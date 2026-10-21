@@ -435,7 +435,7 @@ function Importer({ onClose }: { onClose?: () => void }) {
 
   const addOne = (p: Partial<Character>, label: string) => {
     if (!isAdult({ age: Number(p.age) })) {
-      setLog((l) => [{ name: p.name || label, ok: false, msg: Number(p.age) ? `age ${p.age} — under 18, refused` : "no clear adult age — refused (add “Age: 25” to the profile, or make them by hand)" }, ...l]);
+      setLog((l) => [{ name: p.name || label, ok: false, msg: Number(p.age) ? `age ${p.age} — under 18, refused` : "age under 18 — refused" }, ...l]);
       return null;
     }
     const c = newCharacter({ ...p, style: (p.style as Character["style"]) ?? style });

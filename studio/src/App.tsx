@@ -807,18 +807,18 @@ function TitleProgress() {
 
 /** ⋯ menu: Proton Drive — results and exports copied there automatically (set up in the Vast template) */
 function ProtonItem({ cls }: { cls: string }) {
-  const [st, setSt] = useState<{ on: boolean; state: string; last_ok: number | null; error: string; sent: number; folder: string } | null>(null);
+  const [st, setSt] = useState<{ on: boolean; cloud?: string; state: string; last_ok: number | null; error: string; sent: number; folder: string } | null>(null);
   useEffect(() => { fetch("/studio-api/proton").then((r) => r.json()).then(setSt).catch(() => {}); }, []);
   if (!st?.on) return null;
   const ago = st.last_ok ? `${Math.max(1, Math.round((Date.now() / 1000 - st.last_ok) / 60))} min ago` : "not yet";
   const send = async () => {
     const r = await fetch("/studio-api/proton", { method: "POST" });
-    useJobs.getState().toast(r.ok ? `Sending results and an export to Proton Drive (“${st.folder}”) — it runs by itself every 15 minutes too.` : ((await r.json()).error ?? "Couldn't start"), r.ok ? "info" : "bad");
+    useJobs.getState().toast(r.ok ? `Sending results and an export to ${st.cloud || "Proton Drive"} (“${st.folder}”) — it runs by itself every 15 minutes too.` : ((await r.json()).error ?? "Couldn't start"), r.ok ? "info" : "bad");
   };
   return (
     <button className={cls} onClick={send} title={st.error || undefined}>
       <Icon name="up" size={15} className={st.state === "error" ? "text-bad" : "text-muted"} />
-      <span className="flex flex-col"><span>Send to Proton Drive now</span>
+      <span className="flex flex-col"><span>Send to {st.cloud || "Proton Drive"} now</span>
         <span className={cx("text-[12px]", st.state === "error" ? "text-bad" : "text-dim")}>{st.state === "error" ? `Last try failed — ${st.error.slice(0, 70)}` : st.state === "sending" ? "Sending…" : `Automatic · last sent ${ago}${st.sent ? ` · ${st.sent} files` : ""}`}</span></span>
     </button>
   );

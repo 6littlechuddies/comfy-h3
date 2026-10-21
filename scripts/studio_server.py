@@ -2191,6 +2191,11 @@ def _gdrive_token() -> str:
     return t if t.startswith("{") else ""
 
 
+def _cloud() -> str:
+    """the name shown to you: which drive the backups go to"""
+    return "Google Drive" if _gdrive_token() else "Proton Drive"
+
+
 def _proton_on() -> bool:
     """backups on: Google Drive (GDRIVE_TOKEN) or Proton Drive (PROTON_USER + PROTON_PASSWORD) — same folders either way"""
     return bool(_gdrive_token() or (os.environ.get("PROTON_USER") and os.environ.get("PROTON_PASSWORD")))
@@ -2269,7 +2274,7 @@ async def proton_sync(full: bool = False) -> None:
         PROTON.update(state="ok", last_ok=time.time(), error="")
     except Exception as e:  # noqa: BLE001
         PROTON.update(state="error", error=str(e)[:800])
-        print("!! Proton Drive:", PROTON["error"], flush=True)
+        print(f"!! {_cloud()}:", PROTON["error"], flush=True)
     finally:
         PROTON["running"] = False
 
@@ -2292,14 +2297,14 @@ async def _proton_keys():
                 if rc == 0:
                     keys += [k for k in re.findall(r"hf_[A-Za-z0-9]{20,}", out) if k not in keys]
     except Exception as e:  # noqa: BLE001
-        print("!! Hugging Face keys from Proton Drive:", _redact(str(e))[:300], flush=True)
+        print(f"!! Hugging Face keys from {_cloud()}:", _redact(str(e))[:300], flush=True)
     finally:
         try:
             os.makedirs(os.path.dirname(HF_KEYS_FILE), mode=0o700, exist_ok=True)
             fd = os.open(HF_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f: f.write("\n".join(keys))
             os.replace(HF_KEYS_FILE + ".tmp", HF_KEYS_FILE)
-            if keys: print(f"Hugging Face: {len(keys)} key(s) from Proton Drive", flush=True)
+            if keys: print(f"Hugging Face: {len(keys)} key(s) from {_cloud()}", flush=True)
         except OSError as e:
             print("!! couldn't save the Hugging Face keys:", e, flush=True)
 
@@ -2379,7 +2384,7 @@ async def _proton_restore(force: bool = False):
                 continue
             found += [{**f, "Where": where} for f in files if not f.get("IsDir") and str(f.get("Name", "")).lower().endswith(".zip") and (f.get("Size") or 0) > 0]
         if not found:
-            it.update(state="error" if errs else "none", error=("Couldn't look in Proton Drive: " + errs[0]) if errs else "No exports in Proton Drive yet"); return
+            it.update(state="error" if errs else "none", error=(f"Couldn't look in {_cloud()}: " + errs[0]) if errs else f"No exports in {_cloud()} yet"); return
         # newest = the date in the name (h3-…-2026-10-10.zip, the day it was made — an upload from your PC changes the
         # file's own time), then the file's time
         newest = max(found, key=_export_when)
@@ -2395,7 +2400,7 @@ async def _proton_restore(force: bool = False):
             if sizes: it["got"] = max(sizes); it["at"] = time.time()
         rc, out = job.result()
         if rc != 0 or not os.path.isfile(it["path"]):
-            it.update(state="error", error="Couldn't get the export from Proton Drive: " + _redact(out)[-300:]); return
+            it.update(state="error", error=f"Couldn't get the export from {_cloud()}: " + _redact(out)[-300:]); return
         it.update(got=it["size"], state="unpacking")
         MAIN_LOOP[:] = [asyncio.get_running_loop()]
         await asyncio.get_running_loop().run_in_executor(None, _import_run, it)
@@ -2424,10 +2429,10 @@ async def _proton_loop():
 
 async def proton_status(req):
     if req.method == "POST":
-        if not _proton_on(): return web.json_response({"error": "Proton Drive isn't set up — add PROTON_USER, PROTON_PASSWORD and PROTON_2FA_SECRET to the Vast template"}, status=400)
+        if not _proton_on(): return web.json_response({"error": "Backups aren't set up — add GDRIVE_TOKEN (Google Drive) or PROTON_USER + PROTON_PASSWORD (Proton Drive) to the Vast template"}, status=400)
         asyncio.create_task(proton_sync(full=True))
         return web.json_response({"ok": True})
-    return web.json_response({"on": _proton_on(), "folder": (os.environ.get("PROTON_FOLDER") or "H3 Studio"), **{k: v for k, v in PROTON.items()}})
+    return web.json_response({"on": _proton_on(), "cloud": _cloud(), "folder": (os.environ.get("PROTON_FOLDER") or "H3 Studio"), **{k: v for k, v in PROTON.items()}})
 
 
 async def _local_library():
@@ -2963,6 +2968,14 @@ async def debug_report(req):
 CHAR_FILE = os.path.join(STATE, "characters.json")
 
 
+DEFAULT_AGE = 25  # a character saved without an age comes in as an adult (the age is written into its prompts)
+
+
+def _no_age(c: dict) -> bool:
+    try: return not float(c.get("age"))
+    except (TypeError, ValueError): return True
+
+
 def _adult(c: dict) -> bool:
     try: return float(c.get("age")) >= 18
     except (TypeError, ValueError): return False
@@ -3394,11 +3407,13 @@ def _import_zip(z, progress=None) -> dict:
     for info in files:
         parts = info.filename.split("/")
         if len(parts) == 3 and parts[0] == "pictures": by_char.setdefault(parts[1], []).append(info)
-    added = updated = kept_newer = 0; refused = []; refused_ids: set = set()
+    added = updated = kept_newer = 0; refused = []; refused_ids: set = set(); aged = []
     for c in incoming:
         if not isinstance(c, dict) or not KEPT_PATH_OK.match(str(c.get("id") or "")): continue
         cid = str(c["id"])
         pics = by_char.get(cid, [])
+        if _no_age(c):  # no age set: an adult by default (an age under 18 is still refused below)
+            c["age"] = DEFAULT_AGE; aged.append(c.get("name") or cid)
         if not _adult(c):
             refused.append(c.get("name") or cid); refused_ids.add(cid); tick(len(pics)); continue
         i = next((j for j, x in enumerate(have) if isinstance(x, dict) and str(x.get("id")) == cid), None)
@@ -3419,7 +3434,7 @@ def _import_zip(z, progress=None) -> dict:
     os.replace(CHAR_FILE + ".tmp", CHAR_FILE)
     extras = _import_extras(z, refused_ids, tick)
     if progress: progress(len(files), len(files))
-    return {"ok": True, "added": added, "updated": updated, "kept_newer": kept_newer, "refused": refused, "extras": extras}
+    return {"ok": True, "added": added, "updated": updated, "kept_newer": kept_newer, "refused": refused, "aged": aged, "extras": extras}
 
 
 async def characters_import(req):
@@ -3512,14 +3527,14 @@ def _import_run(it):
 async def import_status(req):
     it = IMPORTS.get(req.match_info["id"])
     if not it: raise web.HTTPNotFound()
-    return web.json_response({k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results")})
+    return web.json_response({**{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results")}, "cloud": _cloud()})
 
 
 async def import_latest(req):
     """the import running (or just finished) on this rental — the startup screen and the Studio both show it"""
     if not IMPORTS: return web.json_response(None)
     iid, it = max(IMPORTS.items(), key=lambda kv: kv[1]["at"])
-    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results")}})
+    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results")}, "cloud": _cloud()})
 
 
 # ------------------------------------------------------------------ download switches ("later" / "Download now")

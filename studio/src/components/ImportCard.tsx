@@ -19,14 +19,15 @@ export function importPct(r: ImportRun): number | null {
 }
 
 function line(r: ImportRun): string {
-  const from = r.source === "proton" ? "Getting it from Proton Drive" : "Sending";
+  const cloud = r.cloud || "your drive";
+  const from = r.source === "proton" ? `Getting it from ${cloud}` : "Sending";
   switch (r.state) {
-    case "finding": return "Looking for your newest export in Proton Drive…";
+    case "finding": return `Looking for your newest export in ${cloud}…`;
     case "uploading": case "fetching":
       return [`${from} · ${mb(r.got)} of ${mb(r.size)}`, r.mbps && `${r.mbps} MB/s`, left(r.leftS)].filter(Boolean).join(" · ");
     case "unpacking": return r.total ? `Unpacking pictures · ${r.done} of ${r.total}` : "Unpacking…";
     case "done":
-      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? " · your results are still coming from Proton Drive" : r.results === "failed" ? " · some results didn't come back from Proton Drive" : "");
+      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
     case "error": return r.error || "Couldn't import that file";
     default: return "";
   }

@@ -201,11 +201,12 @@ export async function afterImport(d: ImportResult | undefined) {
   // scenes, presets, chats, prompt files or preferences came along: start fresh so every part of the Studio picks them up
   if (d?.extras && Object.keys(d.extras).some((k) => k !== "packs")) setTimeout(() => location.reload(), 2500);
 }
-export const importNote = (r: { added: number; updated: number; kept_newer?: number; refused: string[]; extras?: Record<string, number | boolean> }) =>
+export const importNote = (r: { added: number; updated: number; kept_newer?: number; refused: string[]; aged?: string[]; extras?: Record<string, number | boolean> }) =>
   [r.added && `${r.added} character${r.added > 1 ? "s" : ""} added`, r.updated && `${r.updated} updated`, r.kept_newer && `${r.kept_newer} kept as you have them (yours are newer)`,
     r.extras?.scenes && `${r.extras.scenes} scene${r.extras.scenes === 1 ? "" : "s"}`, r.extras?.scene_presets && "scene presets", r.extras?.presets && "presets",
     r.extras?.packs && "prompt files", r.extras?.settings && "your preferences",
-    r.refused.length && `${r.refused.length} refused (no adult age): ${r.refused.slice(0, 3).join(", ")}`].filter(Boolean).join(" · ") || "Nothing new in that file";
+    r.aged?.length && `${r.aged.length} had no age, set to 25 (change it under Looks → Age): ${r.aged.slice(0, 3).join(", ")}`,
+    r.refused.length && `${r.refused.length} refused (age under 18): ${r.refused.slice(0, 3).join(", ")}`].filter(Boolean).join(" · ") || "Nothing new in that file";
 
 /** put a finished picture into one of their site sets (made if missing), e.g. "Beach at dusk" · premium */
 export function addToSiteSet(charId: string, title: string, tier: "free" | "premium", file: FileRef) {
@@ -281,7 +282,7 @@ export function parseExtracted(raw: string): Partial<Character> | null {
     const d = JSON.parse(m[0]);
     const g = String(d.gender ?? "").toLowerCase();
     return {
-      name: String(d.name ?? "").trim() || "Unnamed", age: Number(d.age) || 0,
+      name: String(d.name ?? "").trim() || "Unnamed", age: Number(d.age) || 25, // no age given: an adult by default
       gender: g.startsWith("m") ? "male" : g.startsWith("f") ? "female" : "other",
       hair: d.hair ?? "", eyes: d.eyes ?? "", body: d.body ?? "", ethnicity: d.ethnicity ?? "", outfit: d.outfit ?? "",
       details: d.details ?? "", personality: d.personality ?? "",
@@ -296,7 +297,7 @@ export function fromCreatorJson(d: any): Partial<Character> | null {
   const a = d.appearance ?? {};
   const g = String(d.gender ?? "").toLowerCase();
   return {
-    name: d.name, age: Number(d.age) || 0, gender: g.startsWith("m") ? "male" : g.startsWith("f") ? "female" : "other",
+    name: d.name, age: Number(d.age) || 25, gender: g.startsWith("m") ? "male" : g.startsWith("f") ? "female" : "other",
     style: d.style === "realistic" ? "realistic" : "anime",
     hair: a.hair ?? "", eyes: a.eyes ?? "", body: a.body ?? "", ethnicity: a.ethnicity ?? "", outfit: a.outfit ?? "", details: a.details ?? "",
     personality: d.personality ?? "", source: d.id ? `creator:${d.id}` : "creator",

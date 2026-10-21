@@ -70,7 +70,7 @@ export async function runSelfCheck(includeVideo: boolean) {
   useSelfCheck.setState({ running: true, checks, at: Date.now(), video: includeVideo });
   const set = (id: string, p: Partial<Check>) => useSelfCheck.setState((s) => ({ checks: s.checks.map((c) => (c.id === id ? { ...c, ...p } : c)) }));
   civitNote = "";
-  try { const p = await (await fetch("/studio-api/proton")).json(); protonNote = p.on ? `${p.state}${p.last_ok ? `, last sent ${new Date(p.last_ok * 1000).toISOString()}` : ""}${p.error ? ` — ${p.error}` : ""}` : ""; } catch { protonNote = ""; }
+  try { const p = await (await fetch("/studio-api/proton")).json(); protonNote = p.on ? `${p.cloud ? `(${p.cloud}) ` : ""}${p.state}${p.last_ok ? `, last sent ${new Date(p.last_ok * 1000).toISOString()}` : ""}${p.error ? ` — ${p.error}` : ""}` : ""; } catch { protonNote = ""; }
   try { const r = await fetch("/studio-api/civitai/debug", { signal: AbortSignal.timeout(60_000) }); civitNote = r.ok ? JSON.stringify(await r.json()) : `HTTP ${r.status} ${(await r.text()).slice(0, 200)}`; } catch (e) { civitNote = `failed: ${(e as Error).message}`; }
   let pic = "";
   try { pic = await testPicture(); } catch (e) { /* tests that need it will fail with the reason */ }
@@ -103,5 +103,5 @@ export const BUILT = typeof __BUILT__ === "string" ? __BUILT__ : "dev";
 export function checkReport(): string {
   const { checks, at, video } = useSelfCheck.getState();
   const line = (c: Check) => `${c.state === "pass" ? "PASS" : c.state === "fail" ? "FAIL" : c.state === "skipped" ? "SKIP" : c.state.toUpperCase()}  ${c.label}${c.ms ? ` (${(c.ms / 1000).toFixed(0)} s)` : ""}${c.state === "pass" && c.note ? ` — ${c.note}` : ""}${c.error ? `\n      ${c.error}` : ""}`;
-  return [`H3 Studio check — ${at ? new Date(at).toISOString() : ""}${video ? " (with video)" : ""} · Studio built ${BUILT}`, ...checks.map(line), ...(civitNote ? [`CivitAI: ${civitNote}`] : []), ...(protonNote ? [`Proton Drive: ${protonNote}`] : [])].join("\n");
+  return [`H3 Studio check — ${at ? new Date(at).toISOString() : ""}${video ? " (with video)" : ""} · Studio built ${BUILT}`, ...checks.map(line), ...(civitNote ? [`CivitAI: ${civitNote}`] : []), ...(protonNote ? [`Backups: ${protonNote}`] : [])].join("\n");
 }

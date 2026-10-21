@@ -15,9 +15,11 @@ export type ImportRun = {
   leftS?: number;
   error?: string;
   result?: ImportResult;
+  /** which drive the backups use: "Google Drive" or "Proton Drive" */
+  cloud?: string;
   results?: "copying" | "done" | "failed"; // Proton: your result files following in the background
 };
-export type ImportResult = { added: number; updated: number; kept_newer?: number; refused: string[]; extras?: Record<string, number | boolean> };
+export type ImportResult = { added: number; updated: number; kept_newer?: number; refused: string[]; aged?: string[]; extras?: Record<string, number | boolean> };
 
 export const useImport = create<{ run: ImportRun | null; hidden: boolean; set: (p: Partial<ImportRun> | null) => void; hide: () => void }>((set) => ({
   run: null, hidden: false,

@@ -417,7 +417,7 @@
         const pct = d.state === "finding" ? null : d.state === "fetching" ? Math.round((d.size ? d.got / d.size : 0) * 70) : d.state === "unpacking" ? 70 + Math.round((d.total ? d.done / d.total : 0) * 30) : d.state === "done" ? 100 : null;
         const msg = { finding: "Looking for your newest export…", fetching: `Getting it · ${mbs(d.got || 0)} of ${mbs(d.size || 0)}`, unpacking: d.total ? `Unpacking pictures · ${d.done} of ${d.total}` : "Unpacking…",
           done: note(d.result) + (d.results === "copying" ? " · your results follow in the background" : ""), error: d.error || "It didn't work — drop the .zip here instead" }[d.state] || "";
-        impShow({ state: d.state, title: d.state === "done" ? "Your work is back from Proton Drive" : d.state === "error" ? "Couldn't bring it back from Proton Drive" : "Bringing your work back from Proton Drive",
+        impShow({ state: d.state, title: d.state === "done" ? `Your work is back from ${d.cloud || "your drive"}` : d.state === "error" ? `Couldn't bring it back from ${d.cloud || "your drive"}` : `Bringing your work back from ${d.cloud || "your drive"}`,
           hint: d.name || "", pct, msg, lock: d.state !== "done" && d.state !== "error", retry: d.state === "error" });
         if (d.state === "done" || d.state === "error") return;
         await new Promise((r) => setTimeout(r, 1500));
