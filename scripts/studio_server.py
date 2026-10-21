@@ -2390,7 +2390,8 @@ async def _proton_restore(force: bool = False):
         newest = max(found, key=_export_when)
         cloud_t = _export_time(newest)
         if have and not force and cloud_t <= last_change() + 1:
-            IMPORTS.pop(iid, None); return  # this machine already has the newest work
+            # this machine already has the newest work: say so (the card stops looking) — Import brings in a .zip anyway
+            it.update(state="none", name=newest["Name"], error="This rental already has your newest backup"); return
         it.update(name=newest["Name"], size=int(newest.get("Size") or 0), state="fetching", at=time.time())
         job = asyncio.create_task(_rclone("copyto", f"proton:{newest['Where']}/{newest['Name']}", it["path"], "--retries", "3", timeout=3600))
         import glob as _glob
@@ -2413,6 +2414,9 @@ async def _proton_restore(force: bool = False):
             it["results"] = "done" if rc == 0 or "not found" in out.lower() else "failed"  # no results folder yet is fine
     except Exception as e:  # noqa: BLE001
         print("!! Proton restore:", _redact(str(e)), flush=True)
+        try:
+            if it.get("state") in ("finding", "fetching", "unpacking"): it.update(state="error", error=_redact(str(e))[:300])
+        except NameError: pass
     finally:
         RESTORED.set()
 

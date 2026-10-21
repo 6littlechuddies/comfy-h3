@@ -119,7 +119,7 @@ export async function watchRestore(onDone: (r: ImportResult | undefined) => void
     if (cur?.source === "you" && cur.state !== "done" && cur.state !== "error") { await sleep(3000); continue; }
     let d: (ImportRun & { source?: string }) | null = null;
     try { const r = await fetch("/studio-api/import/latest", { cache: "no-store" }); d = r.ok ? await r.json() : null; } catch { /* rental busy */ }
-    if (!d || d.source !== "proton") return;
+    if (!d || d.source !== "proton") { if (seenRunning && useImport.getState().run?.source === "proton") useImport.getState().set(null); return; }
     const running = ["finding", "fetching", "unpacking"].includes(d.state);
     if (running || d.results === "copying") seenRunning = true;
     if (running) sawUnpack = true;
