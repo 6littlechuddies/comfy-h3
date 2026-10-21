@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Everything about this rental in one text report (logs, errors, downloads, GPU) — passwords and tokens hidden.
+#   h3-report            the report (last 80 lines of each log)
+#   h3-report 400        more of each log
+curl -sf "http://127.0.0.1:18190/studio-api/debug-report?lines=${1:-80}" || echo "The Studio's helper isn't answering — see: tail -n 50 /var/log/studio.log"

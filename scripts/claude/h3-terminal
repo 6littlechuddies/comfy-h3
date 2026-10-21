@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# what the Studio's Terminal opens (inside tmux, so closing the tab keeps everything running).
+# The Studio's "Claude on this rental" button opens /terminal/?arg=claude, which starts h3-claude straight away.
+export PATH="/root/.local/bin:/opt/venv/bin:$PATH"
+[[ "${1:-}" == "claude" ]] && h3-claude
+cat <<'MSG'
+
+  H3 rental terminal
+    h3-claude    Claude Code on this rental (talk to it from claude.ai/code or the Claude app)
+    h3-report    everything about this rental: errors, logs, downloads, GPU (secrets hidden)
+    nvidia-smi   the GPU right now
+
+MSG
+exec bash -l

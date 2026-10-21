@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(h3-report:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(df:*)",
+      "Bash(du:*)",
+      "Bash(ps:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

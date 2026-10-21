@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Claude Code on this rental, reachable from claude.ai/code or the Claude app (Remote Control).
+# It starts in /opt/h3 (the kit), where CLAUDE.md tells it how everything fits together.
+# First run on a new rental: sign in once (press c to copy the link, open it, paste the code back).
+set -uo pipefail
+# the template's settings (GITHUB_TOKEN, …) — a terminal opened later doesn't inherit them
+if [[ -r /proc/1/environ ]]; then
+  while IFS= read -r -d '' kv; do k="${kv%%=*}"; [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [[ -z "${!k:-}" ]] && export "$kv"; done < /proc/1/environ
+fi
+export PATH="/root/.local/bin:/opt/venv/bin:$PATH"
+cd /opt/h3
+
+# the source code, so fixes can be made properly and pushed (needs GITHUB_TOKEN in the Vast template)
+REPO_URL="${H3_REPO:-https://github.com/6littlechuddies/comfy-h3.git}"
+if [[ -n "${GITHUB_TOKEN:-}" && ! -d /opt/h3/repo/.git ]]; then
+  echo "Getting the kit's source code into /opt/h3/repo …"
+  git config --global credential.helper store
+  printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials; chmod 600 ~/.git-credentials
+  git config --global user.name "${GIT_NAME:-H3 rental (Claude)}"
+  git config --global user.email "${GIT_EMAIL:-h3-rental@users.noreply.github.com}"
+  git clone -q "$REPO_URL" /opt/h3/repo && echo "  done" || echo "  couldn't clone — Claude can still read and hot-fix the running kit"
+fi
+
+GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | sed 's/NVIDIA //; s/GeForce //')"
+cat <<MSG
+
+  Claude on this rental — H3 kit (${GPU:-GPU})
+  ───────────────────────────────────────────────
+  • First time on this rental: sign in when asked (press c to copy the link, open it,
+    sign in with your Claude account, paste the code back here).
+  • Then open claude.ai/code or the Claude app → Code → this session ("H3 · ${GPU:-rental}").
+    If it doesn't show up, type /remote-control here.
+  • Close this tab any time: Claude keeps running. Open Terminal again to come back.
+  • Ask it things like: "check the rental", "why did my last edit fail?", "run check everything".
+
+MSG
+claude --remote-control "H3 · ${GPU:-rental}"
+echo; echo "Claude stopped. Type h3-claude to start it again, or keep using this terminal."

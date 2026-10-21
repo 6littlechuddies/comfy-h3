@@ -1,0 +1,1092 @@
+{
+ "id": "151410b3-7845-4561-aac4-8968574e9ba2",
+ "revision": 0,
+ "last_node_id": 90,
+ "last_link_id": 154,
+ "nodes": [
+  {
+   "id": 68,
+   "type": "Reroute",
+   "pos": [
+    987.8758722809641,
+    912.2402070677537
+   ],
+   "size": [
+    75,
+    26
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "",
+     "type": "*",
+     "link": 142
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "VAE",
+     "links": [
+      143
+     ]
+    }
+   ],
+   "properties": {
+    "showOutputText": false,
+    "horizontal": false
+   }
+  },
+  {
+   "id": 67,
+   "type": "Reroute",
+   "pos": [
+    -33.95705109188316,
+    912.0198990739484
+   ],
+   "size": [
+    75,
+    26
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "",
+     "type": "*",
+     "link": 148
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "VAE",
+     "links": [
+      142
+     ]
+    }
+   ],
+   "properties": {
+    "showOutputText": false,
+    "horizontal": false
+   }
+  },
+  {
+   "id": 69,
+   "type": "Reroute",
+   "pos": [
+    980.5432492366198,
+    -251.0092291897248
+   ],
+   "size": [
+    75,
+    26
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "",
+     "type": "*",
+     "link": 144
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "MODEL",
+     "links": [
+      145
+     ]
+    }
+   ],
+   "properties": {
+    "showOutputText": false,
+    "horizontal": false
+   }
+  },
+  {
+   "id": 14,
+   "type": "PreviewImage",
+   "pos": [
+    1713.5380920364257,
+    -264.68587214410536
+   ],
+   "size": [
+    537.78125,
+    705.15625
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 140
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage",
+    "cnr_id": "comfy-core",
+    "ver": "0.3.18"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 71,
+   "type": "MarkdownNote",
+   "pos": [
+    1278.1148797914555,
+    809.6742358801766
+   ],
+   "size": [
+    427.25,
+    1018.828125
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## Save image with metadata\n\nAvailable filename_prefix Pattern Codes\n\n- %seed% - Inserts the generation seed number\n- %width% - Inserts the image width\n- %height% - Inserts the image height\n- %pprompt:N% - Inserts the positive prompt (limited to N characters)\n- %nprompt:N% - Inserts the negative prompt (limited to N characters)\n- %model:N% - Inserts the model/checkpoint name (limited to N characters)\n- %date% - Inserts current date/time as \"yyyyMMddhhmmss\"\n- %date:FORMAT% - Inserts date using custom format with:\n    - yyyy - 4-digit year\n    - yy - 2-digit year\n    - MM - 2-digit month\n    - dd - 2-digit day\n    - hh - 2-digit hour\n    - mm - 2-digit minute\n    - ss - 2-digit second\n\nExamples\n\n- image_%seed% \u2192 image_1234567890\n- gen_%width%x%height% \u2192 gen_512x768\n- %model:10%_%seed% \u2192 dreamshape_1234567890\n- %date:yyyy-MM-dd% \u2192 2025-04-28\n- %pprompt:20%_%seed% \u2192 beautiful landscape_1234567890\n- %model%_%date:yyMMdd%_%seed% \u2192 dreamshaper_v8_250428_1234567890\n\nYou can combine multiple patterns to create detailed, organized filenames for your generated images.\n\n[More detail](https://github.com/willmiao/ComfyUI-Lora-Manager#filename-format-patterns-for-save-image-node)"
+   ],
+   "color": "#432",
+   "bgcolor": "#653"
+  },
+  {
+   "id": 60,
+   "type": "Save Image (LoraManager)",
+   "pos": [
+    1275.2037222312076,
+    416.62815520572985
+   ],
+   "size": [
+    380.28125,
+    314.390625
+   ],
+   "flags": {},
+   "order": 19,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 128
+    },
+    {
+     "localized_name": "filename_prefix",
+     "name": "filename_prefix",
+     "type": "STRING",
+     "widget": {
+      "name": "filename_prefix"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "file_format",
+     "name": "file_format",
+     "type": "COMBO",
+     "widget": {
+      "name": "file_format"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "lossless_webp",
+     "name": "lossless_webp",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "lossless_webp"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "quality",
+     "name": "quality",
+     "shape": 7,
+     "type": "INT",
+     "widget": {
+      "name": "quality"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "embed_workflow",
+     "name": "embed_workflow",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "embed_workflow"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "save_with_metadata",
+     "name": "save_with_metadata",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "save_with_metadata"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "add_counter_to_filename",
+     "name": "add_counter_to_filename",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "add_counter_to_filename"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "save_as_recipe",
+     "name": "save_as_recipe",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "save_as_recipe"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Save Image (LoraManager)",
+    "cnr_id": "comfyui-lora-manager",
+    "ver": "f51f49eb60e1c7e524fa71c07bdea138824164e1"
+   },
+   "widgets_values": [
+    "noobai/%seed%",
+    "png",
+    false,
+    100,
+    false,
+    true,
+    true,
+    false
+   ],
+   "color": "#323",
+   "bgcolor": "#535"
+  },
+  {
+   "id": 70,
+   "type": "MarkdownNote",
+   "pos": [
+    -654.8336772969171,
+    -345.34804957705796
+   ],
+   "size": [
+    505.1875,
+    1072.15625
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "LoRA Manager \u2013 LoRA Loader Node Usage Guide",
+   "properties": {},
+   "widgets_values": [
+    "## Sending from LM UI to Workflow\n- **Click**: Append the selected LoRA(s) to the current LoRA Loader node.  \n- **Shift + Click**: Replace the current node content with the selected LoRA(s).  \n- **Color-code your target nodes**:  \n  If multiple valid target nodes exist, you can assign colors to them.  \n  LM will display these colors in the *Send to workflow* picker, making target selection easier.\n\n---\n\n## Text Input Autocomplete\n- Supports **multi-token search**, **case-insensitive**, and **token exclusion**.\n- Examples:\n  - `enhance low` \u2192 matches LoRAs containing **both** \u201cenhance\u201d and \u201clow\u201d.\n  - `detail -sdxl` \u2192 matches LoRAs containing \u201cdetail\u201d but **not** \u201csdxl\u201d.\n\n---\n\n## LoRA Widget Shortcuts\n### Navigation\n- **Arrow Up / Arrow Down** \u2014 Select previous / next LoRA.\n- **Ctrl/Cmd + Arrow Up** \u2014 Move selected LoRA upward.\n- **Ctrl/Cmd + Arrow Down** \u2014 Move selected LoRA downward.\n- **Ctrl/Cmd + Home** \u2014 Move selected LoRA to top.\n- **Ctrl/Cmd + End** \u2014 Move selected LoRA to bottom.\n\n### Editing & Deleting\n- **Delete / Backspace** \u2014 Remove current LoRA.\n- **Tab / Shift + Tab** \u2014 After confirming strength input, jump to next / previous editable field.\n\n---\n\nThese same features also apply to **LoRA Stacker**, **WanVideo LoRA Select**, and other LoRA Manager lora nodes.  \n"
+   ],
+   "color": "#432",
+   "bgcolor": "#653"
+  },
+  {
+   "id": 8,
+   "type": "VAEDecode",
+   "pos": [
+    1462.0044935007538,
+    9.844672951242455
+   ],
+   "size": [
+    225,
+    95.828125
+   ],
+   "flags": {
+    "collapsed": false
+   },
+   "order": 18,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 7
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 143
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "slot_index": 0,
+     "links": [
+      128,
+      140
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode",
+    "cnr_id": "comfy-core",
+    "ver": "0.3.18"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 5,
+   "type": "EmptyLatentImage",
+   "pos": [
+    872.749581614747,
+    329.20028294578697
+   ],
+   "size": [
+    225,
+    7.828125
+   ],
+   "flags": {
+    "collapsed": true
+   },
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "width",
+     "name": "width",
+     "type": "INT",
+     "widget": {
+      "name": "width"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "height",
+     "name": "height",
+     "type": "INT",
+     "widget": {
+      "name": "height"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "batch_size",
+     "name": "batch_size",
+     "type": "INT",
+     "widget": {
+      "name": "batch_size"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "slot_index": 0,
+     "links": [
+      2
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "EmptyLatentImage",
+    "cnr_id": "comfy-core",
+    "ver": "0.3.18"
+   },
+   "widgets_values": [
+    832,
+    1216,
+    1
+   ],
+   "title": "Size (832x1216 portrait)"
+  },
+  {
+   "id": 73,
+   "type": "MarkdownNote",
+   "pos": [
+    449.47204601375984,
+    357.5767232451153
+   ],
+   "size": [
+    419.15625,
+    813.9375
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Prompt Node Usage",
+   "properties": {},
+   "widgets_values": [
+    "## Tag Autocomplete\n- **Type directly** to trigger tag autocomplete suggestions.  \n  Suggestions are based on **merged Danbooru + e621 tags**.\n- Use **category shortcuts** for faster searches, such as:\n  - `/character` \u2014 character tags  \n  - `/artist` \u2014 artist tags  \n  - Type `/` alone to see **more categories and available commands**.\n- Use `/ac` and `/noac` to **enable or disable autocomplete**:\n  - When autocomplete is **disabled**, `/` commands are still available for **category-specific tag search**.\n- Check **ComfyUI Settings** for additional autocomplete-related options.\n\n---\n\n## Embedding Search\n- Use the `/emb` command or the `emb:` prefix to search embeddings.\n- Supports **multi-token search** with **inclusion and exclusion**.\n- Examples:\n  - `/emb lazy pos` \u2192 matches embeddings containing **both** `lazy` **and** `pos`.\n  - `emb: lazy -neg` \u2192 matches embeddings containing `lazy` but **excluding** `neg`.\n"
+   ],
+   "color": "#432",
+   "bgcolor": "#653"
+  },
+  {
+   "id": 75,
+   "type": "Checkpoint Loader (LoraManager)",
+   "pos": [
+    -660.6077952124524,
+    827.9022873844732
+   ],
+   "size": [
+    327.84375,
+    187.78125
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "ckpt_name",
+     "name": "ckpt_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "ckpt_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      146
+     ]
+    },
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      147
+     ]
+    },
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      148
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Checkpoint Loader (LoraManager)"
+   },
+   "widgets_values": [
+    "NoobAI-XL-v1.1.safetensors"
+   ],
+   "color": "#233",
+   "bgcolor": "#355",
+   "shape": 2
+  },
+  {
+   "id": 76,
+   "type": "MarkdownNote",
+   "pos": [
+    -659.6785979354222,
+    1302.8245584893155
+   ],
+   "size": [
+    412.078125,
+    247.015625
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Checkpoint / Unet Loader Node Usage",
+   "properties": {},
+   "widgets_values": [
+    "## Checkpoint / Unet Loader Node Usage\n- Works exactly like the built in **Load Checkpoint** and **Load Diffusion Model** nodes, but can load from LoRA Manager exclusive extra folder paths.\n- The **UNet Loader** node from LoRA Manager can also load GGUF models. The **ComfyUI-GGUF** custom node must be installed to enable this.\n"
+   ],
+   "color": "#432",
+   "bgcolor": "#653",
+   "shape": 2
+  },
+  {
+   "id": 3,
+   "type": "KSampler",
+   "pos": [
+    1116.8523657659164,
+    -4.255002417427306
+   ],
+   "size": [
+    315,
+    341.0625
+   ],
+   "flags": {},
+   "order": 17,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 145
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 151
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 153
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 2
+    },
+    {
+     "localized_name": "seed",
+     "name": "seed",
+     "type": "INT",
+     "widget": {
+      "name": "seed"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "steps",
+     "name": "steps",
+     "type": "INT",
+     "widget": {
+      "name": "steps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "cfg",
+     "name": "cfg",
+     "type": "FLOAT",
+     "widget": {
+      "name": "cfg"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "sampler_name",
+     "name": "sampler_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "sampler_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "scheduler",
+     "name": "scheduler",
+     "type": "COMBO",
+     "widget": {
+      "name": "scheduler"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "denoise",
+     "name": "denoise",
+     "type": "FLOAT",
+     "widget": {
+      "name": "denoise"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "slot_index": 0,
+     "links": [
+      7
+     ]
+    }
+   ],
+   "title": "KSampler (NoobAI settings)",
+   "properties": {
+    "Node name for S&R": "KSampler",
+    "cnr_id": "comfy-core",
+    "ver": "0.3.18",
+    "lm_marker_role": "send_gen_params",
+    "lm_marker_original_title": "KSampler"
+   },
+   "widgets_values": [
+    42,
+    "randomize",
+    28,
+    5.5,
+    "euler_ancestral",
+    "normal",
+    1
+   ]
+  },
+  {
+   "id": 79,
+   "type": "Prompt (LoraManager)",
+   "pos": [
+    449.47204601375984,
+    88.06552860863088
+   ],
+   "size": [
+    423.796875,
+    219.078125
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 152
+    },
+    {
+     "localized_name": "seed",
+     "name": "seed",
+     "shape": 7,
+     "type": "INT",
+     "link": null
+    },
+    {
+     "localized_name": "trigger_words1",
+     "name": "trigger_words1",
+     "shape": 7,
+     "type": "STRING",
+     "link": null
+    },
+    {
+     "localized_name": "text",
+     "name": "text",
+     "type": "AUTOCOMPLETE_TEXT_PROMPT,STRING",
+     "widget": {
+      "name": "text"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      153
+     ]
+    },
+    {
+     "localized_name": "PROMPT",
+     "name": "PROMPT",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Prompt (LoraManager)",
+    "__lm_widget_ids": [
+     "__lm_autocomplete_meta_text",
+     "text"
+    ]
+   },
+   "widgets_values": [
+    {
+     "version": 1,
+     "textWidgetName": "text"
+    },
+    "worst quality, old, early, low quality, lowres, signature, username, logo,\nbad hands, mutated hands, extra fingers, bad anatomy,\nchild, loli, young, petite, furry"
+   ],
+   "color": "#322",
+   "bgcolor": "#533",
+   "title": "Negative prompt"
+  },
+  {
+   "id": 56,
+   "type": "Lora Loader (LoraManager)",
+   "pos": [
+    -78.20123493411847,
+    -291.06665286231714
+   ],
+   "size": [
+    423.65625,
+    493.421875
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 146
+    },
+    {
+     "localized_name": "text",
+     "name": "text",
+     "type": "AUTOCOMPLETE_TEXT_LORAS",
+     "widget": {
+      "name": "text"
+     },
+     "link": null
+    },
+    {
+     "name": "clip",
+     "shape": 7,
+     "type": "CLIP",
+     "link": 147
+    },
+    {
+     "name": "lora_stack",
+     "shape": 7,
+     "type": "LORA_STACK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      144
+     ]
+    },
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      150,
+      152
+     ]
+    },
+    {
+     "localized_name": "trigger_words",
+     "name": "trigger_words",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "localized_name": "loaded_loras",
+     "name": "loaded_loras",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Lora Loader (LoraManager)",
+    "cnr_id": "comfyui-lora-manager",
+    "ver": "ad56cafd62e42e67f282a967627f26b8fa6ce00a",
+    "__lm_widget_ids": [
+     "__lm_autocomplete_meta_text",
+     "text",
+     "loras"
+    ]
+   },
+   "widgets_values": [
+    {
+     "version": 1,
+     "textWidgetName": "text"
+    },
+    "",
+    []
+   ],
+   "color": "#323",
+   "bgcolor": "#535"
+  },
+  {
+   "id": 78,
+   "type": "Prompt (LoraManager)",
+   "pos": [
+    449.47204601375984,
+    -203.224579935463
+   ],
+   "size": [
+    428.6875,
+    243.078125
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 150
+    },
+    {
+     "localized_name": "seed",
+     "name": "seed",
+     "shape": 7,
+     "type": "INT",
+     "link": null
+    },
+    {
+     "localized_name": "trigger_words1",
+     "name": "trigger_words1",
+     "shape": 7,
+     "type": "STRING",
+     "link": null
+    },
+    {
+     "localized_name": "text",
+     "name": "text",
+     "type": "AUTOCOMPLETE_TEXT_PROMPT,STRING",
+     "widget": {
+      "name": "text"
+     },
+     "link": null
+    },
+    {
+     "name": "trigger_words2",
+     "type": "STRING",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      151
+     ]
+    },
+    {
+     "localized_name": "PROMPT",
+     "name": "PROMPT",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Prompt (LoraManager)",
+    "__lm_widget_ids": [
+     "__lm_autocomplete_meta_text",
+     "text"
+    ]
+   },
+   "widgets_values": [
+    {
+     "version": 1,
+     "textWidgetName": "text"
+    },
+    "masterpiece, best quality, newest, absurdres, highres,\n1girl, solo, adult woman, mature female,\nlong pink hair, twintails, heart hair ornament, pink eyes,\nblush, light smile, choker, off-shoulder pink top,\nupper body, looking at viewer,\nbedroom, fairy lights, night, soft lighting"
+   ],
+   "color": "#232",
+   "bgcolor": "#353",
+   "title": "Positive prompt"
+  },
+  {
+   "id": 90,
+   "type": "MarkdownNote",
+   "pos": [
+    -660.6077952124524,
+    -765.348049577058
+   ],
+   "size": [
+    520,
+    380
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "How to use (NoobAI characters)",
+   "properties": {},
+   "widgets_values": [
+    "## NoobAI anime characters\n\n1. **Positive prompt**: tags in this order: quality \u2192 1girl/adult \u2192 hair \u2192 eyes \u2192 face \u2192 outfit \u2192 accessories \u2192 pose/framing \u2192 background \u2192 lighting.\n2. Keep `adult woman, mature female` in the positive and `child, loli, young, petite` in the negative.\n3. **Same character, new scene**: keep the hair/eyes/outfit tags identical, change only pose/background.\n4. **LoRAs**: open **/loras** in a new tab (same address as ComfyUI), download from CivitAI there, then click a LoRA to send it to the *Lora Loader* node. Use LoRAs whose Base Model is *NoobAI* or *Illustrious*.\n5. Settings: 832\u00d71216, euler_ancestral, normal, 28 steps, CFG 5.5.\n6. Outputs save to `output/noobai/` (and auto-backup to B2 if set up)."
+   ]
+  }
+ ],
+ "links": [
+  [
+   2,
+   5,
+   0,
+   3,
+   3,
+   "LATENT"
+  ],
+  [
+   7,
+   3,
+   0,
+   8,
+   0,
+   "LATENT"
+  ],
+  [
+   128,
+   8,
+   0,
+   60,
+   0,
+   "IMAGE"
+  ],
+  [
+   140,
+   8,
+   0,
+   14,
+   0,
+   "IMAGE"
+  ],
+  [
+   142,
+   67,
+   0,
+   68,
+   0,
+   "*"
+  ],
+  [
+   143,
+   68,
+   0,
+   8,
+   1,
+   "VAE"
+  ],
+  [
+   144,
+   56,
+   0,
+   69,
+   0,
+   "*"
+  ],
+  [
+   145,
+   69,
+   0,
+   3,
+   0,
+   "MODEL"
+  ],
+  [
+   146,
+   75,
+   0,
+   56,
+   0,
+   "MODEL"
+  ],
+  [
+   147,
+   75,
+   1,
+   56,
+   2,
+   "CLIP"
+  ],
+  [
+   148,
+   75,
+   2,
+   67,
+   0,
+   "VAE"
+  ],
+  [
+   150,
+   56,
+   1,
+   78,
+   0,
+   "CLIP"
+  ],
+  [
+   151,
+   78,
+   0,
+   3,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   152,
+   56,
+   1,
+   79,
+   0,
+   "CLIP"
+  ],
+  [
+   153,
+   79,
+   0,
+   3,
+   2,
+   "CONDITIONING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 1.1,
+   "offset": [
+    -176.51209496032757,
+    989.8683381072402
+   ]
+  },
+  "frontendVersion": "1.16.8",
+  "VHS_latentpreview": false,
+  "VHS_latentpreviewrate": 0,
+  "VHS_MetadataImage": true,
+  "VHS_KeepIntermediate": true
+ },
+ "version": 0.4
+}

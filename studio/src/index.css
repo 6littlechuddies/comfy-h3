@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Archivo Variable", "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Archivo Variable", "Archivo", ui-sans-serif, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* SIGNAL: field-kit black, bone text, acid for actions, magenta for glitches + warnings, cyan only in the RGB split */
+  --color-bg: #0a0b0c;
+  --color-panel: #0f1012;
+  --color-panel2: #0d0e10;
+  --color-raised: #141619;
+  --color-raised2: #1b1d21;
+  --color-hover: #24272c;
+  --color-line: #2a2d33;
+  --color-line2: #1a1c20;
+  --color-ink: #e9e6dc;
+  --color-muted: #9d9b92;
+  --color-dim: #6d6c66;
+  --color-accent: #d4ff1f;
+  --color-accent2: #e6ff7a;
+  --color-accentink: #0a0b0c;
+  --color-hot: #ff2a6d;
+  --color-cyan: #2de2e6;
+  --color-good: #3cf2a0;
+  --color-blue: #2de2e6;
+  --color-purple: #ff2a6d;
+  --color-bad: #ff5a4f;
+  --radius-sm: 1px;
+  --radius: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+  --radius-2xl: 3px;
+}
+
+@layer base {
+html, body, #root { height: 100%; }
+/* native pop-ups (select menus, date pickers, scrollbars) drawn dark instead of a white box */
+html { color-scheme: dark; }
+body {
+  margin: 0;
+  font-size: 14px;
+  font-variation-settings: "wdth" 100;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+* { scrollbar-color: #33363d transparent; scrollbar-width: thin; }
+::selection { background: var(--color-accent); color: var(--color-accentink); }
+a { color: var(--color-accent); }
+a:hover { color: var(--color-accent2); }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+input[type="range"] { accent-color: var(--color-accent); }
+input[type="checkbox"] { accent-color: var(--color-accent); }
+select option { background: #141619; color: #e9e6dc; }
+select option:checked { background: #2a2d33; }
+}
+
+.checker {
+  background-color: #16181b;
+  background-image: linear-gradient(45deg, #1f2226 25%, transparent 25%, transparent 75%, #1f2226 75%),
+    linear-gradient(45deg, #1f2226 25%, transparent 25%, transparent 75%, #1f2226 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.hatch {
+  background-color: #111215;
+  background-image: repeating-linear-gradient(135deg, #17191c 0 6px, #111215 6px 12px);
+}
+.lbl {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+/* wide, heavy, uppercase: the type carries the look */
+.display { font-family: var(--font-display); font-variation-settings: "wdth" 125; font-weight: 800; text-transform: uppercase; letter-spacing: -0.01em; }
+/* technical micro-text: codes, counts, ids — never sentences */
+.micro { font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; line-height: 1.2; }
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.toast-in { animation: toast-in 0.18s ease-out; }
+@keyframes pulse-bar { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
+.pulse { animation: pulse-bar 1.4s ease-in-out infinite; }
+
+/* two-handle range (trim): two stacked range inputs, only the thumbs take clicks */
+.dual { pointer-events: none; -webkit-appearance: none; appearance: none; background: transparent; height: 20px; margin: 0; }
+.dual::-webkit-slider-runnable-track { background: transparent; height: 20px; }
+.dual::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--color-accent); border: 2px solid var(--color-bg); cursor: ew-resize; }
+.dual::-moz-range-track { background: transparent; }
+.dual::-moz-range-thumb { pointer-events: auto; width: 12px; height: 12px; border-radius: 50%; background: var(--color-accent); border: 2px solid var(--color-bg); cursor: ew-resize; }
+
+/* ---------------------------------------------------------------- motion */
+@keyframes fade-up { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fade-up .32s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fade-in .2s ease-out both; }
+@keyframes zoom-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+.zoom-in { animation: zoom-in .24s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes shimmer { from { background-position: -400px 0; } to { background-position: 400px 0; } }
+.shimmer {
+  background: linear-gradient(90deg, #141619 0%, #1f2226 40%, #141619 80%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+.press { transition: transform .12s ease, background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .2s ease; }
+.press:active:not(:disabled) { transform: scale(.97); }
+.card { background: var(--color-raised); }
+.glass { background: rgba(10,11,12,.82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.drawer { transition: width .28s cubic-bezier(.2,.8,.2,1), opacity .2s ease; }
+.glow:focus-within { border-color: rgba(212,255,31,.7); box-shadow: 0 0 0 4px rgba(212,255,31,.07); }
+/* something is being made here: a light runs round the edge (the "generating" border, borrowed from HeliosGen) */
+@property --run-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes run-around { to { --run-a: 360deg; } }
+.run-border { position: relative; }
+.run-border::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 5;
+  background: conic-gradient(from var(--run-a), transparent 0deg, transparent 290deg, var(--color-accent) 345deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: run-around 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-border::after { animation: none; background: var(--color-accent); opacity: .5; }
+  .fade-up, .fade-in, .zoom-in, .toast-in, .pulse, .shimmer, .glitch-once, .glitch-once::before, .glitch-once::after, .stripes { animation: none !important; }
+  .btn-primary:hover::before, .btn-primary:hover::after { display: none; }
+  .drawer, .press { transition: none !important; }
+}
+
+/* ---------------------------------------------------------------- surfaces: flat, hard-edged, hairline */
+.btn-raised {
+  background: var(--color-raised2);
+  border: 1px solid var(--color-line);
+  color: var(--color-ink);
+}
+.btn-raised:hover:not(:disabled) { background: var(--color-hover); border-color: #3a3e46; }
+.btn-raised:active:not(:disabled) { transform: scale(.98); }
+.btn-raised:disabled { background: #111215; color: var(--color-dim); }
+
+/* the action colour. hovering does a short RGB-split glitch */
+.btn-primary {
+  position: relative;
+  background: var(--color-accent);
+  color: var(--color-accentink);
+  border: 0;
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+.btn-primary:hover:not(:disabled) { background: var(--color-accent2); animation: rgb-split .32s steps(2) 1; }
+.btn-primary:active:not(:disabled) { transform: scale(.98); }
+.btn-primary:disabled { background: #1b1d21; color: var(--color-dim); }
+.btn-hot { background: var(--color-hot); color: #0a0b0c; border: 0; }
+.btn-hot:hover:not(:disabled) { background: #ff5c8f; animation: rgb-split .32s steps(2) 1; }
+.btn-hot:disabled { background: #1b1d21; color: var(--color-dim); }
+@keyframes rgb-split {
+  0% { box-shadow: -3px 0 0 var(--color-cyan), 3px 0 0 var(--color-hot); transform: translate(1px, 0); }
+  50% { box-shadow: 2px 0 0 var(--color-cyan), -2px 0 0 var(--color-hot); transform: translate(-1px, 0); }
+  100% { box-shadow: none; transform: none; }
+}
+/* cut corners */
+.chamfer { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
+.chamfer-sm { clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px)); }
+
+.chip-raised { background: var(--color-raised2); border: 1px solid var(--color-line); }
+.chip-raised:hover { background: var(--color-hover); border-color: #3a3e46; }
+.inset { background: #0b0c0e; border-color: var(--color-line); }
+.seg-track { background: #0b0c0e; }
+.seg-on { background: var(--color-hover); box-shadow: inset 0 -2px 0 var(--color-accent); }
+.glass-btn { background: rgba(10,11,12,.75); border: 1px solid rgba(255,255,255,.12); backdrop-filter: blur(8px); }
+.glass-btn:hover { background: rgba(30,32,36,.9); border-color: var(--color-accent); }
+.card-hover { transition: border-color .15s ease; }
+.card-hover:hover { border-color: #4a4e57; }
+.tag-btn { height: 32px; padding: 0 12px; font-size: 13px; font-weight: 600; border: 1px solid var(--color-line); color: var(--color-muted); background: transparent; }
+.tag-btn:hover { color: var(--color-ink); border-color: #3a3e46; }
+.tag-btn.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accentink); }
+
+/* corner registration ticks on framed panels */
+.ticks { position: relative; }
+.ticks::after {
+  content: ""; position: absolute; inset: -1px; pointer-events: none; z-index: 5;
+  --t: var(--color-accent);
+  background:
+    linear-gradient(var(--t), var(--t)) top left / 10px 1px no-repeat, linear-gradient(var(--t), var(--t)) top left / 1px 10px no-repeat,
+    linear-gradient(var(--t), var(--t)) top right / 10px 1px no-repeat, linear-gradient(var(--t), var(--t)) top right / 1px 10px no-repeat,
+    linear-gradient(var(--t), var(--t)) bottom left / 10px 1px no-repeat, linear-gradient(var(--t), var(--t)) bottom left / 1px 10px no-repeat,
+    linear-gradient(var(--t), var(--t)) bottom right / 10px 1px no-repeat, linear-gradient(var(--t), var(--t)) bottom right / 1px 10px no-repeat;
+}
+.ticks-dim::after { --t: #4a4e57; }
+.frame { box-shadow: 0 40px 120px -30px rgba(0,0,0,.95); }
+
+/* progress: moving hazard segments */
+.stripes {
+  background: repeating-linear-gradient(-45deg, var(--color-accent) 0 6px, #a9cc12 6px 12px);
+  background-size: 17px 17px;
+  animation: stripes-move .6s linear infinite;
+}
+@keyframes stripes-move { to { background-position: 17px 0; } }
+
+/* the work area sits on a faint measuring grid */
+.grid-bg {
+  background-color: var(--color-bg);
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: -1px -1px;
+}
+/* scanlines + grain over everything, barely there */
+.scan::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay;
+}
+
+/* one glitch when a heading appears (tab switch, opening a window) */
+.glitch-once { position: relative; display: inline-block; animation: glitch-jolt .5s steps(1) 1; }
+.glitch-once::before, .glitch-once::after {
+  content: attr(data-text); position: absolute; inset: 0; pointer-events: none; opacity: 0;
+}
+.glitch-once::before { color: var(--color-cyan); animation: glitch-a .5s steps(1) 1; }
+.glitch-once::after { color: var(--color-hot); animation: glitch-b .5s steps(1) 1; }
+@keyframes glitch-jolt { 0% { transform: translateX(-3px) skewX(-8deg); } 20% { transform: translateX(2px); } 40% { transform: none; } 60% { transform: translateX(-1px); } 80%, 100% { transform: none; } }
+@keyframes glitch-a {
+  0% { opacity: .9; clip-path: inset(10% 0 60% 0); transform: translate(-4px, 0); }
+  25% { opacity: .9; clip-path: inset(55% 0 20% 0); transform: translate(3px, 0); }
+  50% { opacity: .8; clip-path: inset(30% 0 45% 0); transform: translate(-2px, 0); }
+  75% { opacity: .6; clip-path: inset(70% 0 5% 0); transform: translate(2px, 0); }
+  100% { opacity: 0; }
+}
+@keyframes glitch-b {
+  0% { opacity: .9; clip-path: inset(65% 0 10% 0); transform: translate(4px, 0); }
+  25% { opacity: .9; clip-path: inset(15% 0 70% 0); transform: translate(-3px, 0); }
+  50% { opacity: .8; clip-path: inset(45% 0 30% 0); transform: translate(2px, 0); }
+  75% { opacity: .6; clip-path: inset(5% 0 80% 0); transform: translate(-2px, 0); }
+  100% { opacity: 0; }
+}
+.lb-card { transition: border-color .15s ease; }
+.lb-card:hover { border-color: var(--color-accent); }

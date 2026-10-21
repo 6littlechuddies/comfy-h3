@@ -1,0 +1,91 @@
+# Builds the image on GitHub's servers and publishes it to GitHub's own registry (ghcr.io).
+# No Docker Hub account and no secrets needed — it uses the repo's built-in token.
+# Runs on every push to main, or manually: Actions tab -> build-image -> Run workflow.
+# Result: ghcr.io/<your-github-username>/comfy-h3:latest
+name: build-image
+
+# Only changes that need a new image start this (ComfyUI nodes, system packages, the Dockerfile …). Studio code, prompt
+# files and models.txt reach rentals without it: code.yml publishes them and rentals fetch them at start
+# (scripts/self_update.sh). To rebuild the image anyway: Actions tab -> build-image -> Run workflow.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - custom_nodes.txt
+      - scripts/install_nodes.sh
+      - scripts/patch_llm_text_processor.py
+      - scripts/self_update.sh
+      - scripts/image_rev.sh
+      - scripts/claude/**
+      - workflows/**
+      - settings/**
+      - .github/workflows/build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# A newer push supersedes an older build still in progress (saves Actions minutes).
+concurrency:
+  group: build-image
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      # Most pushes only change the Studio / scripts (the last layers; the rest comes from the cache), so the quick clean-up is
+      # enough. The slow part (uninstalling big apt packages, ~2 min of Actions minutes every build) only runs for a full
+      # rebuild: a manual run, or a push whose commit message contains [full] (changing the Dockerfile's early layers).
+      - name: Free disk space (quick)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]') }}
+          docker-images: true
+          swap-storage: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]') }}
+
+      - uses: actions/checkout@v4
+
+      - id: rev
+        run: echo "image=$(bash scripts/image_rev.sh)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/comfy-h3
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      # Layer cache (registry): after the first build, only the parts you changed get rebuilt
+      # (editing custom_nodes.txt skips the slow llama.cpp / torch / ComfyUI layers).
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            IMAGE_REV=${{ steps.rev.outputs.image }}
+            CODE_REV=${{ github.sha }}
+          # The saved layers live in GitHub's registry next to the image (tag "buildcache"), not in GitHub's 10 GB Actions cache,
+          # which this multi-GB image overflowed (so every build started from scratch). The old gha cache is read once as a fallback.
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/comfy-h3:buildcache
+            type=gha
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/comfy-h3:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd

@@ -1,0 +1,97 @@
+{
+	admin off
+	auto_https off
+}
+
+:8188 {
+	# the H3 Grok helper (userscript in your own browser) can't send the password: its routes check the relay token instead
+	@locked not path /grok-relay/*
+	basic_auth @locked {
+		{$COMFY_USER} {$COMFY_HASH}
+	}
+
+	handle /grok-relay/* {
+		reverse_proxy 127.0.0.1:18190
+	}
+
+	# Boot progress (download %, speed, phase, backup state) — polled by the launcher
+	handle /h3-status {
+		root * /opt/h3/run
+		rewrite * /status.json
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	# Model download progress per group (anime / realistic / writer / video) — read by the Studio and the startup screen
+	handle /h3-downloads {
+		root * /opt/h3/run
+		rewrite * /downloads.json
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	# Startup screen (download progress, steps, time left) — shown instead of an error while the machine boots
+	handle /h3-boot {
+		root * /opt/h3/boot
+		rewrite * /boot.html
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	handle_path /h3-boot-assets/* {
+		root * /opt/h3/boot
+		header Cache-Control "public, max-age=86400"
+		file_server
+	}
+
+	# Vast's "Open" button lands on /?token=… — take it straight to the Studio (ComfyUI stays at /)
+	@vastopen {
+		path /
+		query token=*
+	}
+	redir @vastopen /studio/ 302
+
+	# Browse + download every output in your browser: http://<instance>/outputs/
+	redir /outputs /outputs/
+	handle_path /outputs/* {
+		root * /opt/ComfyUI/output
+		file_server browse
+	}
+
+	# H3 Studio: the simple web app (http://<instance>/studio/) and its helper API
+	redir /studio /studio/
+	handle_path /studio/* {
+		root * /opt/h3/studio
+		try_files {path} /index.html
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-store"
+		file_server
+	}
+	handle /studio-api/* {
+		reverse_proxy 127.0.0.1:18190
+	}
+
+	# a terminal on this rental in the browser (ttyd, behind the same password): Studio ⋯ → Terminal / Claude on this rental
+	redir /terminal /terminal/
+	handle /terminal/* {
+		reverse_proxy 127.0.0.1:7681
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:18188
+	}
+
+	# while ComfyUI is still starting, pages show the startup screen instead of "502 Bad Gateway"
+	handle_errors {
+		@booting {
+			expression `{err.status_code} in [502, 503, 504]`
+			header Accept *text/html*
+		}
+		handle @booting {
+			root * /opt/h3/boot
+			rewrite * /boot.html
+			header Cache-Control "no-store"
+			file_server
+		}
+	}
+}

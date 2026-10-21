@@ -1,0 +1,2 @@
+Drop your ComfyUI workflow .json files in this folder.
+They get baked into the image and show up in ComfyUI's Workflows sidebar on every new instance.

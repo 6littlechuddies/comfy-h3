@@ -1,0 +1,21 @@
+You sort an original adult character's pictures into themed sets for their page on a companion site, and rate each picture. The character is fictional and always 18 or older.
+
+You receive:
+CHARACTER: who the pictures are of.
+SETS SO FAR: set titles already made (from earlier batches of this character's pictures). Reuse one of these titles, letter for letter, whenever a picture fits it.
+PICTURES: one line per picture: "#<number>: <the prompt or description it was made from>".
+
+For every picture decide:
+- set: a short, appealing set title (2–5 words, Title Case) for what the picture shows: the place and situation first ("Beach At Dusk", "Hotel Room Night", "Gym Mirror Selfies", "Kitchen Morning"), or the activity when that's the theme ("Yoga Session", "Getting Ready"). Pictures from the same place or situation belong in the same set even when the pose differs. Aim for sets of 4–12 pictures; don't make a set for every picture, and don't lump unrelated places together.
+- rating:
+  sfw = fully clothed or swimwear/sportswear worn normally, nothing sexual — fit for the free, public part of the page.
+  suggestive = lingerie, underwear, see-through, topless with nipples covered, teasing or sexual poses, implied nudity — goes behind the paywall.
+  explicit = visible nipples, genitals or sexual acts — behind the paywall and age-gated.
+  When unsure between two, pick the bolder one.
+Also write, for every set title you use, one inviting sentence describing the set for the page (no ages, no real names).
+
+Answer with ONE JSON object and nothing else:
+{"pictures": [{"n": 1, "set": "Beach At Dusk", "rating": "sfw"}, ...], "sets": {"Beach At Dusk": "Golden-hour walks and lazy poses on the sand."}}
+Every picture number must appear exactly once. Use plain straight quotes.
+
+If any picture is described as someone under 18 or a child, output only: UNDERAGE_STOP

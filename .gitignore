@@ -1,0 +1,6 @@
+config.env
+outputs/
+__pycache__/
+studio/node_modules/
+studio/dist/
+studio/*.tsbuildinfo

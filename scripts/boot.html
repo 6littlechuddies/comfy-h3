@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starting up — H3 Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d4ff1f' stroke-width='2.5'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M8 16V8M16 16V8M8 12h8'/%3E%3C/svg%3E">
+<style>
+  @font-face { font-family: "Archivo Variable"; src: url("/h3-boot-assets/archivo.woff2") format("woff2-variations"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("/h3-boot-assets/plex-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("/h3-boot-assets/plex-500.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  :root {
+    --bg: #0a0b0c; --panel: #0f1012; --raised: #15171a; --line: #2a2d33; --line2: #1a1c20;
+    --ink: #e9e6dc; --muted: #9d9b92; --dim: #6d6c66; --acid: #d4ff1f; --hot: #ff2a6d; --cyan: #2de2e6; --good: #3cf2a0;
+    --sans: "Archivo Variable", "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background-color: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased;
+    background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size: 32px 32px; display: flex; align-items: center; justify-content: center; padding: 32px 16px;
+  }
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 3px); }
+  .micro { font: 500 10px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .card { position: relative; width: 100%; max-width: 760px; background: var(--panel); border: 1px solid var(--line); padding: 28px 28px 22px; }
+  .card::after { content: ""; position: absolute; inset: -1px; pointer-events: none;
+    background:
+      linear-gradient(var(--acid),var(--acid)) top left/12px 1px no-repeat, linear-gradient(var(--acid),var(--acid)) top left/1px 12px no-repeat,
+      linear-gradient(var(--acid),var(--acid)) top right/12px 1px no-repeat, linear-gradient(var(--acid),var(--acid)) top right/1px 12px no-repeat,
+      linear-gradient(var(--acid),var(--acid)) bottom left/12px 1px no-repeat, linear-gradient(var(--acid),var(--acid)) bottom left/1px 12px no-repeat,
+      linear-gradient(var(--acid),var(--acid)) bottom right/12px 1px no-repeat, linear-gradient(var(--acid),var(--acid)) bottom right/1px 12px no-repeat; }
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .logo { width: 30px; height: 30px; background: var(--acid); color: var(--bg); display: grid; place-items: center;
+    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px)); }
+  .brand { font-weight: 800; font-stretch: 125%; text-transform: uppercase; letter-spacing: -.01em; font-size: 15px; line-height: 1; }
+  .elapsed { margin-left: auto; text-align: right; }
+  h1 { margin: 0; font-weight: 800; font-stretch: 125%; text-transform: uppercase; letter-spacing: -.015em; font-size: clamp(24px, 4.4vw, 34px); line-height: 1.05; }
+  .sub { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; max-width: 62ch; }
+  .big { display: flex; align-items: flex-end; gap: 18px; margin: 26px 0 10px; flex-wrap: wrap; }
+  .pct { font: 700 clamp(56px, 11vw, 88px)/.85 var(--mono); letter-spacing: -.04em; color: var(--ink); }
+  .pct small { font-size: .38em; color: var(--dim); margin-left: 4px; letter-spacing: 0; }
+  .facts { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 22px; padding-bottom: 6px; }
+  .facts b { display: block; font: 600 15px/1.3 var(--mono); color: var(--ink); }
+  .bar { height: 14px; background: #0b0c0e; border: 1px solid var(--line); overflow: hidden; }
+  .fill { height: 100%; width: 0; transition: width .8s cubic-bezier(.2,.8,.2,1);
+    background: repeating-linear-gradient(-45deg, var(--acid) 0 6px, #a9cc12 6px 12px); background-size: 17px 17px; animation: move .6s linear infinite; }
+  .fill.indet { width: 35% !important; animation: move .6s linear infinite, slide 1.6s ease-in-out infinite alternate; }
+  @keyframes move { to { background-position: 17px 0; } }
+  @keyframes slide { from { transform: translateX(-10%); } to { transform: translateX(200%); } }
+  ol.steps { list-style: none; margin: 26px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  ol.steps li { border-top: 3px solid var(--line); padding-top: 8px; font-size: 12.5px; color: var(--dim); }
+  ol.steps li .micro { display: block; margin-bottom: 2px; }
+  ol.steps li.done { border-color: var(--good); color: var(--muted); }
+  ol.steps li.done .micro { color: var(--good); }
+  ol.steps li.now { border-color: var(--acid); color: var(--ink); }
+  ol.steps li.now .micro { color: var(--acid); }
+  ol.steps li.bad { border-color: var(--hot); color: var(--ink); }
+  details { margin-top: 20px; border-top: 1px solid var(--line2); padding-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+  summary::before { content: "+ "; font-family: var(--mono); color: var(--dim); }
+  details[open] summary::before { content: "− "; }
+  .keys { margin-top: 10px; font-size: 12.5px; color: var(--dim); line-height: 1.5; }
+  .keys b { color: inherit; font-weight: 600; }
+  .files { margin-top: 10px; display: grid; gap: 6px; max-height: 260px; overflow-y: auto; padding-right: 6px; }
+  .file { display: grid; grid-template-columns: 1fr 92px 90px 86px 64px; gap: 10px; align-items: center; font: 12px/1.3 var(--mono); }
+  .file .src { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file .fst { text-align: right; color: var(--muted); white-space: nowrap; }
+  .file.stalled .fst, .file.failed .fst { color: var(--hot); } .file.active .fst { color: var(--acid); }
+  .file.stalled span:first-child { color: var(--ink); } .file.later, .file.waiting { opacity: .6; }
+  @media (max-width: 640px) { .file { grid-template-columns: 1fr 70px 60px; } .file .src, .file .mini { display: none; } }
+  .file span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .file .mini { height: 4px; background: var(--raised); }
+  .file .mini i { display: block; height: 100%; background: var(--acid); }
+  .file.done .mini i { background: var(--good); }
+  .file span:last-child { text-align: right; color: var(--dim); }
+  .groups { margin-top: 22px; display: grid; gap: 7px; }
+  .groups:empty { display: none; }
+  .grp { display: grid; grid-template-columns: 14px 1fr 160px 70px 128px; gap: 10px; align-items: center; font-size: 13px; }
+  .grp .acts { justify-self: end; display: flex; gap: 6px; }
+  .grp .act { font: 500 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+    background: none; border: 1px solid var(--line); padding: 5px 7px; cursor: pointer; }
+  .grp .act:hover { color: var(--ink); border-color: var(--muted); } .grp .act.now { color: var(--acid); border-color: var(--acid); }
+  .grp .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; } .grp .act[disabled] { opacity: .5; cursor: wait; }
+  .grp.later .lab { color: var(--dim); }
+  @media (max-width: 640px) { .grp { grid-template-columns: 14px 1fr 56px 120px; } .grp .gbar { display: none; } }
+  .grp .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .grp.done .dot { background: var(--good); } .grp.downloading .dot { background: var(--acid); } .grp.error .dot { background: var(--hot); }
+  .grp .lab { color: var(--muted); } .grp.downloading .lab, .grp.done .lab { color: var(--ink); }
+  .grp .gbar { height: 4px; background: var(--raised); } .grp .gbar i { display: block; height: 100%; background: var(--acid); }
+  .grp.done .gbar i { background: var(--good); }
+  .grp .st { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); text-align: right; }
+  .grp .first { font: 500 9.5px/1 var(--mono); letter-spacing: .1em; color: var(--acid); margin-left: 6px; }
+  @media (max-width: 620px) { .grp { grid-template-columns: 14px 1fr 70px 56px; } }
+  .alert { margin-top: 22px; border: 1px solid var(--hot); background: rgba(255,42,109,.08); padding: 14px 16px; display: none; }
+  .alert b { color: var(--hot); }
+  .alert p { margin: 4px 0 0; color: var(--ink); }
+  .foot { margin-top: 22px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--dim); font-size: 12.5px; }
+  .btn { margin-left: auto; text-decoration: none; background: var(--acid); color: var(--bg); font-weight: 800; text-transform: uppercase; letter-spacing: .02em;
+    padding: 11px 20px; font-size: 13px; clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); display: none; }
+  .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); clip-path: none; font-weight: 600; text-transform: none; display: inline-block; padding: 9px 14px; margin-left: 0; }
+  .ready h1 { color: var(--acid); }
+  .glitch { animation: jolt .45s steps(1) 1; }
+  @keyframes jolt { 0% { transform: translateX(-3px) skewX(-8deg); text-shadow: -3px 0 var(--cyan), 3px 0 var(--hot); } 30% { transform: translateX(2px); } 60% { transform: none; text-shadow: 2px 0 var(--cyan), -2px 0 var(--hot); } 100% { text-shadow: none; } }
+  .imp { margin-top: 22px; border: 1px dashed var(--line); padding: 14px 16px; display: grid; gap: 8px; transition: border-color .15s, background .15s; }
+  .imp.over { border-color: var(--acid); background: rgba(212,255,31,.05); }
+  .imp .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .imp .lab { color: var(--ink); font-weight: 600; }
+  .imp .hint { color: var(--dim); font-size: 12.5px; }
+  .imp .pick { margin-left: auto; font: 500 11px/1 var(--mono); letter-spacing: .06em; color: var(--acid); background: none; border: 1px solid var(--acid); padding: 7px 10px; cursor: pointer; }
+  .imp .pick:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; } .imp .pick[disabled] { opacity: .5; cursor: wait; }
+  .imp .ibar { height: 8px; background: #0b0c0e; border: 1px solid var(--line2); overflow: hidden; }
+  .imp .ibar i { display: block; height: 100%; width: 0; background: var(--acid); transition: width .4s; }
+  .imp.done .ibar i { background: var(--good); } .imp.bad { border-color: var(--hot); } .imp.bad .msg { color: var(--hot); }
+  .imp .msg { font: 12px/1.4 var(--mono); color: var(--muted); }
+  .hide { display: none !important; }
+  @media (max-width: 620px) { ol.steps { gap: 4px; } ol.steps li { font-size: 11px; line-height: 1.25; } .facts { grid-template-columns: repeat(2, auto); } .file { grid-template-columns: 1fr 70px 52px; } .card { padding: 22px 18px; } }
+  @media (prefers-reduced-motion: reduce) { .fill, .fill.indet, .glitch { animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="card" id="card" aria-live="polite">
+  <div class="top">
+    <span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M8 17V7M16 17V7M8 12h8"/></svg></span>
+    <div><div class="brand">H3 Studio</div><div class="micro">Starting your rental</div></div>
+    <div class="elapsed"><div class="micro">Elapsed</div><div id="elapsed" style="font:600 15px var(--mono)">0:00</div></div>
+  </div>
+
+  <h1 id="title">Getting ready</h1>
+  <p class="sub" id="sub">Connecting to your machine…</p>
+
+  <div class="big">
+    <div class="pct hide" id="pct">0<small>%</small></div>
+    <div class="facts" id="facts"></div>
+  </div>
+  <div class="bar" role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" id="barwrap"><div class="fill indet" id="fill"></div></div>
+
+  <ol class="steps" id="steps">
+    <li data-k="booting"><span class="micro">01</span>Start up</li>
+    <li data-k="restoring"><span class="micro">02</span>Your settings</li>
+    <li data-k="downloading"><span class="micro">03</span>First models</li>
+    <li data-k="starting"><span class="micro">04</span>ComfyUI</li>
+    <li data-k="ready"><span class="micro">05</span>Ready</li>
+  </ol>
+
+  <div class="groups" id="groups"></div>
+
+  <section class="imp" id="imp" aria-live="polite">
+    <div class="row">
+      <div><div class="lab" id="impLab">Bring your work back while this downloads</div><div class="hint" id="impHint">Drop an Export .zip anywhere on this page — characters, chats, presets, results. It goes in pieces, so big files are fine.</div></div>
+      <button class="pick" id="impPick" type="button">Choose .zip</button>
+      <input type="file" id="impFile" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+    </div>
+    <div class="ibar hide" id="impBar" role="progressbar" aria-label="Import progress" aria-valuemin="0" aria-valuemax="100"><i id="impFill"></i></div>
+    <div class="msg hide" id="impMsg"></div>
+  </section>
+
+  <div class="alert" id="alert"><b id="alertTitle"></b><p id="alertText"></p></div>
+
+  <details id="filesBox" style="display:none">
+    <summary id="filesSum">Files</summary>
+    <div class="keys" id="keys"></div>
+    <div class="files" id="files"></div>
+  </details>
+
+  <div class="foot">
+    <span id="footText">This page updates itself — leave it open. It opens the Studio as soon as everything's ready.</span>
+    <a class="btn ghost" href="/studio-api/debug-report?lines=200" target="_blank" rel="noopener" title="Logs, downloads and errors in one page (keys and passwords hidden) — copy it into your Claude chat">Debug report</a>
+    <a class="btn" id="go" href="/studio/">Open the Studio</a>
+  </div>
+</main>
+<script>
+(() => {
+  const ORDER = ["booting", "restoring", "preparing", "downloading", "loading", "starting", "ready"];
+  const STEP_OF = { booting: "booting", restoring: "restoring", preparing: "downloading", downloading: "downloading", slow: "downloading", loading: "starting", starting: "starting", error: null, ready: "ready" };
+  const STEP_KEYS = ["booting", "restoring", "downloading", "starting", "ready"];
+  const $ = (id) => document.getElementById(id);
+  const inFrame = window.top !== window;
+  // "Open the Studio now": remember it, so the Studio doesn't put this screen back over itself while models still download
+  $("go").addEventListener("click", (e) => {
+    if (typeof imp !== "undefined" && imp.sending && !confirm("Your .zip is still being sent — leaving now stops it. Leave anyway?")) { e.preventDefault(); return; }
+    try { localStorage.setItem("h3.skipBoot", String(Date.now())); } catch { /* private mode */ }
+    if (inFrame) { e.preventDefault(); parent.postMessage({ h3: "skip" }, location.origin); }
+  });
+  let lastPhase = "", start = Date.now(), elapsedBase = 0, readyAt = 0, fails = 0;
+
+  const fmtT = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}` : `${m}:${String(ss).padStart(2, "0")}`; };
+  const fmtLeft = (s) => s < 0 ? "working it out" : s < 60 ? "under a minute" : s < 3600 ? `about ${Math.ceil(s / 60)} min` : `about ${(s / 3600).toFixed(1)} h`;
+  const gb = (mb) => (mb / 1024).toFixed(mb >= 10240 ? 0 : 1);
+  const facts = (pairs) => { $("facts").innerHTML = pairs.map(([k, v]) => `<div><span class="micro">${k}</span><b>${v}</b></div>`).join(""); };
+  const setBar = (p) => { const f = $("fill"); $("barwrap").classList.toggle("hide", p === false); if (p === false) return; if (p == null) { f.classList.add("indet"); f.style.width = ""; } else { f.classList.remove("indet"); f.style.width = `${Math.max(1, Math.min(100, p))}%`; $("barwrap").setAttribute("aria-valuenow", p); } };
+  const setPct = (p) => { $("pct").classList.toggle("hide", p == null); $("pct").innerHTML = `${p ?? 0}<small>%</small>`; };
+  const steps = (phase) => {
+    const cur = STEP_OF[phase];
+    const ci = STEP_KEYS.indexOf(cur ?? "downloading");
+    document.querySelectorAll("#steps li").forEach((li, i) => {
+      li.className = phase === "ready" || i < ci ? "done" : i === ci ? (phase === "error" || phase === "slow" ? "bad" : "now") : "";
+    });
+  };
+  const alertBox = (title, text) => { $("alert").style.display = title ? "block" : "none"; $("alertTitle").textContent = title || ""; $("alertText").textContent = text || ""; };
+
+  const pending = {};
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button.act[data-g]");
+    if (!b) return;
+    const g = b.dataset.g, what = b.dataset.do; pending[g] = true; b.disabled = true;
+    try {
+      const body = what === "next" ? { group: g, next: true } : { group: g, later: what === "later" };
+      const r = await fetch("/studio-api/downloads/later", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "That didn't work — try again in a moment."); }
+    } catch { alert("Couldn't reach the machine — try again in a moment."); }
+    setTimeout(() => { delete pending[g]; }, 4000);  // the downloader picks it up within a few seconds
+  });
+  function renderGroups(dl) {
+    const el = $("groups");
+    if (!dl || !Array.isArray(dl.groups) || !dl.groups.length) { el.innerHTML = ""; return; }
+    el.innerHTML = dl.groups.map((g, i) => {
+      const st = g.state === "done" ? "Ready" : g.why ? (/disk/.test(g.why) ? "No room" : "Big card") : g.state === "later" || g.state === "skipped" ? "Later" : g.state === "error" ? "Failed" : g.state === "downloading" ? `${g.pct}%` : g.state === "checking" ? "Checking" : "In line";
+      const w = g.state === "done" ? 100 : g.pct || 0;
+      const busy = pending[g.id] ? " disabled" : "";
+      const btn = (what, label, cls, title) => `<button class="act${cls}" data-g="${g.id}" data-do="${what}"${busy} title="${title}">${label}</button>`;
+      const LATER = btn("later", "Later", "", "Leave this out on this rental, until you press Download now");
+      const acts = !g.can_later || g.state === "done" || g.state === "checking" ? ""
+        : g.state === "later" || g.state === "skipped" ? btn("next", "Download now", " now", "Download this next")
+        : g.state === "error" ? btn("now", "Try again", " now", "Try the failed files again")
+        : g.state === "waiting" ? btn("next", "Next", "", "Download this next, right after what's already running") + LATER
+        : LATER;
+      const err = g.state === "error" && g.error ? `<div class="file failed" style="grid-template-columns:1fr;margin:-2px 0 4px 24px"><span style="white-space:normal">${String(g.error).replace(/[<>&]/g, "")}</span></div>` : "";
+      return `<div class="grp ${g.state}"><span class="dot"></span><span class="lab" title="${(g.why || g.error || "").replace(/"/g, "")}">${g.label}${i === 0 ? '<span class="first">OPENS THE STUDIO</span>' : ""}</span><div class="gbar"><i style="width:${w}%"></i></div><span class="st">${st}</span><span class="acts">${acts}</span></div>${err}`;
+    }).join("");
+  }
+
+  function render(st, dl) {
+    const phase = st.phase || "booting";
+    renderGroups(dl);
+    if (phase !== lastPhase) { const t = $("title"); t.classList.remove("glitch"); void t.offsetWidth; t.classList.add("glitch"); lastPhase = phase; }
+    if (typeof st.elapsed_s === "number") { elapsedBase = st.elapsed_s; start = Date.now(); }
+    steps(phase);
+    alertBox();
+    $("card").classList.toggle("ready", phase === "ready");
+    $("imp").classList.toggle("hide", (phase === "slow" || phase === "error") && !imp.busy);
+    $("go").style.display = phase === "error" ? "none" : "inline-block";
+    $("go").textContent = phase === "ready" ? "Open the Studio" : "Open the Studio now — downloads keep going";
+    const files = Array.isArray(dl?.files) ? dl.files : Array.isArray(st.files) ? st.files : [];
+    $("filesBox").style.display = files.length ? "block" : "none";
+    if (files.length) {
+      const fst = (f) => f.st || (f.t > 0 && f.g >= f.t * 0.999 ? "done" : "waiting");
+      const done = files.filter((f) => fst(f) === "done").length;
+      const stalled = files.filter((f) => fst(f) === "stalled");
+      $("filesSum").textContent = `${done} of ${files.length} files done` + (stalled.length ? ` · ${stalled.length} stuck` : "");
+      const ORDER = { stalled: 0, active: 1, queued: 2, failed: 3, waiting: 4, later: 5, done: 6 };
+      const sorted = [...files].sort((a, b) => (ORDER[fst(a)] - ORDER[fst(b)]) || (b.t - a.t));
+      const label = (f) => ({ stalled: "stuck", active: `${f.s ?? 0} MB/s`, queued: "starting", failed: "failed", waiting: "in line", later: "later", done: "done" })[fst(f)];
+      $("files").innerHTML = sorted.map((f) => {
+        const p = f.t ? Math.min(100, Math.round(f.g / f.t * 100)) : 0;
+        return `<div class="file ${fst(f)}"><span title="${f.n}${f.err ? " — " + f.err : ""}">${f.n}</span><span class="src">${f.src || ""}</span><div class="mini"><i style="width:${p}%"></i></div><span class="fst">${label(f)}</span><span>${f.t ? `${gb(f.t)} GB` : "?"}</span></div>`;
+      }).join("");
+      // Hugging Face without a token is throttled hard: say how to fix it, right above the list
+      if (files.some((f) => /no token/.test(f.src || ""))) $("files").insertAdjacentHTML("afterbegin", `<div class="file failed" style="grid-template-columns:1fr"><span style="white-space:normal">No HF_TOKEN on this rental, so Hugging Face downloads are slow (~2–5 MB/s per file). Add HF_TOKEN to your Vast template's environment and start a new rental for ~300 MB/s.</span></div>`);
+      // which Hugging Face key is in use, why it last switched, and whether the keys are all on one account
+      const k = dl?.hf_key;
+      if (k && k.of > 1) {
+        const acc = Array.isArray(k.accounts) ? k.accounts : null;
+        const real = acc ? [...new Set(acc.filter((n) => n && n !== "?" && !/^not accepted/.test(n)))] : [];
+        const bad = acc ? acc.map((n, i) => /^not accepted/.test(n) ? `key ${i + 1}` : null).filter(Boolean) : [];
+        $("keys").innerHTML = `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`
+          + (k.last ? `<br>Last: ${k.last}` : "")
+          + (k.of > 1 ? `<br>Hugging Face slows each key down after a few GB; the downloader moves to a rested key when that happens.` : "")
+          + (bad.length ? `<br>Hugging Face didn't accept ${bad.join(", ")} — check them in your Vast template.` : "");
+      } else $("keys").innerHTML = "";
+      // images-only mode on a card under 30 GB: video and the 27B writer wait
+      if (dl?.gpu?.images_only) $("keys").innerHTML += `${$("keys").innerHTML ? "<br>" : ""}<b>Images-only mode</b> · ${String(dl.gpu.name || "this GPU").replace(/[<>&]/g, "")} has ${Math.round((dl.gpu.vram_mb || 0) / 1024)} GB, so H3 video and the 27B writer download last, after everything else (pictures, Edit and the small writer all work on it).`;
+      if (stalled.length && !$("filesBox").dataset.opened) { $("filesBox").open = true; $("filesBox").dataset.opened = "1"; }
+    }
+    switch (phase) {
+      case "booting": $("title").textContent = "Starting up"; $("sub").textContent = "The machine is switching on its web page and helpers."; setPct(null); setBar(null); facts([]); break;
+      case "restoring": $("title").textContent = "Your settings"; $("sub").textContent = "Bringing back your settings, characters and LoRA list from your backup."; setPct(null); setBar(null); facts([]); break;
+      case "preparing": $("title").textContent = "Checking models"; $("sub").textContent = `Looking up ${st.checked || ""} model files — the download starts in a moment.`; setPct(0); setBar(null); facts([]); break;
+      case "downloading": {
+        const g0 = dl?.groups?.[0];
+        if (g0 && g0.state !== "done") {
+          const p = g0.pct ?? 0;
+          $("title").textContent = g0.state === "checking" ? "Checking models" : `Downloading ${g0.label.toLowerCase()}`;
+          const stuck0 = (dl.files || []).filter((f) => f.group === g0.id && f.st === "stalled");
+          $("sub").textContent = stuck0.length
+            ? `Waiting on ${stuck0.length === 1 ? `one file (${stuck0[0].n}, from ${stuck0[0].src})` : `${stuck0.length} files`} that has stopped moving. It's retried automatically, and the rest of the queue keeps downloading meanwhile.`
+            : dl.speed_ok === false
+            ? `This machine downloads slowly (${dl.speed_best ?? "?"} MB/s at best)${(dl.left_s ?? -1) > 0 ? `, so the full download takes ${fmtLeft(dl.left_s)}` : ""}. It keeps going, and the Studio opens once these are in. If that's too long, destroy it on Vast and rent one with a faster download speed.`
+            : "The Studio opens as soon as these are in. Everything else keeps downloading in the background, and each tab unlocks when its models arrive.";
+          setPct(p); setBar(g0.state === "checking" ? null : p);
+          facts([
+            ["Downloaded", `${gb(g0.done_mb)} / ${gb(g0.total_mb)} GB`],
+            ["Speed", `${dl.mbps ?? 0} MB/s`],
+            ["Time left", fmtLeft(g0.left_s ?? -1)],
+          ]);
+        } else if (dl) {
+          $("title").textContent = "Almost there"; $("sub").textContent = "First models are in — starting ComfyUI."; setPct(null); setBar(null); facts([]);
+        } else {
+          const p = st.pct ?? 0;
+          $("title").textContent = "Downloading models";
+          $("sub").textContent = "Every new rental downloads the models once.";
+          setPct(p); setBar(p);
+          facts([["Downloaded", st.total_mb ? `${gb(st.downloaded_mb)} / ${gb(st.total_mb)} GB` : `${st.downloaded_gb ?? 0} / ${st.total_gb ?? "?"} GB`], ["Speed", `${st.mbps ?? 0} MB/s`], ["Time left", fmtLeft(st.left_s ?? -1)]]);
+        }
+        break;
+      }
+      case "slow":
+        $("title").textContent = "This machine is too slow"; $("sub").textContent = ""; setPct(null); setBar(false); facts([["Best speed", `${dl?.speed_best ?? dl?.avg_mbps ?? st.avg_mbps ?? "?"} MB/s`]]);
+        $("footText").textContent = "You can close this page.";
+        alertBox("Rent a different machine", "Its internet is far too slow for the models (it would take hours). It switches itself off — go back to Vast and pick one with a faster download speed.");
+        break;
+      case "loading": case "starting":
+        $("title").textContent = "Starting ComfyUI"; $("sub").textContent = "Models are in. Loading the engine and its add-ons — usually one to three minutes."; setPct(null); setBar(null); facts([]); break;
+      case "error":
+        $("title").textContent = "Something went wrong"; $("sub").textContent = ""; setPct(null); setBar(false); facts([]);
+        $("footText").textContent = "You can close this page.";
+        alertBox("Startup stopped", (st.message || "") + " — destroy this rental and start a new one. If it happens twice, send Claude a screenshot of this page.");
+        break;
+      case "ready":
+        $("title").textContent = "Ready"; $("sub").textContent = "Opening the Studio…"; setPct(100); setBar(100); facts([]);
+        $("footText").textContent = "Everything's downloaded and running.";
+        if (!readyAt) {
+          readyAt = Date.now();
+          if (inFrame) parent.postMessage({ h3: "ready" }, location.origin);
+          else if (!/[?&]stay\b/.test(location.search)) { const go = () => imp.sending ? setTimeout(go, 2000) : location.assign("/studio/"); setTimeout(go, 1800); }
+        }
+        break;
+      default: $("sub").textContent = st.message || "";
+    }
+  }
+
+  async function poll() {
+    try {
+      const [r, d] = await Promise.all([fetch("/h3-status", { cache: "no-store" }), fetch("/h3-downloads", { cache: "no-store" }).catch(() => null)]);
+      if (!r.ok) throw new Error(r.status);
+      const dl = d && d.ok ? await d.json().catch(() => null) : null;
+      render(await r.json(), dl); fails = 0;
+    } catch {
+      if (++fails > 3) { $("sub").textContent = "Waiting for the machine to answer… (normal for the first minute)"; }
+    }
+    setTimeout(poll, readyAt ? 4000 : 2000);
+  }
+
+  // ---- import an Export .zip while the models download (same pieces-upload as the Studio) ----------------------------
+  const imp = { busy: false, sending: false, watching: false };
+  const mbs = (b) => b >= 1 << 30 ? `${(b / 2 ** 30).toFixed(2)} GB` : `${Math.round(b / 2 ** 20)} MB`;
+  const impShow = (o) => {
+    const box = $("imp");
+    box.classList.toggle("done", o.state === "done"); box.classList.toggle("bad", o.state === "error");
+    if (o.title) $("impLab").textContent = o.title;
+    if (o.hint != null) $("impHint").textContent = o.hint;
+    $("impBar").classList.toggle("hide", o.pct == null);
+    if (o.pct != null) { $("impFill").style.width = `${Math.max(1, o.pct)}%`; $("impBar").setAttribute("aria-valuenow", o.pct); }
+    $("impMsg").classList.toggle("hide", !o.msg); $("impMsg").textContent = o.msg || "";
+    $("impPick").disabled = !!o.lock; $("impPick").textContent = o.retry ? "Try again" : o.state === "done" ? "Import another" : o.state === "error" ? "Choose .zip" : "Choose .zip";
+    $("impPick").dataset.retry = o.retry ? "1" : "";
+  };
+  const note = (r) => r ? [r.added && `${r.added} character${r.added > 1 ? "s" : ""} added`, r.updated && `${r.updated} updated`, r.kept_newer && `${r.kept_newer} kept as you have them`,
+    r.extras && Object.keys(r.extras).length && "chats, presets and settings", r.refused?.length && `${r.refused.length} refused (no adult age)`].filter(Boolean).join(" · ") || "Nothing new in that file" : "Done";
+  const tellParent = (on) => { imp.sending = on; if (inFrame) parent.postMessage({ h3: "importing", on }, location.origin); };
+  const j = async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `The rental answered ${r.status}`); return d; };
+  async function piece(id, blob, off, add) {
+    for (let n = 0; ; n++) {
+      try {
+        await new Promise((ok, bad) => {
+          const x = new XMLHttpRequest(); let seen = 0;
+          x.open("PUT", `/studio-api/import/${id}/chunk?offset=${off}`);
+          x.upload.onprogress = (e) => { add(e.loaded - seen); seen = e.loaded; };
+          x.onload = () => { if (x.status < 300) { add(blob.size - seen); ok(); } else { add(-seen); bad(new Error(`piece refused (${x.status})`)); } };
+          x.onerror = x.ontimeout = () => { add(-seen); bad(new Error("connection dropped")); };
+          x.timeout = 600000; x.send(blob);
+        });
+        return;
+      } catch (e) { if (n >= 4) throw e; await new Promise((r) => setTimeout(r, 1000 * 2 ** n)); }
+    }
+  }
+  async function importZip(file) {
+    if (imp.busy) return;
+    if (!/\.zip$/i.test(file.name)) { impShow({ state: "error", title: "That isn't a .zip", msg: "Drop the .zip you made with Export all in the Studio." }); return; }
+    imp.busy = true; tellParent(true);
+    impShow({ title: `Importing ${file.name}`, hint: "Keep this page open until it says Unpacking.", pct: 0, msg: "Starting…", lock: true });
+    try {
+      const st = await j(await fetch("/studio-api/import/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, size: file.size }) }));
+      const chunk = st.chunk || 16777216, offs = [];
+      for (let o = 0; o < file.size; o += chunk) offs.push(o);
+      let sent = 0, next = 0, last = 0; const t0 = performance.now();
+      const add = (n) => {
+        sent += n; const now = performance.now(); if (now - last < 250) return; last = now;
+        const s = (now - t0) / 1000, sp = s > 1 ? sent / 1048576 / s : 0, lft = sp ? (file.size - sent) / 1048576 / sp : -1;
+        impShow({ pct: Math.round(sent / file.size * 70), msg: `Sending · ${mbs(sent)} of ${mbs(file.size)}${sp ? ` · ${sp.toFixed(1)} MB/s · ${fmtLeft(lft)} left` : ""}`, lock: true });
+      };
+      await Promise.all(Array.from({ length: Math.min(4, offs.length) }, async () => { while (next < offs.length) { const o = offs[next++]; await piece(st.id, file.slice(o, Math.min(file.size, o + chunk)), o, add); } }));
+      tellParent(false);
+      impShow({ hint: "Sent — the rental is unpacking it. You can open the Studio now.", pct: 70, msg: "Unpacking…", lock: true });
+      await j(await fetch(`/studio-api/import/${st.id}/finish`, { method: "POST" }));
+      for (let fails = 0; ;) {
+        await new Promise((r) => setTimeout(r, 700));
+        let d; try { d = await j(await fetch(`/studio-api/import/${st.id}`, { cache: "no-store" })); fails = 0; } catch (e) { if (++fails > 8) throw e; continue; }
+        if (d.state === "done") { impShow({ state: "done", title: `Imported ${file.name}`, hint: "It's all there when the Studio opens.", pct: 100, msg: note(d.result) }); break; }
+        if (d.state === "error") throw new Error(d.error || "Couldn't import that file");
+        impShow({ pct: 70 + Math.round((d.total ? d.done / d.total : 0) * 30), msg: d.total ? `Unpacking pictures · ${d.done} of ${d.total}` : "Unpacking…", lock: true });
+      }
+    } catch (e) {
+      impShow({ state: "error", title: "Import stopped", hint: "", msg: e.message === "Failed to fetch" ? "Couldn't reach the rental — try again in a moment." : e.message });
+    } finally { imp.busy = false; tellParent(false); }
+  }
+  // a fresh rental with Proton Drive set up brings your newest export back by itself: show it here
+  async function watchRestore(again) {
+    if (imp.watching && !again) return; imp.watching = true;
+    try {
+      for (;;) {
+        if (imp.busy) { await new Promise((r) => setTimeout(r, 3000)); continue; }
+        const r = await fetch("/studio-api/import/latest", { cache: "no-store" }).catch(() => null);
+        const d = r && r.ok ? await r.json().catch(() => null) : null;
+        if (!d || d.source !== "proton" || d.state === "none") return;
+        const pct = d.state === "finding" ? null : d.state === "fetching" ? Math.round((d.size ? d.got / d.size : 0) * 70) : d.state === "unpacking" ? 70 + Math.round((d.total ? d.done / d.total : 0) * 30) : d.state === "done" ? 100 : null;
+        const msg = { finding: "Looking for your newest export…", fetching: `Getting it · ${mbs(d.got || 0)} of ${mbs(d.size || 0)}`, unpacking: d.total ? `Unpacking pictures · ${d.done} of ${d.total}` : "Unpacking…",
+          done: note(d.result) + (d.results === "copying" ? " · your results follow in the background" : ""), error: d.error || "It didn't work — drop the .zip here instead" }[d.state] || "";
+        impShow({ state: d.state, title: d.state === "done" ? "Your work is back from Proton Drive" : d.state === "error" ? "Couldn't bring it back from Proton Drive" : "Bringing your work back from Proton Drive",
+          hint: d.name || "", pct, msg, lock: d.state !== "done" && d.state !== "error", retry: d.state === "error" });
+        if (d.state === "done" || d.state === "error") return;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    } finally { imp.watching = false; }
+  }
+  $("impPick").addEventListener("click", async () => {
+    if ($("impPick").dataset.retry) {  // a Proton Drive restore that failed: run it again
+      $("impPick").disabled = true;
+      try { await j(await fetch("/studio-api/import/restore", { method: "POST" })); } catch (e) { impShow({ state: "error", msg: e.message, retry: true }); return; }
+      await new Promise((r) => setTimeout(r, 800)); watchRestore(true); return;
+    }
+    $("impFile").click();
+  });
+  $("impFile").addEventListener("change", (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) importZip(f); });
+  let dragDepth = 0;
+  document.addEventListener("dragenter", (e) => { if (e.dataTransfer?.types?.includes("Files")) { dragDepth++; $("imp").classList.add("over"); } });
+  document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("imp").classList.remove("over"); } });
+  document.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
+  document.addEventListener("drop", (e) => { e.preventDefault(); dragDepth = 0; $("imp").classList.remove("over"); const f = e.dataTransfer?.files?.[0]; if (f) importZip(f); });
+  window.addEventListener("beforeunload", (e) => { if (imp.sending) { e.preventDefault(); e.returnValue = ""; } });
+  watchRestore();
+  setInterval(() => { $("elapsed").textContent = fmtT(elapsedBase + (Date.now() - start) / 1000); }, 1000);
+  poll();
+})();
+</script>
+</body>
+</html>

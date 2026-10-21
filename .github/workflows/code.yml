@@ -1,0 +1,55 @@
+# Publishes the Studio's code (web app, server, downloader, prompt files, models.txt) as the "code-latest" release.
+# Rentals download it when they start (scripts/self_update.sh), so most changes need no image rebuild. ~2 minutes.
+name: code-bundle
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "launcher/**", "local/**", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: code-bundle
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+
+      - name: Build the Studio
+        working-directory: studio
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - name: Pack
+        run: |
+          set -e
+          b=out/b; mkdir -p $b/boot
+          cp -a studio/dist $b/studio
+          cp -a prompts $b/prompts
+          cp models.txt scripts/studio_server.py scripts/downloader.py scripts/watchdog.py scripts/Caddyfile scripts/h3-grok.user.js scripts/start.sh scripts/claude/CLAUDE.md $b/
+          cp scripts/boot.html $b/boot/boot.html
+          bash scripts/image_rev.sh > $b/IMAGE_REV
+          echo "$GITHUB_SHA" > $b/CODE_REV
+          python3 -m py_compile $b/studio_server.py $b/downloader.py $b/watchdog.py && rm -rf $b/__pycache__
+          tar -czf h3-code.tar.gz -C $b .
+          ls -la h3-code.tar.gz; cat $b/IMAGE_REV
+
+      - name: Publish as the code-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view code-latest >/dev/null 2>&1 || gh release create code-latest --prerelease --title "Latest Studio code" \
+            --notes "Downloaded by rentals at start (scripts/self_update.sh). Replaced on every push."
+          gh release upload code-latest h3-code.tar.gz --clobber

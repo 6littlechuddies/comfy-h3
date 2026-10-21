@@ -1,0 +1,35 @@
+# Custom nodes baked into the image — one GitHub link per line.
+# To add a node permanently: add its GitHub link on a new line and save (on github.com: pencil icon -> Commit).
+# GitHub rebuilds the image automatically (~10-20 min with cache). Lines starting with # are ignored.
+# Optional: pin a version with @<commit-or-tag> at the end of the link.
+
+# --- your usual set ---
+https://github.com/Comfy-Org/ComfyUI-Manager
+https://github.com/kijai/ComfyUI-KJNodes
+https://github.com/1038lab/ComfyUI-RMBG
+https://github.com/1038lab/ComfyUI-QwenVL
+
+# --- needed by MinimaxH3 Auto Prompter v7.3 (civitai.com/models/2834106) ---
+https://github.com/rgthree/rgthree-comfy
+# LLM Text Processor only supports Windows out of the box; the image builds llama.cpp for Linux
+# and patches the node to use it (scripts/patch_llm_text_processor.py). Don't remove that step.
+https://github.com/KingManiya/ComfyUI-LLM-text-processor
+
+# --- H3 single-frame stills / i2i edits ---
+https://github.com/shootthesound/ComfyUI-Fizgig-H3-Still
+
+# --- LoRA Manager: browse/download CivitAI LoRAs at http://<instance>/loras and send them to workflows ---
+https://github.com/willmiao/ComfyUI-Lora-Manager
+
+# --- video save/load helpers ---
+https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
+
+# --- Krea 2 Identity Edit: instruction editing + "put this character into this scene" on Krea 2 (the Edit tab's default) ---
+https://github.com/lbouaraba/comfyui-krea2edit@13ef60f20828949becada815d3cbc371eb5ccaab
+
+# --- Krea2T Enhancer: patches Krea 2's text path so pictures follow the prompt more closely (the community Krea 2 workflows
+#     run it at 1.5; Create → "Follow the prompt harder"). Also has an image-only character LoRA loader, for testing ---
+https://github.com/capitan01R/ComfyUI-Krea2T-Enhancer@02db4defe5483c8f5aacc0a9a7baa647916149c0
+
+# --- IP-Adapter Plus: Illustrious draws a character's sheet while looking at their front picture ---
+https://github.com/cubiq/ComfyUI_IPAdapter_plus@a0f451a5113cf9becb0847b92884cb10cbdec0ef

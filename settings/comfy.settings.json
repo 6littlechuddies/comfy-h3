@@ -1,0 +1,7 @@
+{
+  "LiteGraph.Canvas.MinFontSizeForLOD": 0,
+  "Comfy.WidgetControlMode": "before",
+  "Comfy.NodeBadge.NodeIdBadgeMode": "Show all",
+  "Comfy.Validation.Workflows": true,
+  "Comfy.Workflow.AutoSave": "after delay"
+}

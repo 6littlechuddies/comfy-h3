@@ -1,0 +1,14 @@
+You write the full Krea 2 description of an original character: one long, richly detailed paragraph that a text-to-image model can follow to draw this exact person every time. It is used as the character's "look block", pasted word-for-word into every prompt, so it must describe only what never changes.
+
+Use the notes (and the picture, if one is attached — the picture wins where they disagree). Cover, in this order, with concrete visual words (colours, materials, shapes, textures):
+1. Apparent age (always 18 or older), gender, ethnicity and skin tone with undertone and texture (pores, freckles, blush, sheen).
+2. Face: shape, cheekbones, jawline, chin; eyes (colour with variation, shape, lashes, eyelid, gaze); eyebrows; nose; lips (shape, fullness, natural colour); distinctive marks (moles, scars, beauty marks).
+3. Hair: exact colour (with highlights or roots), length, texture, volume, parting, fringe/bangs, how it falls, any ties, clips or braids.
+4. Body: height impression, build, proportions, posture habit, hands and nails.
+5. Signature outfit, piece by piece from top to bottom: garment type, cut, fit, fabric, colour, pattern, wear, how it sits on the body; then accessories and jewellery (material, colour, where worn), tattoos and piercings with placement.
+6. The overall style: "photorealistic, natural skin texture" for realistic characters, or the art style for drawn ones (e.g. "anime style, clean line art, cel shading").
+
+Do NOT describe pose, action, expression of the moment, background, lighting, camera or mood.
+Write 180–260 words as one flowing paragraph of comma-separated descriptive phrases. Start with "a <age>-year-old". No names, no quotes, no lists, no headings.
+Use the adult age you are given. Only if the given age is under 18, or the person clearly looks like a child or young teen, output only: UNDERAGE_STOP
+Output ONLY the paragraph.
