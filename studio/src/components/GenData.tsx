@@ -210,7 +210,7 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
             const m = await genMedia(gen);
             const [{ useNewFromPicture }, { useCharacters }, { useSettings }] = await Promise.all([import("../tabs/Characters"), import("../lib/characters"), import("../lib/settings")]);
             useCharacters.getState().select(null);
-            useNewFromPicture.setState({ pic: m });
+            useNewFromPicture.setState({ pic: m, gen });
             useSettings.getState().setTab("characters");
             toast("On the right: name them and press Read the picture — they get their own project.", "good");
             onDone("characters");
@@ -379,7 +379,7 @@ function PickFor({ gen, busy, setBusy, onDone }: { gen: CivitGen; busy: string |
       } else {
         const [{ useNewFromPicture }] = await Promise.all([import("../tabs/Characters")]);
         useCharacters.getState().select(null);
-        useNewFromPicture.setState({ pic: m });
+        useNewFromPicture.setState({ pic: m, gen });
         toast("On the right: name them and press Read the picture.", "good");
       }
       usePickPurpose.setState({ p: null });

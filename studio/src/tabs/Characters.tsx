@@ -21,6 +21,8 @@ import { CheckpointPicker } from "../components/Checkpoint";
 import { openSiteLink } from "../components/SiteLink";
 import { openViewer } from "../components/Viewer";
 import { pickFromCivitai } from "../components/ImageImport";
+import { ensureLoras, GEN_OF, lorasFor } from "../lib/civitUse";
+import type { CivitGen } from "../lib/api";
 import { DRAG_TYPE, useTray, type Media } from "../lib/tray";
 import { Btn, Check, Help, Icon, JobBar, Label, LoraList, Seg, Slider, Slot, TextArea, TextIn, cx } from "../components/ui";
 
@@ -357,12 +359,14 @@ function SheetMaker({ c, back }: { c: Character; back: () => void }) {
 
 // ------------------------------------------------------------------ new character from a picture
 /** a picture sent here from anywhere (a CivitAI post, a result): "New character from this picture" */
-export const useNewFromPicture = create<{ pic: Media | null }>(() => ({ pic: null }));
+export const useNewFromPicture = create<{ pic: Media | null; gen?: CivitGen | null }>(() => ({ pic: null }));
 
 function FromPicture() {
   const handed = useNewFromPicture((s) => s.pic);
   const [pic, setPic] = useState<Media | null>(null);
-  useEffect(() => { if (handed) { setPic(handed); useNewFromPicture.setState({ pic: null }); } }, [handed]);
+  // the picture's generation data (a CivitAI post or one of your results): its LoRAs come along to the new character
+  const [gen, setGen] = useState<CivitGen | null>(null);
+  useEffect(() => { if (handed) { setPic(handed); setGen(useNewFromPicture.getState().gen ?? GEN_OF.get(handed.name) ?? null); useNewFromPicture.setState({ pic: null, gen: null }); } }, [handed]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [needAge, setNeedAge] = useState<Partial<Character> | null>(null);
@@ -373,11 +377,22 @@ function FromPicture() {
 
   const create = async (p: Partial<Character>) => {
     const c = newCharacter({ ...p, name: name.trim() || (p.name && p.name !== "Unnamed" ? p.name : "New character") });
+    // the LoRAs the picture was made with (the ones that fit this character's model), downloaded if needed
+    let loraNote = "";
+    if (gen) {
+      const fam = c.style === "realistic" ? "krea2" : familyOfModel(charModel(c));
+      const want = lorasFor(gen, fam);
+      if (want.length) {
+        const { picks, failed } = await ensureLoras(want, (m) => toast(m, "info", "characters")).catch(() => ({ picks: [], failed: want.map((r) => r.name) }));
+        if (picks.length) { c.loras = picks; loraNote = ` With the picture's LoRA${picks.length > 1 ? "s" : ""}: ${picks.map((l) => l.name.replace(/\.safetensors$/, "")).join(", ")}.`; }
+        if (failed.length) loraNote += ` Couldn't add: ${failed.join("; ").slice(0, 160)}.`;
+      }
+    }
     useCharacters.getState().save(c);
     await useCharacters.getState().setView(c.id, "front", { filename: pic!.name, subfolder: "", type: "input" }, { yours: true });
     useCharacters.getState().select(c.id);
-    toast(isAdult(c) ? `${c.name} is in, with your picture as their look. Next: Open sheet maker → Make full sheet.` : `${c.name} is in. Their age couldn't be read from the picture — type it in Looks → Age (18 or older) to start using them.`, isAdult(c) ? "good" : "info", "characters");
-    setPic(null); setName(""); setNeedAge(null); setAge("");
+    toast(isAdult(c) ? `${c.name} is in, with your picture as their look.${loraNote} Next: Open sheet maker → Make full sheet.` : `${c.name} is in. Their age couldn't be read from the picture — type it in Looks → Age (18 or older) to start using them.`, isAdult(c) ? "good" : "info", "characters");
+    setPic(null); setGen(null); setName(""); setNeedAge(null); setAge("");
   };
   const read = async () => {
     if (!pic) return;

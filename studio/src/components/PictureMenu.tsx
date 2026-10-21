@@ -164,9 +164,9 @@ export function PictureMenuHost() {
       key: "newc", icon: "user", label: "New character from this picture", hide: isVideo, run: async () => {
         // its own project: the picture becomes their look, so it doesn't mix into the character you're on
         const m = await toMedia(t);
-        const [{ useNewFromPicture }] = await Promise.all([import("../tabs/Characters")]);
+        const [{ useNewFromPicture }, gen] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null)]);
         useCharacters.getState().select(null);
-        useNewFromPicture.setState({ pic: m });
+        useNewFromPicture.setState({ pic: m, gen });
         useSettings.getState().setTab("characters");
         await closeWindows();
         return "On the right: name them and press Read the picture — they get their own project";
