@@ -8,6 +8,7 @@ import { viewUrl, type FileRef } from "../lib/api";
 import { describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo, type SiteSet, type View } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { runWriter } from "../lib/writer";
+import { hasAge, stripAges } from "../lib/siteAuto";
 import { Btn, Icon, TextArea, TextIn, cx } from "./ui";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/copy";
@@ -225,6 +226,14 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   const toast = useJobs((s) => s.toast);
   const site: SiteInfo = c.site ?? {};
   const up = (p: Partial<SiteInfo>) => save({ ...c, site: { ...site, ...p } });
+  // an age in the profile (the site refuses it — it sets the age itself): taken out by itself, wherever it came from
+  useEffect(() => {
+    const keys = ["bio", "persona", "greeting", "backstory", "personality"] as const;
+    const bad = keys.filter((k) => hasAge(site[k]));
+    if (!bad.length) return;
+    up(Object.fromEntries(bad.map((k) => [k, stripAges(site[k]!)])) as Partial<SiteInfo>);
+    toast(`Took the stated age out of the ${bad.join(" and ")} — the site sets the age itself`, "info");
+  }, [c.id, site.bio, site.persona, site.greeting, site.backstory, site.personality]); // eslint-disable-line react-hooks/exhaustive-deps
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && c.views[v.id]);

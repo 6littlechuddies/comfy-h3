@@ -11,9 +11,43 @@ const keyOf = (f: FileRef) => `${f.type}/${f.subfolder}/${f.filename}`;
 const isPic = (name: string) => /\.(png|jpe?g|webp)$/i.test(name);
 const isVid = (name: string) => /\.(mp4|webm|mov)$/i.test(name);
 
-/** every picture of this character: what's in their site folders + every result made as them (Batch, Create, face pass) */
-export function charPictures(c: Character): { file: FileRef; label?: string }[] {
+/** ages written into a profile ("25-year-old", "aged 25", "25 y/o"): the site sets the age itself and refuses text with one */
+export const hasAge = (t?: string) => !!t && /\b\d{2}\s*-?\s*(year|yr)s?[- ]?old\b|\baged? \d{2}\b|\b\d{2} ?y\/?o\b/i.test(t);
+export function stripAges(t: string): string {
+  return t
+    .replace(/\b(is|she's|he's|was|being)\s+\d{2}\s*(?:years?|yrs?)[- ]?old\b/gi, (_m, v: string) => `${v} an adult`)
+    .replace(/\b(an?)\s+\d{2}\s*-?\s*(?:years?|yrs?)[- ]?old\b\s*/gi, (_m, art: string) => (art[0] === "A" ? "A " : "a "))
+    .replace(/\b\d{2}\s*-?\s*(?:years?|yrs?)[- ]?old\b/gi, "adult")
+    .replace(/\s*,?\s*\baged?\s+\d{2}\b/gi, "")
+    .replace(/\s*,?\s*\b\d{2}\s?y\/?o\b/gi, "")
+    .replace(/\b([Aa]) ([aeiouAEIOU])/g, (_m, a: string, v: string) => (a === "A" ? "An " : "an ") + v)
+    .replace(/ {2,}/g, " ").replace(/ ([,.!?])/g, "$1").replace(/,,/g, ",").trim();
+}
+
+/** every picture of this character: what's in their site folders, every result made as them in this browser (Batch, Create,
+ *  Edit, face pass), and every file on the rental in their project folder or noted as theirs — also from earlier rentals */
+export async function charPictures(c: Character): Promise<{ file: FileRef; label?: string }[]> {
   const out = new Map<string, { file: FileRef; label?: string }>();
+  // the rental's own list of results: their project folder (Create, Edit, Batch… made while they were picked) + files noted as theirs
+  type Item = { filename: string; subfolder: string; type: string; tab?: string; folder?: string; meta?: { character?: string; project?: string; label?: string } };
+  const page = async (q: string) => {
+    const all: Item[] = [];
+    for (let off = 0; off < 3000; off += 500) {
+      const r = await fetch(`/studio-api/catalog?${q}&limit=500&offset=${off}`).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { items?: Item[]; total?: number } | null;
+      if (!r?.items?.length) break;
+      all.push(...r.items);
+      if (all.length >= (r.total ?? 0)) break;
+    }
+    return all;
+  };
+  const name = (c.name || "").trim();
+  const found = [...(name ? await page(`folder=${encodeURIComponent(name)}`) : []), ...(name ? await page(`q=${encodeURIComponent(name.toLowerCase())}`) : [])];
+  for (const it of found) {
+    if (it.tab === "characters" || /(^|\/)(_work|face|refs)(\/|$)/.test(it.subfolder) && it.tab !== "create" && it.tab !== "edit" && it.tab !== "batch") continue; // sheet views and helper files aren't content
+    const theirs = it.folder === name || it.meta?.project === c.id || (it.meta?.character ?? "") === name || (it.meta?.label ?? "").includes(` · ${name}`) || (it.meta?.label ?? "").startsWith(`${name} `);
+    if (!theirs || !(isPic(it.filename) || isVid(it.filename))) continue;
+    out.set(keyOf(it as FileRef), { file: { filename: it.filename, subfolder: it.subfolder, type: "output" }, label: it.meta?.label });
+  }
   for (const s of c.site?.sets ?? []) for (const it of s.items) out.set(keyOf(it), { file: { filename: it.filename, subfolder: it.subfolder, type: it.type } });
   for (const j of useJobs.getState().jobs) {
     const m = (j.meta ?? {}) as Record<string, unknown>;
@@ -55,26 +89,28 @@ const FIELDS = ["bio", "greeting", "backstory", "personality", "persona"] as con
 /** fill the profile from their look + their pictures' prompts + set titles; what you already wrote stays unless `all` */
 export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void } = {}) {
   o.onStep?.("Reading their pictures…");
-  const pics = charPictures(c).slice(-60);
+  const pics = (await charPictures(c)).slice(-60);
   const prompts = (await pool(pics, 6, (p) => promptOf(p.file, false))).filter(Boolean);
   const seen = new Set<string>();
   const uniq = prompts.map((p) => p.slice(0, 260)).filter((p) => { const k = p.slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
   const site = c.site ?? {};
   const filled = o.all ? [] : FIELDS.filter((k) => (site[k] ?? "").trim());
   const notes = [
-    describe(c), c.block && `Full look: ${c.block}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
-    uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${p}`).join("\n")}`,
+    stripAges(describe(c)), c.block && `Full look: ${stripAges(c.block)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     filled.length && `ALREADY FILLED (keep exactly):\n${filled.map((k) => `${k}: ${site[k]}`).join("\n")}${!o.all && site.tags?.length ? `\ntags: ${site.tags.join(", ")}` : ""}`,
   ].filter(Boolean).join("\n\n");
   o.onStep?.("Writing the profile…");
-  const raw = await runWriter("site", { character: `${c.name}, ${c.age}, ${c.gender}`, notes }, { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id } });
+  const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes }, { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id } });
   const d = json(raw) as Record<string, unknown>;
   const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string).trim() : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
   const s0 = cur.site ?? {};
   const next = { ...s0 };
   for (const k of FIELDS) if (o.all || !(s0[k] ?? "").trim()) next[k] = str(k) || s0[k];
+  // the site refuses any stated age (it sets the age itself): taken out of everything, whoever wrote it
+  for (const k of FIELDS) if (next[k]) next[k] = stripAges(next[k]!);
   if (o.all || !s0.tags?.length) next.tags = Array.isArray(d.tags) ? (d.tags as unknown[]).map(String).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10) : s0.tags;
   useCharacters.getState().save({ ...cur, site: next });
   return { pictures: uniq.length, filled: FIELDS.filter((k) => next[k] !== s0[k]).length };
@@ -87,8 +123,8 @@ const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 
 /** group every picture of theirs into themed sets: sfw → a free set, suggestive / explicit → the premium set of that theme */
 export async function sortIntoSets(c: Character, o: { look?: boolean; onStep?: (t: string) => void } = {}): Promise<{ pictures: number; sets: number; skipped: number }> {
-  const pics = charPictures(c);
-  if (!pics.length) throw new Error(`No pictures of ${c.name} yet — make some (Batch → Content plan), or add them to a folder`);
+  const pics = await charPictures(c);
+  if (!pics.length) throw new Error(`No pictures of ${c.name} found — pictures count when they were made with ${c.name} picked (Create, Edit, Batch) or are in their project folder`);
   let n = 0;
   const prompts = await pool(pics, 6, async (p) => { const t = await promptOf(p.file, o.look ?? true); o.onStep?.(`Reading pictures… ${++n}/${pics.length}`); return t; });
   const known = pics.map((p, i) => ({ ...p, prompt: prompts[i] })).filter((p) => p.prompt);
