@@ -1,3 +1,4 @@
+import { writerOutside } from "../lib/outside";
 // Dense prompts, broken into labelled pieces you can click, remove, weight, or change in plain words.
 // And: right-click any highlighted text in a prompt box → "Change this part…".
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -137,6 +138,12 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
     e.preventDefault();
     setState({ x: e.clientX, y: e.clientY, start: el.selectionStart, end: el.selectionEnd });
   };
+  /** the "Change it" button: the same box, for the whole prompt (no highlighting needed) */
+  const openWhole = (e: React.MouseEvent) => {
+    if (!tab || !value.trim()) return;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setState({ x: r.left, y: r.bottom, start: 0, end: value.length });
+  };
   const apply = async () => {
     if (!state || !tab || !note.trim()) return;
     // the menu can be closed while the writer works (it may wait behind a picture on the GPU); the change still lands
@@ -155,19 +162,19 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
       setState(null); setNote("");
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
   };
-  const why = rewriteWhy();
+  const why = writerOutside() ? undefined : rewriteWhy(); // Grok doesn't need the local writer downloaded
   const menu = state && createPortal(
     // while it's rewriting, the rest of the Studio stays usable: clicks go through, and a click outside just hides this box
     <div className={cx("fade-in fixed inset-0 z-[94]", busy && "pointer-events-none")} onMouseDown={() => setState(null)}>
       <div className="pointer-events-auto absolute w-[380px] border border-line bg-raised2 p-2.5 shadow-2xl" style={{ left: Math.min(state.x, window.innerWidth - 392), top: Math.min(state.y + 6, window.innerHeight - 150) }} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="micro mb-1 text-hot">CHANGE THIS PART</div>
+        <div className="micro mb-1 text-hot">{state.start === 0 && state.end >= value.length ? "CHANGE THE PROMPT" : "CHANGE THIS PART"}</div>
         <p className="mb-2 line-clamp-2 bg-hot/10 px-1.5 py-1 font-mono text-[11.5px] text-ink/90">“{value.slice(state.start, state.end)}”</p>
         <div className="flex gap-1.5">
           <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } if (e.key === "Escape") setState(null); }}
-            placeholder="How? e.g. make it a red silk dress" aria-label="How to change this part" className="inset h-8 min-w-0 flex-1 border border-line px-2 text-[12.5px] focus:border-accent focus:outline-none" />
+            placeholder={state.start === 0 && state.end >= value.length ? "What to change? e.g. make her sit on the bed, hands on her knees" : "How? e.g. make it a red silk dress"} aria-label="How to change this part" className="inset h-8 min-w-0 flex-1 border border-line px-2 text-[12.5px] focus:border-accent focus:outline-none" />
           <span title={why}><button onClick={apply} disabled={!note.trim() || busy || !!why} className="press chamfer-sm btn-hot h-8 px-3 text-[12.5px] font-bold disabled:opacity-40">{busy ? "…" : "Change"}</button></span>
         </div>
-        <p className="mt-1.5 text-[11px] text-dim">{busy ? "Rewriting… you can keep working — the change lands in the box when it's done." : "The local writer rewrites only the highlighted part, in the same style."}</p>
+        <p className="mt-1.5 text-[11px] text-dim">{busy ? "Rewriting… you can keep working — the change lands in the box when it's done." : `${writerOutside() ? "Grok" : "The local writer"} changes only what you ask${state.start === 0 && state.end >= value.length ? "" : " in the highlighted part"} — the rest stays word for word.`}</p>
       </div>
     </div>, document.body);
   const shown = changed && createPortal(
@@ -179,7 +186,7 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
         <button aria-label="Close" className="text-muted hover:text-ink" onClick={() => setChanged(null)}>×</button></div>
       <p className="max-h-40 overflow-y-auto font-mono text-[11.5px] leading-relaxed text-ink/90"><WordDiff before={changed.part} after={changed.out} /></p>
     </div>, document.body);
-  return { onContextMenu, menu: <>{menu}{shown}</> };
+  return { onContextMenu, openWhole, menu: <>{menu}{shown}</> };
 }
 
 export type { PieceCat };

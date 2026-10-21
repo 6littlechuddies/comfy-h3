@@ -280,11 +280,15 @@ export async function makeWithRefs(o: { c: Character | null; anime: boolean; pro
   if (pic1 && !pic2 && !pic1Own && o.c && !remixing && !o.anime) {
     const c = o.c;
     const shape = useSettings.getState().s.create.shape;
-    const shot = o.asTyped || !words ? (words || "A natural candid photo of them.") : await polishKrea(words, c, shape);
-    const { ref, view, instruction, loras, canvas } = await characterShot(c, `${words} ${shot}`, shot, shape, o.loras ?? [], o.balance !== false ? lib : null);
-    useMakeRefs.setState({ lastSent: { instruction, changes: shot, balanced: [], loras: loras.filter((l) => !l.off).map((l) => `${l.name.split("/").pop()!.replace(/\.safetensors$/, "")} ${l.strength.toFixed(2)}`),
-      pictures: [`${c.name} — ${VIEW_LABEL[view] ?? view}`] } });
+    // several takes: the writer gives each its own pose, angle and expression (the same prompt ×4 made near-copies)
+    const takeNote = (i: number) => o.count > 1 ? `\n(Take ${i + 1} of ${o.count}: keep the person, outfit and idea, but give this take its own pose, camera angle and expression, different from the other takes.)` : "";
+    const shots = o.asTyped || !words ? Array(o.count).fill(words || "A natural candid photo of them.") as string[]
+      : await Promise.all(Array.from({ length: o.count }, (_, i) => polishKrea(words + takeNote(i), c, shape)));
     for (let i = 0; i < o.count; i++) {
+      const shot = shots[i];
+      const { ref, view, instruction, loras, canvas } = await characterShot(c, `${words} ${shot}`, shot, shape, o.loras ?? [], o.balance !== false ? lib : null);
+      useMakeRefs.setState({ lastSent: { instruction, changes: shot, balanced: [], loras: loras.filter((l) => !l.off).map((l) => `${l.name.split("/").pop()!.replace(/\.safetensors$/, "")} ${l.strength.toFixed(2)}`),
+        pictures: [`${c.name} — ${VIEW_LABEL[view] ?? view}`] } });
       const graph = buildEdit({ ...editArgs(e, "krea"), loras, enhance: false, seed: newSeed(), images: [ref.name], blank: canvas, instruction, negative: "", resolution: 1024, refBoost: 4, prefix: "studio/create/refs" });
       await run("create", label(i), graph, `edit:krea:1:raw`, { stack, ...(o.snapshot ? { snapshot: o.snapshot } : {}), ...(o.faceFix ? { faceFix: o.faceFix } : {}), sent: sentOf(instruction, loras, c, words) });
     }

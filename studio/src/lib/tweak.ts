@@ -1,4 +1,4 @@
-import { askOutside, writerOutside } from "./outside";
+import { askOutside, grokSees, writerOutside } from "./outside";
 import { writerFast } from "./models";
 // "Change this part": the local writer rewrites one highlighted piece of a prompt from a plain-words note.
 // Also: split dense prompts into labelled pieces (subject, outfit, pose, setting, lighting, camera, style…).
@@ -28,7 +28,8 @@ export async function rewritePart(tab: Tab, prompt: string, part: string, change
     // "Grok tab · copy & paste": Grok can't see the pictures, but the references' written looks go along
     const c0 = await rewriteContext(tab, `${part} ${change}`);
     const inp = fillTemplate(pack.template || usePacks.getState().templates.tweak, { prompt, part, change: c0.text ? `${change}\n\n${c0.text}` : change });
-    const ans = await askOutside("Rewriting part of the prompt", await packText(pack.id), inp);
+    // the connected Grok tab also gets the reference pictures ("change the pose to match picture 2")
+    const ans = await askOutside("Rewriting part of the prompt", await packText(pack.id), inp, grokSees() && c0.images.length ? c0.images : undefined);
     if (ans !== null) return ans;
     if (why) throw new Error(why);
   }

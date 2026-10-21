@@ -130,6 +130,8 @@ export function PromptBar({ value, onChange, placeholder, chips, action, minRows
           className={cx("press inline-flex h-8 items-center rounded-sm px-2 text-[12px]", big ? "text-accent" : "text-muted hover:text-ink")}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>{big ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}</svg></button>
         {rewrite && <PromptHistoryButton tab={rewrite} value={value} onChange={onChange} />}
+        {rewrite && value.trim() && <button type="button" onClick={rw.openWhole} title="Say what to change in this prompt — only that changes, the rest stays word for word (or highlight a part and right-click it)"
+          className="press inline-flex h-8 items-center gap-1 rounded-sm px-2 text-[12px] text-muted hover:text-ink"><Icon name="brush" size={13} />Change it</button>}
         {pose && <PosePicker value={value} onChange={onChange} mode={pose} />}
         {at.enabled && <MentionButton onClick={at.start} />}
         <button type="button" onClick={() => txt.current?.click()} title="Load a .txt file into this box (replaces what's there) — or drag the file onto the box"

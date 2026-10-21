@@ -171,7 +171,7 @@ export default function CreateTab() {
   const why = usingRefs ? (!refDl.ready ? refDl.why : busy ? "Sending…" : undefined)
     : !dl.ready ? dl.why : (!positive.trim() ? "Describe something first" : busy ? "Sending…" : undefined);
   const etaKey = `create:${m.model}:${c.shape}:${c.count}${up > 1.01 ? `:x${up}` : ""}`;
-  const queue = async (over: { loras?: LoraPick[]; seed?: number; count?: number; label?: string; sweep?: { name: string; strength: number } } = {}) => {
+  const queue = async (over: { loras?: LoraPick[]; seed?: number; count?: number; label?: string; sweep?: { name: string; strength: number }; take?: { i: number; n: number } } = {}) => {
     const seed = over.seed ?? seedFor(adv, setAdv);
     const count = over.count ?? c.count;
     // LoRAs fitted into what the model holds (character leads, sliders apart) unless you switched that off
@@ -183,8 +183,13 @@ export default function CreateTab() {
     }
     // Remix with words added after the old prompt: the writer works them in (replacing what they contradict)
     const base = useMakeRefs.getState().remixBase;
-    const words = writerOn && base && c.extra.trim().startsWith(base.trim()) && c.extra.trim() !== base.trim()
+    const merged = writerOn && base && c.extra.trim().startsWith(base.trim()) && c.extra.trim() !== base.trim()
       ? await mergeRemix(c.extra, base).catch((e) => { toast(`Added your words as typed: ${(e as Error).message}`, "info"); return c.extra; }) : c.extra;
+    // one of several takes (×2, ×4…): the writer makes each one its own picture — same person and idea, another pose,
+    // angle and expression — instead of four near-copies (Krea 2 Turbo hardly changes with the seed alone)
+    const words = over.take && writerOn && !c.raw && looksPlain(merged)
+      ? `${merged}\n(Take ${over.take.i + 1} of ${over.take.n}: keep the person, outfit and idea, but give this take its own pose, camera angle and expression, different from the other takes.)`
+      : merged;
     // anime + plain words: the local writer turns them into tags first (see them under the prompt box)
     const extra = anime && writerOn && !c.raw && looksPlain(words) ? await toTags(words, person ? ch : null).catch((e) => { if (/under 18/i.test((e as Error).message)) throw e; toast(`Sent your words as typed: ${(e as Error).message}`, "info"); return words; }) : words;
     // realistic + plain words: the local writer turns them into a precise Krea 2 prompt (see it under the prompt box)
@@ -222,6 +227,11 @@ export default function CreateTab() {
           ...(c.faceFix && person ? { faceFix: { character: ch?.id ?? null, strength: c.faceStrength ?? 0.45 } } : {}),
           label: remixing ? `Remix${ch && person && r.pic1 ? ` · ${ch.name}` : ""}` : `${ch && person ? ch.name : "Picture"} · ${r.pic1 && r.pic2 ? TAKES.find((t) => t.value === r.take)!.label.toLowerCase() : "from a picture"}`,
         });
+      } else if (c.count > 1) {
+        // several takes = separate pictures, each with its own seed (and its own prompt when the writer is on)
+        const n = c.count, base = seedFor(adv, setAdv);
+        const title = `${anime ? "Anime" : "Realistic"} ${c.make === "background" ? "background" : c.make === "scene" ? "scene" : "character"}`;
+        await Promise.all(Array.from({ length: n }, (_, i) => queue({ count: 1, seed: adv.lockSeed ? base + i : newSeed(), take: { i, n }, label: `${title} ${i + 1}/${n}` })));
       } else await queue();
     } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); }
   };
