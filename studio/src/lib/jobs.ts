@@ -110,6 +110,8 @@ export const useJobs = create<JobState>((set, get) => ({
       jobs: s.jobs.map((j) => ({ ...j, outputs: j.outputs.filter((o) => !gone.has(`${j.id}|${o.subfolder}|${o.filename}`)) }))
         .filter((j) => j.status !== "done" || j.outputs.length > 0 || Object.keys(j.texts).length > 0),
     }));
+    // out of the tray too (it kept showing deleted pictures)
+    import("./tray").then(({ useTray }) => useTray.setState((t) => ({ items: t.items.filter((i) => !(i.src.type === "output" && items.some((x) => x.filename === i.src.filename && x.subfolder === i.src.subfolder))) }))).catch(() => {});
     for (const x of items) fetch("/studio-api/output/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subfolder: x.subfolder, filename: x.filename }) }).catch(() => {});
   },
   cancel: (id) => {

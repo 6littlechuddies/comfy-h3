@@ -1,7 +1,7 @@
 // Your site: Characters › one character (profile + content folders) › one folder. Everything is sent as a draft through
 // the site's factory API; a person publishes it in the site's admin panel. Built for doing many at once: pick several
 // characters, let the writer fill their profiles, send them all.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl, type FileRef } from "../lib/api";
@@ -402,10 +402,32 @@ function Folder({ c, index }: { c: Character; index: number }) {
   const merged = useMemo(() => { const seen = new Set<string>(); return [...outs, ...disk].filter((o) => { const k = `${o.subfolder}/${o.filename}`; if (seen.has(k)) return false; seen.add(k); return true; }); }, [outs, disk]);
   const shown = merged.filter((o) => kind === "all" || o.kind === kind);
   const order = useMemo(() => new Map(s.items.map((x, i) => [`${x.subfolder}/${x.filename}`, i])), [s.items]);
-  const toggle = (o: FileRef) => {
+  /** add (want = true) or take out one picture — from the latest saved folder, so a fast drag never loses one */
+  const setOne = (o: FileRef, want: boolean) => {
+    const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+    const all = cur.site?.sets ?? [];
+    const items = all[index]?.items ?? [];
     const k = `${o.subfolder}/${o.filename}`;
-    put({ items: order.has(k) ? s.items.filter((x) => `${x.subfolder}/${x.filename}` !== k) : [...s.items, { filename: o.filename, subfolder: o.subfolder, type: o.type }] });
+    const has = items.some((x) => `${x.subfolder}/${x.filename}` === k);
+    if (has === want) return;
+    const next = want ? [...items, { filename: o.filename, subfolder: o.subfolder, type: o.type }] : items.filter((x) => `${x.subfolder}/${x.filename}` !== k);
+    save({ ...cur, site: { ...cur.site, sets: all.map((x, j) => (j === index ? { ...x, items: next } : x)) } });
   };
+  // drag across pictures to add (or, starting on a picked one, take out) many at once; Shift+click picks a whole run
+  const drag = useRef<{ want: boolean } | null>(null);
+  const last = useRef<number | null>(null);
+  useEffect(() => { const up = () => { drag.current = null; }; window.addEventListener("mouseup", up); return () => window.removeEventListener("mouseup", up); }, []);
+  const down = (o: FileRef, i: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const want = !order.has(`${o.subfolder}/${o.filename}`);
+    if (e.shiftKey && last.current != null) {
+      const [a, b] = [Math.min(last.current, i), Math.max(last.current, i)];
+      shown.slice(a, b + 1).forEach((x) => setOne(x, true));
+    } else { setOne(o, want); drag.current = { want }; }
+    last.current = i;
+  };
+  const enter = (o: FileRef) => { if (drag.current) setOne(o, drag.current.want); };
   const siteDecides = !s.price;
   return (
     <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-6">
@@ -444,7 +466,7 @@ function Folder({ c, index }: { c: Character; index: number }) {
       </section>
       <section className="flex min-w-0 flex-col gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[13px] text-muted"><b className="text-ink">{s.items.length}</b> in this folder · click to add or remove — the number is the order on the site</span>
+          <span className="text-[13px] text-muted"><b className="text-ink">{s.items.length}</b> in this folder · click, or drag across several, to add or remove — the number is the order on the site</span>
           <div className="ml-auto flex gap-1">
             <button onClick={() => setEvery((v) => !v)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", every && "on")} title="Also pick from results made outside this character's project">{every ? "All my results" : `${c.name}'s project`}</button>
             <span className="mx-1 w-px bg-line" />
@@ -453,12 +475,12 @@ function Folder({ c, index }: { c: Character; index: number }) {
             {(["s", "m", "l"] as const).map((k) => <button key={k} onClick={() => pickSize(k)} title={k === "s" ? "Small" : k === "m" ? "Medium" : "Large"} className={cx("press tag-btn !h-7 !w-7 !px-0 !text-[12px] uppercase", size === k && "on")}>{k}</button>)}</div>
         </div>
         <div className={cx("grid gap-2", size === "s" ? "grid-cols-4 md:grid-cols-6 xl:grid-cols-8" : size === "m" ? "grid-cols-3 md:grid-cols-4 xl:grid-cols-5" : "grid-cols-2 md:grid-cols-3")}>
-          {shown.slice(0, 600).map((o) => {
+          {shown.slice(0, 600).map((o, i) => {
             const k = `${o.subfolder}/${o.filename}`;
             const n = order.get(k);
             return (
-              <div key={k} className={cx("group relative aspect-[3/4] overflow-hidden border-2 bg-black", n != null ? "border-accent" : "border-transparent")}>
-                <button onClick={() => toggle(o)} className={cx("press h-full w-full", n == null && "opacity-85 hover:opacity-100")} title="Click to add or remove">
+              <div key={k} className={cx("group relative aspect-[3/4] select-none overflow-hidden border-2 bg-black", n != null ? "border-accent" : "border-transparent")}>
+                <button onMouseDown={(e) => down(o, i, e)} onMouseEnter={() => enter(o)} onDragStart={(e) => e.preventDefault()} className={cx("press h-full w-full", n == null && "opacity-85 hover:opacity-100")} title="Click to add or remove · drag across several · Shift+click picks everything in between">
                   {/* the whole picture (not cropped), a little bigger on hover */}
                   {o.kind === "video" ? <video src={viewUrl(o)} muted loop onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />
                     : <img src={viewUrl(o)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />}

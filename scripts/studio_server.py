@@ -135,6 +135,22 @@ async def delete_output(req):
     p = safe_join(OUTPUT, sub, fn) if sub else safe_join(OUTPUT, fn)
     try: os.remove(p)
     except FileNotFoundError: pass
+    # gone for good: also out of the catalog notes and the cloud backup's results (a restore would bring it back otherwise)
+    key = f"{sub}/{fn}"
+    meta = _state_json("catalog_meta", {}) or {}
+    if isinstance(meta, dict) and meta.pop(key, None) is not None: _state_write("catalog_meta", meta)
+    _CAT["at"] = 0.0
+    studio_dir = os.path.join(OUTPUT, "studio")
+    if _proton_on() and os.path.abspath(p).startswith(os.path.abspath(studio_dir) + os.sep):
+        rel = os.path.relpath(p, studio_dir).replace(os.sep, "/")
+        folder_ = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        async def _cloud_delete():
+            try:
+                await _proton_setup()
+                await _rclone("deletefile", f"proton:{folder_}/results/{rel}", timeout=120)
+            except Exception as e:  # noqa: BLE001
+                print("!! deleting from the backup:", _redact(str(e))[:200], flush=True)
+        _spawn(_cloud_delete())
     return web.json_response({"ok": True})
 
 

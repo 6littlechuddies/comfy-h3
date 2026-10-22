@@ -100,8 +100,9 @@ const GROUPS: { id: string; label: string; members: Tab[]; names: Partial<Record
   { id: "scenes", label: "Scenes", members: ["scenes"], names: {} },
   { id: "create", label: "Create", members: ["create"], names: {} },
   { id: "edit", label: "Edit", members: ["edit"], names: {} },
-  { id: "animate", label: "Animate", members: ["animate", "prompt"], names: { animate: "Animate", prompt: "Plan a video (prompt writer)" } },
-  { id: "finish", label: "Finish", members: ["finish"], names: {} },
+  { id: "animate", label: "Animate", members: ["animate", "prompt", "finish"], names: { animate: "Animate", prompt: "Plan a video (prompt writer)", finish: "Finish (trim, loop, export)" } },
+  // 06 opens Your site (profiles, photo sets, send as drafts) — Finish lives under Animate now
+  { id: "site", label: "Your site", members: [], names: {} },
   { id: "batch", label: "Batch", members: ["batch"], names: {} },
 ];
 const groupOf = (t: Tab) => GROUPS.find((g) => g.members.includes(t)) ?? GROUPS[0];
@@ -349,8 +350,8 @@ function TabNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
     <nav aria-label="Steps" className="seg-track relative flex items-center gap-0.5 rounded-xl border border-line2 p-1">
       <span aria-hidden className="seg-on absolute top-1 bottom-1 rounded-lg transition-all duration-300 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ left: ind.left, width: ind.width }} />
       {GROUPS.map((g, i) => (
-        <button key={g.id} ref={(el) => { refs.current[g.id] = el; }} onClick={() => { if (cur === g.id) window.dispatchEvent(new CustomEvent("h3:tab-home", { detail: g.id })); setTab(LAST_IN_GROUP[g.id] ?? g.members[0]); }} aria-current={cur === g.id}
-          title={g.members.map((m) => TABS.find((t) => t.id === m)?.blurb).join(" · ")} className={cx("relative z-10 flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13.5px] font-medium transition-colors", cur === g.id ? "text-white" : "text-muted hover:text-ink")}>
+        <button key={g.id} ref={(el) => { refs.current[g.id] = el; }} onClick={() => { if (g.id === "site") { openSiteLink(); return; } if (cur === g.id) window.dispatchEvent(new CustomEvent("h3:tab-home", { detail: g.id })); setTab(LAST_IN_GROUP[g.id] ?? g.members[0]); }} aria-current={cur === g.id}
+          title={g.id === "site" ? "Your site: profiles, photo sets, send characters as drafts" : g.members.map((m) => TABS.find((t) => t.id === m)?.blurb).join(" · ")} className={cx("relative z-10 flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13.5px] font-medium transition-colors", cur === g.id ? "text-white" : "text-muted hover:text-ink")}>
           <span className={cx("micro", cur === g.id ? "text-accent" : "text-dim")}>{String(i + 1).padStart(2, "0")}</span>{g.label}</button>
       ))}
     </nav>
@@ -546,6 +547,11 @@ function TrayThumb({ item, open, setOpen, mx, onView }: { item: TrayItem; open: 
   const remove = useTray((s) => s.remove);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+  // a result whose file was deleted (here or on an earlier rental) leaves the tray by itself
+  useEffect(() => {
+    if (item.src.type !== "output" || item.input) return;
+    fetch(trayUrl(item), { method: "HEAD" }).then((r) => { if (r.status === 404) remove(item.id); }).catch(() => {});
+  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const act = (fn: () => void) => () => { fn(); setOpen(false); };
   const row = "rounded px-2.5 py-1.5 text-left hover:bg-hover";
   // dock magnification: grow with closeness to the cursor
