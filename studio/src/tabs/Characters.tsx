@@ -407,8 +407,8 @@ function FromPicture() {
           const p = j.status === "done" ? parseExtracted(j.texts.character ?? "") : null;
           if (!p) return toast(j.error ?? "Couldn't read the picture — fill the details in by hand.", "bad", "characters");
           if (p.age && p.age < 18) return toast("This picture may show someone under 18 — not imported.", "bad", "characters");
-          // no age readable from the picture: made anyway — set it in Looks (18+) before using them
-          create(p.age ? p : { ...p, age: 0 });
+          // no age readable from the picture: an adult by default (25) — change it in Looks if you like
+          create(p.age ? p : { ...p, age: 25 });
         });
       });
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }

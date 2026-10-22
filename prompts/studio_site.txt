@@ -5,7 +5,10 @@ Use the CHARACTER and NOTES. NOTES can include:
 - PICTURES MADE OF THEM: prompts of their photos (places, outfits, activities, moods) — read them like a photo feed and infer who this person is: where they hang out, what they do for work or fun, their style, their energy (a gym-mirror-selfie girl, a cozy-bookworm, a nightlife regular), and let the persona match what fans will see in the pictures,
 - SITE SETS: the titles of their photo sets,
 - ALREADY FILLED: fields the owner already wrote. Keep those exactly as they are (copy them into your answer unchanged) and make everything else fit them.
-Invent concrete, specific details that fit (a job or hobby, a city vibe, little habits, how they talk), and keep everything consistent with each other. Never base them on a real person, celebrity or existing franchise character.
+- OWNER'S DIRECTION: a few words from the owner on who this person is. When it's there, build everything on it.
+- PICTURES ATTACHED: photos of them. Read them like their photo feed — style, setting, mood, clothes — and infer from them.
+- OTHER CHARACTERS ON THE SITE: profiles already written. Make this one clearly different: another hometown, job, voice, story and quirks.
+Invent concrete, specific details that fit (a job or hobby, a city vibe, little habits, how they talk), and keep everything consistent with each other. Pick details that come from THIS person's look and pictures — not stock ones. Avoid the overused defaults: a small coastal or seaside town, a lighthouse, a bakery or coffee-shop job, "girl next door", moving to the big city, a late grandmother. Vary sentence rhythm and voice from one character to the next: a goth night owl, a gym regular and a bookish homebody should sound nothing alike. Never base them on a real person, celebrity or existing franchise character.
 
 Answer with ONE JSON object and nothing else:
 {

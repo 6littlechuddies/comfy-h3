@@ -40,18 +40,26 @@ export async function charPictures(c: Character): Promise<{ file: FileRef; label
     }
     return all;
   };
-  const name = (c.name || "").trim();
-  const found = [...(name ? await page(`folder=${encodeURIComponent(name)}`) : []), ...(name ? await page(`q=${encodeURIComponent(name.toLowerCase())}`) : [])];
+  // every name they've had (their name follows their look until you name them) — and their id, which never changes
+  const folderName = (n: string) => n.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/^\.+/, "").trim().slice(0, 60);
+  const names = [...new Set([c.name, ...(c.names ?? [])].map((n) => (n || "").trim()).filter(Boolean))];
+  const folders = new Set(names.map(folderName));
+  const found: Item[] = [];
+  for (const f of folders) found.push(...await page(`folder=${encodeURIComponent(f)}`));
+  found.push(...await page(`q=${encodeURIComponent(c.id.toLowerCase())}`));
+  for (const n of names) found.push(...await page(`q=${encodeURIComponent(n.toLowerCase())}`));
   for (const it of found) {
     if (it.tab === "characters" || /(^|\/)(_work|face|refs)(\/|$)/.test(it.subfolder) && it.tab !== "create" && it.tab !== "edit" && it.tab !== "batch") continue; // sheet views and helper files aren't content
-    const theirs = it.folder === name || it.meta?.project === c.id || (it.meta?.character ?? "") === name || (it.meta?.label ?? "").includes(` · ${name}`) || (it.meta?.label ?? "").startsWith(`${name} `);
+    const lab = it.meta?.label ?? "";
+    const theirs = folders.has(it.folder ?? "") || it.meta?.project === c.id || names.includes((it.meta?.character ?? "").trim())
+      || names.some((n) => lab.includes(` · ${n}`) || lab.startsWith(`${n} `));
     if (!theirs || !(isPic(it.filename) || isVid(it.filename))) continue;
     out.set(keyOf(it as FileRef), { file: { filename: it.filename, subfolder: it.subfolder, type: "output" }, label: it.meta?.label });
   }
   for (const s of c.site?.sets ?? []) for (const it of s.items) out.set(keyOf(it), { file: { filename: it.filename, subfolder: it.subfolder, type: it.type } });
   for (const j of useJobs.getState().jobs) {
     const m = (j.meta ?? {}) as Record<string, unknown>;
-    const mine = m.charId === c.id || (m.toSet as { charId?: string } | undefined)?.charId === c.id || (m.faceFix as { character?: string } | undefined)?.character === c.id
+    const mine = m.charId === c.id || m.project === c.id || (m.toSet as { charId?: string } | undefined)?.charId === c.id || (m.faceFix as { character?: string } | undefined)?.character === c.id
       || (typeof j.label === "string" && c.name && j.label.includes(` · ${c.name}`));
     if (!mine || j.status !== "done") continue;
     // the face-passed copy replaces the raw one: only the job's final file
@@ -95,14 +103,31 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const uniq = prompts.map((p) => p.slice(0, 260)).filter((p) => { const k = p.slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
   const site = c.site ?? {};
   const filled = o.all ? [] : FIELDS.filter((k) => (site[k] ?? "").trim());
+  // the other characters' profiles: this one has to be clearly different (they kept coming out alike)
+  const others = useCharacters.getState().list.filter((x) => x.id !== c.id && (x.site?.bio || x.site?.backstory))
+    .slice(0, 12).map((x) => `- ${x.name}: ${stripAges(`${x.site?.bio ?? ""} ${(x.site?.backstory ?? "").split(/(?<=\.)\s/)[0] ?? ""}`).slice(0, 220)}`);
   const notes = [
-    stripAges(describe(c)), c.block && `Full look: ${stripAges(c.block)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
+    stripAges(describe(c)), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
+    others.length && `OTHER CHARACTERS ON THE SITE (make this one clearly different from them — another hometown, job, voice and story):\n${others.join("\n")}`,
     filled.length && `ALREADY FILLED (keep exactly):\n${filled.map((k) => `${k}: ${site[k]}`).join("\n")}${!o.all && site.tags?.length ? `\ntags: ${site.tags.join(", ")}` : ""}`,
   ].filter(Boolean).join("\n\n");
+  // a few of their pictures for the writer to look at (their front view, and some of their photos): when the connected
+  // Grok tab sees pictures, or with the local writer — text only when Grok writes but doesn't see pictures
+  const { grokSees, writerOutside } = await import("./outside");
+  let images: string[] | undefined;
+  if (!writerOutside() || grokSees()) {
+    o.onStep?.("Picking pictures to look at…");
+    const picks: FileRef[] = [c.views.front, c.views.face].filter(Boolean) as FileRef[];
+    const step = Math.max(1, Math.floor(pics.length / 3));
+    for (let i = 0; i < pics.length && picks.length < 5; i += step) if (isPic(pics[i].file.filename)) picks.push(pics[i].file);
+    images = (await Promise.all(picks.map((f) => toInput(f).then((x) => x.name).catch(() => "")))).filter(Boolean);
+  }
   o.onStep?.("Writing the profile…");
-  const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes }, { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id } });
+  const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: notes + (images?.length ? `\n\nPICTURES ATTACHED: ${images.length} photos of ${c.name} (the first is their reference look). Read them closely — style, setting, mood, clothes, the vibe of their photo feed — and let the profile match what fans will see.` : "") },
+    { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) });
   const d = json(raw) as Record<string, unknown>;
   const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string).trim() : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;

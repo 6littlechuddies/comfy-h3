@@ -27,6 +27,10 @@ export interface SiteSet { set_key: string; title: string; description: string; 
 export interface SiteInfo {
   bio?: string; greeting?: string; backstory?: string; personality?: string; persona?: string; voice?: string; tags?: string[];
   avatar?: View; cover?: View; send_reference?: boolean; sets?: SiteSet[];
+  /** any picture as their avatar / cover (from the tray or their results) — wins over the sheet view above */
+  avatarFile?: FileRef; coverFile?: FileRef;
+  /** your few words on who they are ("shy art student who games all night") — the profile writer builds on them */
+  direction?: string;
   /** when it was last sent, and what the site said */
   sent?: { at: number; ok: boolean; note: string; hash?: string };
 }
@@ -37,6 +41,8 @@ export interface TrainSet { trigger: string; items: TrainItem[]; minScore: numbe
 export interface Character {
   id: string;
   name: string;
+  /** every name they had before (their name follows their look until you name them): their pictures stay theirs */
+  names?: string[];
   age: number;
   gender: "female" | "male" | "other";
   style: "anime" | "realistic";
@@ -130,6 +136,8 @@ export const useCharacters = create<CharState>((set, get) => ({
     // until you name them: a name made from their look, which follows their look as you edit it
     const prev = get().list.find((x) => x.id === c.id);
     if (isDefaultName(c.name) || (prev && c.name === prev.name && prev.name === autoName(prev))) { const n = autoName(c); if (n) c = { ...c, name: n }; }
+    if (prev && prev.name && prev.name !== c.name) c = { ...c, names: [...new Set([...(prev.names ?? []), prev.name])].filter((n) => n !== c.name).slice(-20) };
+    if (!(Number(c.age) > 0)) c = { ...c, age: DEFAULT_AGE }; // no age yet: an adult by default (change it in Looks)
     const exists = get().list.some((x) => x.id === c.id);
     set((s) => ({ list: exists ? s.list.map((x) => (x.id === c.id ? { ...c, updatedAt: now } : x)) : [{ ...c, createdAt: now, updatedAt: now }, ...s.list] }));
     persist();
@@ -172,8 +180,12 @@ export const useCharacters = create<CharState>((set, get) => ({
   },
 }));
 
+/** the age a character gets when none was set or read: every character here is an adult */
+export const DEFAULT_AGE = 25;
+const withAge = (l: Character[]) => l.map((c) => (Number(c.age) > 0 ? c : { ...c, age: DEFAULT_AGE }));
+
 loadState<Character[]>("characters").then((l) => {
-  const list = Array.isArray(l) ? l : [];
+  const list = withAge(Array.isArray(l) ? l : []);
   let last = ""; try { last = localStorage.getItem("h3.character") ?? ""; } catch { /* private mode */ }
   useCharacters.setState({ list, loaded: true, sel: list.some((x) => x.id === last) ? last : null });
 });
@@ -197,7 +209,7 @@ export async function afterImport(d: ImportResult | undefined) {
   // results that came along show up in every tab's results right away
   import("./jobs").then((m) => m.syncJobs()).catch(() => {});
   const l = await loadState<Character[]>("characters");
-  useCharacters.setState({ list: Array.isArray(l) ? l : [], loaded: true });
+  useCharacters.setState({ list: withAge(Array.isArray(l) ? l : []), loaded: true });
   // scenes, presets, chats, prompt files or preferences came along: start fresh so every part of the Studio picks them up
   if (d?.extras && Object.keys(d.extras).some((k) => k !== "packs")) setTimeout(() => location.reload(), 2500);
 }

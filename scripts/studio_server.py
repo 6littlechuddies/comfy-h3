@@ -2530,7 +2530,7 @@ def _save_packs(d: dict):
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
             "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.8, "max_tokens": 1500} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {})), "template": TEMPLATES[stage],
-            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "site", "changes", "remix", "sort", "setplan")}
+            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan")}
 
 
 def _pack_text(p: dict) -> str:
@@ -3920,7 +3920,12 @@ async def _site_push(job: dict, d: dict):
         sets = [x for x in (site.get("sets") or []) if isinstance(x, dict) and x.get("items") and (not d.get("sets") or x.get("set_key") in d["sets"])]
         files = []  # (role, path)
         for role, v in (("avatar", site.get("avatar") or "face"), ("cover", site.get("cover") or "front")):
-            p = vpath(v) or vpath("front")
+            own = site.get(f"{role}File")  # any picture you picked (tray or their results) wins over a sheet view
+            p = None
+            if isinstance(own, dict) and own.get("filename"):
+                try: p = _file_of(own)
+                except web.HTTPException: p = None
+            p = p if p and os.path.isfile(p) else (vpath(v) or vpath("front"))
             if p and os.path.isfile(p): files.append((role, p))
         if site.get("send_reference", True):
             for v in ("front", "left", "right", "back", "threeq", "face", "smile", "angry", "surprised"):

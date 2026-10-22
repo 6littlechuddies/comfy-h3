@@ -9,7 +9,7 @@ import { describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo,
 import { useJobs } from "../lib/jobs";
 import { runWriter } from "../lib/writer";
 import { hasAge, stripAges } from "../lib/siteAuto";
-import { Btn, Icon, TextArea, TextIn, cx } from "./ui";
+import { Btn, Icon, Slot, TextArea, TextIn, cx } from "./ui";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/copy";
 
@@ -21,7 +21,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover]);
+const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -73,7 +73,9 @@ function Shell() {
   const [showCfg, setShowCfg] = useState(false);
   const loadCfg = () => fetch("/studio-api/site/config").then((r) => r.json()).then(setCfg).catch(() => {});
   useEffect(() => { loadCfg(); }, []);
-  useEffect(() => { if (cfg && !cfg.set) setShowCfg(true); }, [cfg]);
+  // connected = a key AND the site's address; either one missing opens the box where you add it
+  const ready = !!cfg?.set && !!cfg?.url;
+  useEffect(() => { if (cfg && (!cfg.set || !cfg.url)) setShowCfg(true); }, [cfg]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); if (folder != null) go(charId); else if (charId) go(null); else close(); } };
     window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true);
@@ -94,13 +96,13 @@ function Shell() {
               </span>
             ))}
           </nav>
-          <button onClick={() => setShowCfg((v) => !v)} className={cx("press ml-auto flex h-9 items-center gap-2 border px-3 text-[12.5px]", cfg?.set ? "border-line text-muted hover:text-ink" : "border-hot text-hot")}>
-            <span className={cx("h-2 w-2 rounded-full", cfg?.set ? "bg-good" : "bg-bad")} />{cfg?.set ? "Connected" : "Connect your site"}</button>
+          <button onClick={() => setShowCfg((v) => !v)} className={cx("press ml-auto flex h-9 items-center gap-2 border px-3 text-[12.5px]", ready ? "border-line text-muted hover:text-ink" : "border-hot text-hot")}>
+            <span className={cx("h-2 w-2 rounded-full", ready ? "bg-good" : "bg-bad")} />{ready ? "Connected" : cfg?.set ? "Add your site's address" : "Connect your site"}</button>
           <button aria-label="Close" onClick={close} className="press btn-raised flex h-10 w-10 shrink-0 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={16} /></button>
         </header>
         {showCfg && <Connection cfg={cfg} onSaved={loadCfg} />}
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {!c ? <Characters connected={!!cfg?.set} /> : folder != null && set ? <Folder c={c} index={folder} /> : <CharacterPage c={c} connected={!!cfg?.set} />}
+          {!c ? <Characters connected={ready} /> : folder != null && set ? <Folder c={c} index={folder} /> : <CharacterPage c={c} connected={ready} />}
         </div>
       </div>
     </div>
@@ -126,7 +128,7 @@ function Connection({ cfg, onSaved }: { cfg: Cfg | null; onSaved: () => void }) 
   };
   return (
     <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-3 border-b border-line bg-raised/40 px-5 py-3">
-      <TextIn label="API address" value={url} onChange={setUrl} placeholder="https://…/api/factory" />
+      <TextIn label={cfg?.url ? "API address" : "API address — needed: paste your site's factory address"} value={url} onChange={setUrl} placeholder="https://actions.your-site/api/factory" />
       {cfg?.source === "template" ? <p className="pb-2 text-[12.5px] text-muted">Key: from your Vast template (SITE_FACTORY_TOKEN)</p>
         : <TextIn label={cfg?.set ? "API key — saved (paste to replace)" : "API key"} value={key} onChange={setKey} placeholder="Paste your site key" />}
       <div className="flex gap-2 pb-0.5"><Btn onClick={save}>Save</Btn><Btn onClick={runTest} disabled={busy || !cfg?.set} why={!cfg?.set ? "Add the key first" : "Testing…"}>{busy ? "Testing…" : "Test"}</Btn></div>
@@ -236,6 +238,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   }, [c.id, site.bio, site.persona, site.greeting, site.backstory, site.personality]); // eslint-disable-line react-hooks/exhaustive-deps
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
+  const [picking, setPicking] = useState<"avatar" | "cover" | null>(null);
   const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && c.views[v.id]);
   const sets = site.sets ?? [];
   const write = async (all: boolean) => {
@@ -273,7 +276,8 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           <Btn className="ml-auto" onClick={() => write(false)} disabled={writing} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing ? "Writing…" : "Fill the blanks"}</Btn>
           {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing} title="Rewrite every field">Rewrite all</Btn>}
         </div>
-        <p className="text-[12px] leading-relaxed text-dim">The writer reads their look, the prompts of every picture made of them and their set titles, and infers who they are — bio, first message, backstory, traits, chat persona and tags. Fill the blanks keeps what you wrote. Uses the prompt writer you picked (27B, 9B or your Grok tab).</p>
+        <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
+        <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
@@ -282,18 +286,31 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <TextArea label="Chat persona · private, the site's chat model reads it" rows={6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />
         <span className="lbl mt-1">Profile pictures</span>
         <div className="grid grid-cols-2 gap-3">
-          {(["avatar", "cover"] as const).map((role) => (
-            <div key={role} className="flex flex-col gap-1.5">
-              <span className="text-[12px] text-muted">{role === "avatar" ? "Avatar" : "Cover"}</span>
-              <div className="flex flex-wrap gap-1">
-                {views.map((v) => {
-                  const on = (site[role] ?? (role === "avatar" ? (c.views.face ? "face" : "front") : "front")) === v.id;
-                  return <button key={v.id} onClick={() => up({ [role]: v.id as View })} title={v.label} className={cx("press h-14 w-10 overflow-hidden border", on ? "border-accent" : "border-line opacity-50 hover:opacity-90")}><img src={viewUrl(c.views[v.id]!)} alt={v.label} className="h-full w-full object-cover" /></button>;
-                })}
+          {(["avatar", "cover"] as const).map((role) => {
+            const fileKey = role === "avatar" ? "avatarFile" : "coverFile";
+            const own = site[fileKey];
+            const viewId = site[role] ?? (role === "avatar" ? (c.views.face ? "face" : "front") : "front");
+            const cur = own ?? c.views[viewId as View] ?? c.views.front;
+            return (
+              <div key={role} className="flex flex-col gap-1.5">
+                <span className="flex items-center text-[12px] text-muted">{role === "avatar" ? "Avatar" : "Cover"}
+                  <button className="ml-auto text-[11.5px] text-accent hover:underline" onClick={() => setPicking(role)}>Pick from their pictures</button></span>
+                {/* any picture: drop one from the tray (or a file), pick from their pictures, or use a sheet view below */}
+                <Slot className="h-44" value={cur ? { name: cur.filename, kind: "image", url: viewUrl(cur), label: role } : null}
+                  hint="drop from the tray or a file — or pick below"
+                  onChange={(m) => up(m ? { [fileKey]: { filename: m.name, subfolder: "", type: "input" } } as Partial<SiteInfo> : { [fileKey]: undefined } as Partial<SiteInfo>)} />
+                <div className="flex flex-wrap gap-1">
+                  {views.map((v) => {
+                    const on = !own && viewId === v.id;
+                    return <button key={v.id} onClick={() => up({ [role]: v.id as View, [fileKey]: undefined } as Partial<SiteInfo>)} title={`Sheet: ${v.label}`} className={cx("press h-12 w-9 overflow-hidden border", on ? "border-accent" : "border-line opacity-50 hover:opacity-90")}><img src={viewUrl(c.views[v.id]!)} alt={v.label} className="h-full w-full object-cover" /></button>;
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+        {picking && <PicPick c={c} title={picking === "avatar" ? "Pick the avatar" : "Pick the cover"} onClose={() => setPicking(null)}
+          onPick={(f) => { up({ [picking === "avatar" ? "avatarFile" : "coverFile"]: { filename: f.filename, subfolder: f.subfolder, type: f.type } } as Partial<SiteInfo>); setPicking(null); }} />}
         <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={site.send_reference !== false} onChange={(e) => up({ send_reference: e.target.checked })} /> Also send their reference sheet ({views.length} pictures)</label>
       </section>
 
@@ -323,6 +340,26 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
       </section>
     </div>
   );
+}
+
+/** pick one of the character's pictures (everything of theirs on the rental) */
+function PicPick({ c, title, onPick, onClose }: { c: Character; title: string; onPick: (f: FileRef) => void; onClose: () => void }) {
+  const [list, setList] = useState<FileRef[] | null>(null);
+  useEffect(() => { import("../lib/siteAuto").then(({ charPictures }) => charPictures(c)).then((l) => setList(l.map((x) => x.file).filter((f) => !/\.(mp4|webm|mov)$/i.test(f.filename)))).catch(() => setList([])); }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return createPortal(
+    <div className="fade-in fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6" onMouseDown={onClose}>
+      <div className="flex max-h-full w-full max-w-[1000px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center border-b border-line px-4 py-3"><b className="text-[14px]">{title}</b><span className="ml-2 text-[12px] text-muted">{list ? `${list.length} pictures of ${c.name}` : "Finding their pictures…"}</span>
+          <button aria-label="Close" className="ml-auto text-muted hover:text-ink" onClick={onClose}><Icon name="x" size={16} /></button></div>
+        <div className="grid min-h-0 grid-cols-3 gap-2 overflow-y-auto p-3 md:grid-cols-5">
+          {(list ?? []).map((f) => (
+            <button key={`${f.subfolder}/${f.filename}`} onClick={() => onPick(f)} className="press group aspect-[3/4] overflow-hidden border border-line bg-black hover:border-accent">
+              <img src={viewUrl(f)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" /></button>
+          ))}
+        </div>
+        {list && !list.length && <p className="p-4 text-[13px] text-muted">No pictures of {c.name} found yet — drop one from the tray into the box instead.</p>}
+      </div>
+    </div>, document.body);
 }
 
 function FolderCard({ s, onOpen }: { s: SiteSet; onOpen: () => void }) {
@@ -355,9 +392,13 @@ function Folder({ c, index }: { c: Character; index: number }) {
   // everything on the rental's disk too (the catalog): older results the feeds no longer hold are still here
   const [disk, setDisk] = useState<(FileRef & { kind: string })[]>([]);
   useEffect(() => {
-    const folder = c.name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/^\.+/, "").trim().slice(0, 60);
-    fetch(`/studio-api/catalog?limit=500${every ? "" : `&folder=${encodeURIComponent(folder)}`}`).then((r) => r.json()).then((d) => setDisk(Array.isArray(d.items) ? d.items : [])).catch(() => {});
-  }, [every, c.name]);
+    if (every) { fetch(`/studio-api/catalog?limit=500`).then((r) => r.json()).then((d) => setDisk(Array.isArray(d.items) ? d.items : [])).catch(() => {}); return; }
+    // everything of theirs on the rental: their project folder under every name they've had, and files noted as theirs
+    import("../lib/siteAuto").then(({ charPictures }) => charPictures(c)).then((l) => setDisk(l.map((x) => ({ ...x.file, kind: /\.(mp4|webm|mov)$/i.test(x.file.filename) ? "video" : "image" })))).catch(() => {});
+  }, [every, c.id, c.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // how big the pictures show (whole picture, not cropped) — remembered
+  const [size, setSize] = useState<"s" | "m" | "l">(() => { try { return (localStorage.getItem("h3.site.thumb") as "s" | "m" | "l") || "m"; } catch { return "m"; } });
+  const pickSize = (v: "s" | "m" | "l") => { setSize(v); try { localStorage.setItem("h3.site.thumb", v); } catch { /* */ } };
   const merged = useMemo(() => { const seen = new Set<string>(); return [...outs, ...disk].filter((o) => { const k = `${o.subfolder}/${o.filename}`; if (seen.has(k)) return false; seen.add(k); return true; }); }, [outs, disk]);
   const shown = merged.filter((o) => kind === "all" || o.kind === kind);
   const order = useMemo(() => new Map(s.items.map((x, i) => [`${x.subfolder}/${x.filename}`, i])), [s.items]);
@@ -407,18 +448,26 @@ function Folder({ c, index }: { c: Character; index: number }) {
           <div className="ml-auto flex gap-1">
             <button onClick={() => setEvery((v) => !v)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", every && "on")} title="Also pick from results made outside this character's project">{every ? "All my results" : `${c.name}'s project`}</button>
             <span className="mx-1 w-px bg-line" />
-            {(["all", "image", "video"] as const).map((k) => <button key={k} onClick={() => setKind(k)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", kind === k && "on")}>{k === "all" ? "All" : k === "image" ? "Pictures" : "Videos"}</button>)}</div>
+            {(["all", "image", "video"] as const).map((k) => <button key={k} onClick={() => setKind(k)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", kind === k && "on")}>{k === "all" ? "All" : k === "image" ? "Pictures" : "Videos"}</button>)}
+            <span className="mx-1 w-px bg-line" />
+            {(["s", "m", "l"] as const).map((k) => <button key={k} onClick={() => pickSize(k)} title={k === "s" ? "Small" : k === "m" ? "Medium" : "Large"} className={cx("press tag-btn !h-7 !w-7 !px-0 !text-[12px] uppercase", size === k && "on")}>{k}</button>)}</div>
         </div>
-        <div className="grid grid-cols-3 gap-2 md:grid-cols-4 xl:grid-cols-6">
+        <div className={cx("grid gap-2", size === "s" ? "grid-cols-4 md:grid-cols-6 xl:grid-cols-8" : size === "m" ? "grid-cols-3 md:grid-cols-4 xl:grid-cols-5" : "grid-cols-2 md:grid-cols-3")}>
           {shown.slice(0, 600).map((o) => {
             const k = `${o.subfolder}/${o.filename}`;
             const n = order.get(k);
             return (
-              <button key={k} onClick={() => toggle(o)} className={cx("press relative aspect-[3/4] overflow-hidden border-2", n != null ? "border-accent" : "border-transparent opacity-80 hover:opacity-100")}>
-                {o.kind === "video" ? <video src={viewUrl(o)} muted loop onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" /> : <img src={viewUrl(o)} alt="" loading="lazy" className="h-full w-full object-cover" />}
-                {n != null && <span className="absolute left-1 top-1 flex h-6 min-w-6 items-center justify-center bg-accent px-1 font-mono text-[12px] font-bold text-accentink">{n + 1}</span>}
-                {o.kind === "video" && <span className="micro absolute bottom-1 right-1 bg-black/70 px-1 text-white">VIDEO</span>}
-              </button>
+              <div key={k} className={cx("group relative aspect-[3/4] overflow-hidden border-2 bg-black", n != null ? "border-accent" : "border-transparent")}>
+                <button onClick={() => toggle(o)} className={cx("press h-full w-full", n == null && "opacity-85 hover:opacity-100")} title="Click to add or remove">
+                  {/* the whole picture (not cropped), a little bigger on hover */}
+                  {o.kind === "video" ? <video src={viewUrl(o)} muted loop onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />
+                    : <img src={viewUrl(o)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />}
+                </button>
+                {n != null && <span className="pointer-events-none absolute left-1 top-1 flex h-6 min-w-6 items-center justify-center bg-accent px-1 font-mono text-[12px] font-bold text-accentink">{n + 1}</span>}
+                {o.kind === "video" && <span className="micro pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 text-white">VIDEO</span>}
+                <button aria-label="See it full size" title="See it full size" onClick={() => import("./Viewer").then((v) => v.openViewer(shown.map((x) => ({ url: viewUrl(x), kind: x.kind === "video" ? "video" : "image", label: x.filename })), shown.indexOf(o)))}
+                  className="absolute right-1 top-1 hidden h-7 w-7 items-center justify-center bg-black/75 text-white hover:text-accent group-hover:flex"><Icon name="search" size={14} /></button>
+              </div>
             );
           })}
         </div>
