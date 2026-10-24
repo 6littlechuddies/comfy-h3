@@ -2340,6 +2340,47 @@ async def _proton_boot():
     await _proton_restore()
 
 
+KEY_REQ = {"at": 0.0, "reason": "", "keys_then": 0, "auto": 0.0}
+
+
+def _key_count() -> int:
+    try: return len(set(re.findall(r"hf_[A-Za-z0-9]{20,}", open(HF_KEYS_FILE).read())))
+    except OSError: return 0
+
+
+async def _ask_pc_for_key(reason: str) -> None:
+    """leave a note on your drive (H3 Studio/hf_key_request.txt) asking your PC for a fresh Hugging Face key: the
+    PC's key helper watches for it, makes one in your logged-in Chrome and adds it to hf_tokens.txt — this rental
+    picks it up within ~2 minutes. Rentals can't make keys themselves (Hugging Face only makes them for a logged-in browser)."""
+    await _proton_setup()
+    folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, dir=WORK) as f:
+        json.dump({"at": int(time.time()), "reason": reason[:200], "rental": os.environ.get("CONTAINER_ID", "")}, f)
+        tmp = f.name
+    try:
+        rc, out = await _rclone("copyto", tmp, f"proton:{folder}/hf_key_request.txt", timeout=120)
+        if rc != 0: raise RuntimeError(_redact(out)[-200:])
+    finally:
+        try: os.remove(tmp)
+        except OSError: pass
+    KEY_REQ.update(at=time.time(), reason=reason, keys_then=_key_count())
+    print(f"asked your PC for a fresh Hugging Face key ({reason})", flush=True)
+
+
+async def hf_key_request(req):
+    """the start page's "Get a fresh key from my PC" button (POST), and how that request is doing (GET)"""
+    if req.method == "POST":
+        if not _proton_on(): return web.json_response({"error": "Connect Google Drive first (GDRIVE_TOKEN in the template)"}, status=400)
+        if time.time() - KEY_REQ["at"] < 120: return web.json_response({"ok": True, "again": True})
+        try: await _ask_pc_for_key("pressed on the start page")
+        except Exception as e:  # noqa: BLE001
+            return web.json_response({"error": f"Couldn't leave the note on your drive: {e}"}, status=502)
+        return web.json_response({"ok": True})
+    got = max(0, _key_count() - KEY_REQ["keys_then"]) if KEY_REQ["at"] else 0
+    return web.json_response({"asked": KEY_REQ["at"] or None, "reason": KEY_REQ["reason"], "new_keys": got})
+
+
 async def _keys_refresh_loop():
     """while models are still downloading, fetch the Hugging Face keys file from your drive again every 2 minutes: keys
     you make on Hugging Face and add to hf_tokens.txt reach this rental without a reboot (the downloader re-reads it)"""
@@ -2350,6 +2391,14 @@ async def _keys_refresh_loop():
         except (OSError, ValueError): active = True
         if not active: return
         if not _proton_on(): return
+        # every key tried and still slow: ask your PC for a fresh one by itself (at most every 30 minutes)
+        try:
+            k = json.load(open(os.path.join(run_dir, "downloads.json"))).get("hf_key") or {}
+            if str(k.get("last") or "").startswith("every key tried") and time.time() - KEY_REQ["auto"] > 1800:
+                KEY_REQ["auto"] = time.time()
+                await _ask_pc_for_key("every key was slow on this rental")
+        except Exception as e:  # noqa: BLE001
+            print("!! asking for a fresh key:", _redact(str(e))[:200], flush=True)
         before = ""
         try: before = open(HF_KEYS_FILE).read()
         except OSError: pass
@@ -4379,6 +4428,7 @@ def main():
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
         web.get("/studio-api/cost", cost),
+        web.post("/studio-api/hf/request-key", hf_key_request), web.get("/studio-api/hf/request-key", hf_key_request),
         web.post("/studio-api/output/delete", delete_output), web.post("/studio-api/keep", keep), web.get("/studio-api/kept/{path:.+}", get_kept), web.delete("/studio-api/kept/{path:.+}", del_kept),
         web.get("/studio-api/https", https_link),
         web.get("/studio-api/loras", list_loras), web.post("/studio-api/loras/fetch-missing", fetch_missing_loras), web.post("/studio-api/loras/add", add_lora),
