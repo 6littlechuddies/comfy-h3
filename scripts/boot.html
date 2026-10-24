@@ -289,7 +289,8 @@
         $("keys").innerHTML = `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`
           + (k.last ? `<br>Last: ${k.last}` : "")
           + (k.of > 1 ? `<br>Hugging Face slows each key down after a few GB; the downloader moves to a rested key when that happens.` : "")
-          + (bad.length ? `<br>Hugging Face didn't accept ${bad.join(", ")} — check them in your Vast template.` : "")
+          + (bad.length ? `<br>Hugging Face didn't accept ${bad.join(", ")} for downloads — check them in your Vast template.` : "")
+          + (acc && acc.some((n) => n === "works (account not shown)") ? `<br>${acc.map((n, i) => n === "works (account not shown)" ? `key ${i + 1}` : null).filter(Boolean).join(", ")}: work for downloads (fine-grained keys that don't show their account).` : "")
           + keyAsk(k);
       } else $("keys").innerHTML = k ? keyAsk(k) : "";
       // images-only mode on a card under 30 GB: video and the 27B writer wait

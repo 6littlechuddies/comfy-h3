@@ -155,7 +155,20 @@ def _hf_accounts():
         i, k = i_k
         try:
             r = requests.get(os.environ.get("H3_HF_WHOAMI", "https://huggingface.co/api/whoami-v2"), headers={"Authorization": f"Bearer {k}"}, timeout=15)
-            names[i] = r.json().get("name", "?") if r.ok else f"not accepted ({r.status_code})"
+            if r.ok: names[i] = r.json().get("name", "?"); return
+            # "whose key is this?" refused doesn't mean the key is dead: a fine-grained key without the "read your
+            # profile" permission still downloads fine. Ask for a real file to tell the two apart.
+            names[i] = f"not accepted ({r.status_code})"
+            probe = None
+            try:  # the first Hugging Face file in models.txt (public)
+                txt = open(sys.argv[1] if len(sys.argv) > 1 else "/opt/h3/models.txt").read()
+                m = re.search(re.escape(HF_BASE) + r"\S+/resolve/\S+", txt)
+                probe = m.group(0) if m else None
+            except OSError:
+                pass
+            if probe:
+                h = requests.head(probe, headers={"Authorization": f"Bearer {k}"}, allow_redirects=False, timeout=15)
+                if h.status_code < 400: names[i] = "works (account not shown)"
         except Exception:
             names[i] = "?"
     # at most 12 keys are asked (spread over the list): asking Hugging Face "whose key is this?" a hundred times at once
