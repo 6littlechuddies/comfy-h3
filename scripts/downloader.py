@@ -34,7 +34,8 @@ KEYS_FILE = os.environ.get("HF_KEYS_FILE") or os.path.expanduser("~/.h3/hf_keys.
 def _wait_for_key_file():
     """with Proton Drive set up, give the Studio helper up to 90 s to bring hf_tokens.txt (it writes the file even when
     there isn't one, so this only waits as long as the login takes)"""
-    if not (os.environ.get("PROTON_USER") and os.environ.get("PROTON_PASSWORD")) or os.environ.get("PROTON_KEYS") == "0": return
+    cloud = os.environ.get("GDRIVE_TOKEN") or (os.environ.get("PROTON_USER") and os.environ.get("PROTON_PASSWORD"))  # Google Drive or Proton
+    if not cloud or os.environ.get("PROTON_KEYS") == "0": return
     for _ in range(90):
         if os.path.exists(KEYS_FILE): return
         time.sleep(1)
