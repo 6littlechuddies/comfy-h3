@@ -91,7 +91,7 @@ SKIP = {x.strip() for x in os.environ.get("SKIP_MODELS", "").split(",") if x.str
 LATER_FILE = os.path.join(STATE_DIR, "download_later.json")
 SUFFIX = ".downloading"
 T0 = time.time()
-KEYS_FILE = os.path.join(STATE_DIR, "hf_keys.json")  # {fingerprint: time it was last found slow} — backed up with your settings
+MARKS_FILE = os.path.join(STATE_DIR, "hf_keys.json")  # {fingerprint: time it was last found slow, "_seen": [fingerprints]} — backed up with your settings
 
 
 def _fp(k: str) -> str:
@@ -100,31 +100,50 @@ def _fp(k: str) -> str:
 
 
 def _slow_marks() -> dict:
-    try: return json.load(open(KEYS_FILE))
+    try: return json.load(open(MARKS_FILE))
     except (OSError, ValueError): return {}
 
 
-def _mark_slow(k: str):
-    d = _slow_marks(); d[_fp(k)] = time.time()
+def _save_marks(d: dict):
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
-        with open(KEYS_FILE + ".tmp", "w") as fh: json.dump(d, fh)
-        os.replace(KEYS_FILE + ".tmp", KEYS_FILE)
+        with open(MARKS_FILE + ".tmp", "w") as fh: json.dump(d, fh)
+        os.replace(MARKS_FILE + ".tmp", MARKS_FILE)
     except OSError:
         pass
 
 
+def _mark_slow(k: str):
+    d = _slow_marks(); d[_fp(k)] = time.time(); _save_marks(d)
+
+
+def _mark_seen(k: str):
+    """a key that has been used on a rental: from now on it's no longer 'brand new'"""
+    d = _slow_marks(); seen = set(d.get("_seen") or [])
+    if _fp(k) not in seen: seen.add(_fp(k)); d["_seen"] = sorted(seen)[-500:]; _save_marks(d)
+
+
 def _pick_key(exclude: set[str]) -> str:
-    """the key that was found slow longest ago (never = best); ties broken at random so rentals spread the load"""
+    """a brand-new key first (never used on a rental: just made on Hugging Face and put in hf_tokens.txt), else the key
+    that was found slow longest ago (never = best); ties broken at random so rentals spread the load"""
     import random
-    marks = _slow_marks()
+    marks = _slow_marks(); seen = set(marks.get("_seen") or [])
     left = [k for k in HF_KEYS if k not in exclude] or HF_KEYS
     random.shuffle(left)
-    return min(left, key=lambda k: marks.get(_fp(k), 0)) if left else ""
+    return min(left, key=lambda k: (_fp(k) in seen, marks.get(_fp(k), 0))) if left else ""
+
+
+def _reload_keys() -> list[str]:
+    """keys added to hf_tokens.txt on your drive while this rental runs (the Studio helper fetches the file again every
+    couple of minutes): added to the list, so the next switch can use them — no reboot needed"""
+    add = [k for k in _keys() if k not in HF_KEYS]
+    if add: HF_KEYS.extend(add)
+    return add
 
 
 if len(HF_KEYS) > 1:
     HF_TOKEN = _pick_key(set())
+if HF_TOKEN: _mark_seen(HF_TOKEN)
 
 
 def _hf_accounts():
@@ -652,6 +671,14 @@ def main() -> int:
         # Hugging Face slow on this key: switch keys (aria2 carries on where each file stopped).
         # Measured over every Hugging Face file in this run, finished ones included — a file finishing must not look
         # like the speed dropping to zero (that was what made it switch while it was going fast).
+        # new keys on your drive (made on Hugging Face while this runs): picked up without a reboot
+        if now - ROT.get("reloaded", 0) >= 60:
+            ROT["reloaded"] = now
+            added = _reload_keys()
+            if added:
+                log(f"{len(added)} new Hugging Face key(s) from your drive — now {len(HF_KEYS)}")
+                ROT["last"] = f"{len(added)} new key(s) from your drive"
+                if ROT.get("slow_since") is not None: ROT["last_switch"] = 0.0  # slow right now: try the new key at once
         if p is not None and p.poll() is None and len(HF_KEYS) > 1 and run_hf:
             hb = sum(on_disk(f) for f in run_hf)
             n_live = sum(1 for f in run_hf if not complete(f))
@@ -709,7 +736,7 @@ def main() -> int:
                 if nk:
                     msg = f"key {HF_KEYS.index(HF_TOKEN) + 1} → key {HF_KEYS.index(nk) + 1} ({why})"
                     log(f"switching Hugging Face key: {msg}")
-                    HF_TOKEN = nk; ROT["n"] += 1; ROT["last_switch"] = now; ROT["last"] = msg
+                    HF_TOKEN = nk; ROT["n"] += 1; ROT["last_switch"] = now; ROT["last"] = msg; _mark_seen(nk)
                     p.terminate()
                     try: p.wait(timeout=30)
                     except subprocess.TimeoutExpired: p.kill(); p.wait()

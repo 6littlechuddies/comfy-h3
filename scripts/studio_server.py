@@ -2336,7 +2336,28 @@ async def _proton_keys():
 
 async def _proton_boot():
     await _proton_keys()  # first: the downloader is waiting for them
+    asyncio.get_running_loop().create_task(_keys_refresh_loop())
     await _proton_restore()
+
+
+async def _keys_refresh_loop():
+    """while models are still downloading, fetch the Hugging Face keys file from your drive again every 2 minutes: keys
+    you make on Hugging Face and add to hf_tokens.txt reach this rental without a reboot (the downloader re-reads it)"""
+    run_dir = os.environ.get("H3_RUN", "/opt/h3/run")
+    for _ in range(180):  # at most 6 hours
+        await asyncio.sleep(120)
+        try: active = json.load(open(os.path.join(run_dir, "downloads.json"))).get("active", True)
+        except (OSError, ValueError): active = True
+        if not active: return
+        if not _proton_on(): return
+        before = ""
+        try: before = open(HF_KEYS_FILE).read()
+        except OSError: pass
+        await _proton_keys()
+        try:
+            if not open(HF_KEYS_FILE).read().strip() and before.strip():  # a failed fetch never wipes the keys already here
+                with open(HF_KEYS_FILE, "w") as f: f.write(before)
+        except OSError: pass
 
 
 async def _proton_prune(folder: str) -> None:
