@@ -2357,7 +2357,13 @@ async def _ask_pc_for_key(reason: str) -> None:
     folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, dir=WORK) as f:
-        json.dump({"at": int(time.time()), "reason": reason[:200], "count": KEY_BATCH, "rental": os.environ.get("CONTAINER_ID", "")}, f)
+        # which accounts just slowed down here: the PC makes the new keys on a different one
+        try: k = json.load(open(os.path.join(os.environ.get("H3_RUN", "/opt/h3/run"), "downloads.json"))).get("hf_key") or {}
+        except (OSError, ValueError): k = {}
+        named = lambda xs: [x for x in xs if x and not str(x).startswith(("key:", "works", "not accepted")) and x not in ("?", "hidden")]
+        json.dump({"at": int(time.time()), "reason": reason[:200], "count": KEY_BATCH, "rental": os.environ.get("CONTAINER_ID", ""),
+                   "avoid_accounts": named(k.get("tired_accounts") or []), "current_account": k.get("account") or "",
+                   "accounts_in_use": sorted(set(named(k.get("accounts") or [])))}, f)
         tmp = f.name
     try:
         rc, out = await _rclone("copyto", tmp, f"proton:{folder}/hf_key_request.txt", timeout=120)

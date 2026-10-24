@@ -286,9 +286,11 @@
         const acc = Array.isArray(k.accounts) ? k.accounts : null;
         const real = acc ? [...new Set(acc.filter((n) => n && n !== "?" && !/^not accepted/.test(n)))] : [];
         const bad = acc ? acc.map((n, i) => /^not accepted/.test(n) ? `key ${i + 1}` : null).filter(Boolean) : [];
-        $("keys").innerHTML = `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`
+        const accName = (x) => String(x || "").startsWith("key:") ? "not looked up yet" : x === "hidden" ? "an account that isn't shown" : String(x).replace(/[<>&]/g, "");
+        $("keys").innerHTML = `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.account ? ` (${accName(k.account)})` : ""}${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`
+          + (k.tired_accounts?.length ? `<br>Slowed down, skipped for 30 min: ${k.tired_accounts.map(accName).join(", ")}` : "")
           + (k.last ? `<br>Last: ${k.last}` : "")
-          + (k.of > 1 ? `<br>Hugging Face slows each key down after a few GB; the downloader moves to a rested key when that happens.` : "")
+          + (k.of > 1 ? `<br>Hugging Face slows an account down after a few GB; the downloader moves to a key on another account when that happens.` : "")
           + (bad.length ? `<br>Hugging Face didn't accept ${bad.join(", ")} for downloads — check them in your Vast template.` : "")
           + (acc && acc.some((n) => n === "works (account not shown)") ? `<br>${acc.map((n, i) => n === "works (account not shown)" ? `key ${i + 1}` : null).filter(Boolean).join(", ")}: work for downloads (fine-grained keys that don't show their account).` : "")
           + keyAsk(k);

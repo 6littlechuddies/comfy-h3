@@ -6,7 +6,7 @@ the first group is in while the rest keeps downloading. Writes progress to /opt/
 Files download under "<name>.downloading" and are renamed when complete, so ComfyUI never sees half a model.
 Exit codes: 0 all done (or done with some failed groups), 3 host too slow (speed check)."""
 import concurrent.futures as cf
-import json, os, re, shutil, subprocess, sys, time
+import json, os, re, shutil, subprocess, sys, threading, time
 
 import requests
 
@@ -124,14 +124,37 @@ def _mark_seen(k: str):
     if _fp(k) not in seen: seen.add(_fp(k)); d["_seen"] = sorted(seen)[-500:]; _save_marks(d)
 
 
+ACCT_SLOW_FOR = float(os.environ.get("HF_ACCOUNT_REST", "1800"))  # an account that slowed down is skipped this long
+_rot = lambda: globals().get("ROT") or {}  # (the run state is made further down; the first pick happens before it)
+
+
+def _acct(k: str) -> str:
+    """which account a key is on, as far as we know: its name; keys that hide it count as one group ("hidden");
+    not looked up yet = its own group"""
+    acc = _rot().get("accounts") or []
+    try: n = acc[HF_KEYS.index(k)]
+    except (ValueError, IndexError): n = None
+    if not n or n == "?": return f"key:{_fp(k)}"
+    if n.startswith("works"): return "hidden"
+    return n
+
+
+def _dead(k: str) -> bool:
+    acc = _rot().get("accounts") or []
+    try: return str(acc[HF_KEYS.index(k)] or "").startswith("not accepted")
+    except (ValueError, IndexError): return False
+
+
 def _pick_key(exclude: set[str]) -> str:
-    """a brand-new key first (never used on a rental: just made on Hugging Face and put in hf_tokens.txt), else the key
-    that was found slow longest ago (never = best); ties broken at random so rentals spread the load"""
+    """the next key: one on an account that hasn't just slowed down (Hugging Face slows a whole account, so another key
+    on the same tired account stays slow), then a brand-new key (never used on a rental), then the key found slow
+    longest ago; keys that can't download at all last; ties at random so rentals spread the load"""
     import random
     marks = _slow_marks(); seen = set(marks.get("_seen") or [])
+    tired = {a for a, t in (_rot().get("acct_slow") or {}).items() if time.time() - t < ACCT_SLOW_FOR}
     left = [k for k in HF_KEYS if k not in exclude] or HF_KEYS
     random.shuffle(left)
-    return min(left, key=lambda k: (_fp(k) in seen, marks.get(_fp(k), 0))) if left else ""
+    return min(left, key=lambda k: (_dead(k), _acct(k) in tired, _fp(k) in seen, marks.get(_fp(k), 0))) if left else ""
 
 
 def _reload_keys() -> list[str]:
@@ -173,9 +196,9 @@ def _hf_accounts():
             names[i] = "?"
     # at most 12 keys are asked (spread over the list): asking Hugging Face "whose key is this?" a hundred times at once
     # counts against the account's request limit — the same account the downloads need
-    idx = sorted(set(range(0, len(HF_KEYS), max(1, len(HF_KEYS) // 12))))[:12]
+    idx = list(range(min(len(HF_KEYS), 40)))
     with cf.ThreadPoolExecutor(4) as ex: list(ex.map(who, [(i, HF_KEYS[i]) for i in idx]))
-    ROT["accounts"] = [names.get(i, "?") for i in range(len(HF_KEYS))]
+    ROT["accounts"] = [names.get(i, (ROT.get("accounts") or [])[i] if i < len(ROT.get("accounts") or []) else "?") for i in range(len(HF_KEYS))]
     real = {n for n in ROT["accounts"] if n and n != "?" and not n.startswith("not accepted")}
     log(f"Hugging Face keys belong to {len(real)} account(s): " + ", ".join(f"key {i + 1} = {names.get(i)}" for i in idx) + (f" (checked {len(idx)} of {len(HF_KEYS)})" if len(idx) < len(HF_KEYS) else ""))
 
@@ -489,7 +512,8 @@ def write(groups, rate_now=0.0, rate_avg=0.0, note=""):
          "pct": int(done * 100 / total) if total else (100 if all(g["state"] in ("done", "later") for g in groups) else 0),
          "mbps": round(rate_now), "avg_mbps": round(rate_avg),
          "left_s": int((total - done) / 1048576 / rate_avg) if rate_avg > 0 else -1,
-         "elapsed_s": int(now - T0), "note": note, "hf_key": ({"n": HF_KEYS.index(HF_TOKEN) + 1, "of": len(HF_KEYS), "switches": ROT["n"], "last": ROT["last"], "mbps": ROT["hf_mbps"], "accounts": ROT["accounts"], "limited": ROT["limited"]} if HF_TOKEN in HF_KEYS else None), "speed_ok": STATE["speed_ok"], "speed_best": STATE["speed_best"],
+         "elapsed_s": int(now - T0), "note": note, "hf_key": ({"n": HF_KEYS.index(HF_TOKEN) + 1, "of": len(HF_KEYS), "switches": ROT["n"], "last": ROT["last"], "mbps": ROT["hf_mbps"], "accounts": ROT["accounts"], "limited": ROT["limited"],
+                    "account": _acct(HF_TOKEN), "tired_accounts": sorted(a for a, t in (ROT.get("acct_slow") or {}).items() if time.time() - t < ACCT_SLOW_FOR)} if HF_TOKEN in HF_KEYS else None), "speed_ok": STATE["speed_ok"], "speed_best": STATE["speed_best"],
          "files": queue_wait([file_info(g, f, now) for g in groups for f in g["files"]])}
     tmp = OUT + ".tmp"
     with open(tmp, "w") as fh:
@@ -692,6 +716,7 @@ def main() -> int:
             if added:
                 log(f"{len(added)} new Hugging Face key(s) from your drive — now {len(HF_KEYS)}")
                 ROT["last"] = f"{len(added)} new key(s) from your drive"
+                threading.Thread(target=_hf_accounts, daemon=True).start()  # which account the new keys are on
                 if ROT.get("slow_since") is not None: ROT["last_switch"] = 0.0  # slow right now: try the new key at once
         if p is not None and p.poll() is None and len(HF_KEYS) > 1 and run_hf:
             hb = sum(on_disk(f) for f in run_hf)
@@ -737,13 +762,13 @@ def main() -> int:
                 why = "Hugging Face said too many requests" if limited else f"{hf_rate:.0f} MB/s for {int(now - ROT['slow_since'])} s"
                 nk = None
                 if untried:
-                    _mark_slow(HF_TOKEN); nk = _pick_key(ROT["tried"])
+                    _mark_slow(HF_TOKEN); ROT.setdefault("acct_slow", {})[_acct(HF_TOKEN)] = now; nk = _pick_key(ROT["tried"])
                 else:
                     # every key tried: settle on the one that was fastest, if it was clearly faster (then stop switching)
                     # every key tried: keys recover after a while, so go round again, starting with the one slowed longest
                     # ago — unless no key ever did better than this one (then the limit is the machine, not the key)
                     if len(HF_KEYS) > 1 and max(ROT["best"].values(), default=0.0) > hf_rate * 1.5:
-                        _mark_slow(HF_TOKEN); ROT["tried"] = {HF_TOKEN}; nk = _pick_key({HF_TOKEN})
+                        _mark_slow(HF_TOKEN); ROT.setdefault("acct_slow", {})[_acct(HF_TOKEN)] = now; ROT["tried"] = {HF_TOKEN}; nk = _pick_key({HF_TOKEN})
                     else:
                         ROT["slow_since"] = None
                         ROT["last"] = f"every key tried — staying on key {HF_KEYS.index(HF_TOKEN) + 1} ({hf_rate:.0f} MB/s; no key was faster, so the limit is the machine)"
