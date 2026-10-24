@@ -2232,7 +2232,10 @@ async def _proton_setup() -> None:
     if os.path.isfile(PROTON_CONF): return
     os.makedirs(os.path.dirname(PROTON_CONF), exist_ok=True)
     if _gdrive_token():  # Google Drive (the remote keeps the name "proton" so every path stays the same)
-        rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", "token", _gdrive_token(), "--non-interactive", timeout=120)
+        # your own Google client (GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET): rclone's shared one is being retired by Google.
+        # The token must have been made with the same client (Connect Google Drive.bat passes them to rclone authorize).
+        own = [x for kv in (("client_id", os.environ.get("GDRIVE_CLIENT_ID")), ("client_secret", os.environ.get("GDRIVE_CLIENT_SECRET"))) if kv[1] for x in kv]
+        rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", *own, "token", _gdrive_token(), "--non-interactive", timeout=120)
         if rc != 0:
             try: os.remove(PROTON_CONF)
             except OSError: pass
@@ -2368,6 +2371,12 @@ async def _ask_pc_for_key(reason: str) -> None:
     try:
         rc, out = await _rclone("copyto", tmp, f"proton:{folder}/hf_key_request.txt", timeout=120)
         if rc != 0: raise RuntimeError(_redact(out)[-200:])
+        # check it's really there (Google Drive allows two folders with the same name — then the PC may look in the other one)
+        rc2, ls = await _rclone("lsjson", f"proton:{folder}", "--files-only", "--include", "hf_key_request.txt", timeout=60)
+        rc3, dirs = await _rclone("lsjson", "proton:", "--dirs-only", timeout=60)
+        same = len(re.findall(r'"Name":"' + re.escape(folder) + '"', dirs)) if rc3 == 0 else 0
+        print(f"request upload: rc={rc}, visible on Drive: {'yes' if rc2 == 0 and 'hf_key_request.txt' in ls else 'NO'}"
+              + (f" — WARNING: {same} folders named \"{folder}\" at the top of your Drive; the PC may be reading another one" if same > 1 else ""), flush=True)
     finally:
         try: os.remove(tmp)
         except OSError: pass
