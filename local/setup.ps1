@@ -118,7 +118,7 @@ Say "`n--- Picture models (Krea 2, Krea 2 Edit, SAM 3) ---" Cyan
 $want = @("image", "krea_te", "kedit", "kedit2", "sam", "krea_gguf")
 $token = $null
 $tokFile = Join-Path $here "hf_tokens.txt"
-if (Test-Path $tokFile) { $token = (Get-Content $tokFile | Where-Object { $_.Trim() -match "^hf_" } | Select-Object -First 1); if ($token) { $token = $token.Trim() } }
+if (Test-Path $tokFile) { $m = [regex]::Matches((Get-Content $tokFile -Raw), "hf_[A-Za-z0-9]{20,}"); if ($m.Count) { $token = $m[0].Value } }  # first key anywhere in the file (any layout)
 $group = $null
 $lists = @(Get-Content (Join-Path $here "models.txt"))
 if (Test-Path (Join-Path $here "models_local.txt")) { $lists += Get-Content (Join-Path $here "models_local.txt") }

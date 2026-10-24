@@ -2300,18 +2300,27 @@ HF_KEYS_FILE = os.environ.get("HF_KEYS_FILE") or os.path.expanduser("~/.h3/hf_ke
 
 
 async def _proton_keys():
-    """Hugging Face keys from your Proton Drive: put a text file called hf_tokens.txt (any layout — every hf_… in it
-    counts) in "H3 Studio" or at the top of My files, and the downloader uses those keys too. No template editing.
-    The file is always written (empty when there's none), so the downloader knows to stop waiting for it."""
+    """Hugging Face keys from your cloud drive (Google Drive or Proton Drive — whichever the template sets up): any text
+    file whose name mentions hf / hugging / token / key, in "H3 Studio" or at the top of the drive (every hf_… in it
+    counts). The file is always written (empty when there's none), so the downloader knows to stop waiting for it."""
     keys: list[str] = []
     try:
         if _proton_on() and os.environ.get("PROTON_KEYS", "1") != "0":
             await _proton_setup()
             folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
-            for where in (f"{folder}/hf_tokens.txt", "hf_tokens.txt", f"{folder}/HF_TOKENS.txt", "HF_TOKENS.txt"):
-                rc, out = await _rclone("cat", f"proton:{where}", timeout=120)
-                if rc == 0:
-                    keys += [k for k in re.findall(r"hf_[A-Za-z0-9]{20,}", out) if k not in keys]
+            # any text file whose name mentions hf / hugging / token / key, in "H3 Studio" or at the top of the drive
+            # (hf_tokens.txt, "HF keys (2).txt", tokens.md …) — renamed or re-uploaded copies are still found
+            names_ok = re.compile(r"(hf|hugging|token|key)", re.I)
+            for where in (folder, ""):
+                rc, out = await _rclone("lsjson", f"proton:{where}", "--files-only", timeout=120)
+                try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 else []
+                except ValueError: files = []
+                for f in files:
+                    nm = str(f.get("Name", ""))
+                    if not re.search(r"\.(txt|md|text)$", nm, re.I) or not names_ok.search(nm) or (f.get("Size") or 0) > 200_000: continue
+                    rc2, txt = await _rclone("cat", f"proton:{where + '/' if where else ''}{nm}", timeout=120)
+                    if rc2 == 0:
+                        keys += [k for k in re.findall(r"hf_[A-Za-z0-9]{20,}", txt) if k not in keys]
     except Exception as e:  # noqa: BLE001
         print(f"!! Hugging Face keys from {_cloud()}:", _redact(str(e))[:300], flush=True)
     finally:
