@@ -2204,7 +2204,9 @@ def _gdrive_token() -> str:
         import base64
         try: t = base64.b64decode(t + "=" * (-len(t) % 4)).decode()
         except Exception: t = ""  # noqa: BLE001
-    return t if t.startswith("{") else ""
+    # just the sign-in object: an earlier connector also caught PowerShell's warning text around it
+    m = re.search(r'\{\s*"access_token".*?\}', t, re.S)
+    return m.group(0) if m else (t if t.startswith('{"') else "")
 
 
 def _cloud() -> str:

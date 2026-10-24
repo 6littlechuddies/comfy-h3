@@ -9,8 +9,8 @@ Write-Host "`nA browser window opens: sign in to the Google account whose Drive 
 $cid = (Read-Host "Your Google client ID (Enter to skip)").Trim()
 $csec = ""; if ($cid) { $csec = (Read-Host "Your Google client secret").Trim() }
 if ($cid) { $out = & $rclone authorize "drive" $cid $csec 2>&1 | Out-String } else { $out = & $rclone authorize "drive" 2>&1 | Out-String }
-$m = [regex]::Match($out, "\{.*?""refresh_token"".*?\}", "Singleline")
-if (-not $m.Success) { $m = [regex]::Match($out, "\{[^{}]*""access_token""[^{}]*\}", "Singleline") }
+# only rclone's sign-in object ({"access_token": … }) — not the PowerShell warning text printed around it
+$m = [regex]::Match($out, "\{\s*""access_token""[^{}]*\}", "Singleline")
 if (-not $m.Success) { Write-Host "Didn't get a sign-in from Google. Run this again." -ForegroundColor Red; Write-Host $out; exit 1 }
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($m.Value.Trim()))
 $line = "GDRIVE_TOKEN=$b64"
