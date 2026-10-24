@@ -209,6 +209,11 @@ export function PresetBar({ section }: { section: "create" | "edit" | "prompt" |
   const { savePreset, applyPreset, deletePreset, reset } = useSettings.getState();
   const names = Object.keys(presets);
   const [sel, setSel] = useState("");
+  const saveAs = async () => { const n = await askText("Name this preset", sel || "", "Save preset"); if (n) { savePreset(section, n); setSel(n); useJobs.getState().toast(`Saved preset “${n}”`, "good"); } };
+  // no presets yet: one small line instead of an empty dropdown
+  if (!names.length) return (
+    <p className="text-xs text-muted"><span className="text-good">✓</span> Opens like this next time · <button className="underline hover:text-ink" onClick={saveAs}>save as a preset</button> · <button className="underline hover:text-ink" onClick={async () => { if (await askConfirm("Reset this tab?", "Every setting on this tab goes back to how it started. Presets are kept.", "Reset")) reset(section); }}>reset</button></p>
+  );
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -217,7 +222,7 @@ export function PresetBar({ section }: { section: "create" | "edit" | "prompt" |
           <option value="">{names.length ? "Load a preset…" : "No presets yet"}</option>
           {names.map((n) => <option key={n} value={n}>{n}</option>)}
         </DropSelect>
-        <Btn small onClick={async () => { const n = await askText("Name this preset", sel || "", "Save preset"); if (n) { savePreset(section, n); setSel(n); useJobs.getState().toast(`Saved preset “${n}”`, "good"); } }}>Save</Btn>
+        <Btn small onClick={saveAs}>Save</Btn>
         {sel && <Btn small onClick={async () => { if (await askConfirm(`Delete “${sel}”?`, "The preset is removed for every future rental too.", "Delete", true)) { deletePreset(section, sel); setSel(""); } }} title="Delete preset"><Icon name="trash" size={14} /></Btn>}
       </div>
       <p className="mt-1.5 text-xs text-muted"><span className="text-good">✓</span> Opens like this next time. <button className="text-muted underline hover:text-ink" onClick={async () => { if (await askConfirm("Reset this tab?", "Every setting on this tab goes back to how it started. Presets are kept.", "Reset")) reset(section); }}>reset</button></p>

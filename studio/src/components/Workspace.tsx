@@ -39,9 +39,12 @@ export function Workspace({ tab, title, sub, drawer, bar, children, drawerWidth 
         </div>
       </aside>
       <section className="grid-bg flex min-h-0 min-w-0 flex-1 flex-col">
-        {bar && <div className="relative z-10 shrink-0 px-6 pb-3 pt-5">{bar}<ModelsNotice id={needs} /></div>}
-        {!bar && needs && <div className="shrink-0 px-6 pt-4"><ModelsNotice id={needs} /></div>}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div>
+        {/* the prompt bar scrolls away with the results (it used to stay pinned, squeezing them under a long prompt) */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {bar && <div className="relative z-10 px-6 pb-3 pt-5">{bar}<ModelsNotice id={needs} /></div>}
+          {!bar && needs && <div className="px-6 pt-4"><ModelsNotice id={needs} /></div>}
+          <div className="px-6 pb-6">{children}</div>
+        </div>
       </section>
     </div>
   );
@@ -95,6 +98,7 @@ export function PromptBar({ value, onChange, placeholder, chips, action, minRows
   const ta = useRef<HTMLTextAreaElement>(null);
   const at = useMention(value, onChange, ta, mention);
   const [big, setBig] = useState(false); // ⤢ a tall box for long prompts
+  const [focused, setFocused] = useState(false); // not typing in it: at most 4 lines (scroll inside), so results stay in view
   const txt = useRef<HTMLInputElement>(null);
   const rw = useRewriteMenu(rewrite, value, onChange);
   const toastT = useJobs((s) => s.toast);
@@ -113,15 +117,16 @@ export function PromptBar({ value, onChange, placeholder, chips, action, minRows
     const el = ta.current; if (!el) return;
     el.style.height = "auto";
     const line = 24;
-    el.style.height = big ? `${Math.max(minRows * line + 20, Math.round(window.innerHeight * 0.55))}px` : `${Math.min(maxRows * line + 20, Math.max(minRows * line + 20, el.scrollHeight))}px`;
-  }, [value, minRows, maxRows, big]);
+    const rows = focused ? maxRows : Math.min(maxRows, 4);
+    el.style.height = big ? `${Math.max(minRows * line + 20, Math.round(window.innerHeight * 0.55))}px` : `${Math.min(rows * line + 20, Math.max(minRows * line + 20, el.scrollHeight))}px`;
+  }, [value, minRows, maxRows, big, focused]);
   return (
     <div className={cx("glow ticks card relative flex flex-col border transition-shadow", overTxt ? "border-accent" : "border-line")}
       onDragOver={(e) => { if (isText(e)) { e.preventDefault(); e.stopPropagation(); setOverTxt(true); } }} onDragLeave={() => setOverTxt(false)}
       onDrop={(e) => { const f = e.dataTransfer.files?.[0]; if (f && /\.(txt|md|text|prompt)$/i.test(f.name)) { e.preventDefault(); e.stopPropagation(); setOverTxt(false); loadText(f); } else setOverTxt(false); }}>
       <div className="flex min-w-0">
         {lead && <div className="flex shrink-0 gap-1.5 pl-4 pt-4">{lead}</div>}
-        <textarea ref={ta} value={value} onChange={(e) => { onChange(e.target.value); requestAnimationFrame(at.sync); }} onKeyDown={at.onKeyDown} onKeyUp={(e) => { if (e.key.startsWith("Arrow") && !at.menu) at.sync(); }} onClick={at.sync} onBlur={at.close} onContextMenu={rw.onContextMenu} placeholder={placeholder} rows={minRows} aria-label={placeholder}
+        <textarea ref={ta} value={value} onChange={(e) => { onChange(e.target.value); requestAnimationFrame(at.sync); }} onKeyDown={at.onKeyDown} onKeyUp={(e) => { if (e.key.startsWith("Arrow") && !at.menu) at.sync(); }} onClick={at.sync} onFocus={() => setFocused(true)} onBlur={() => { at.close(); setFocused(false); }} onContextMenu={rw.onContextMenu} placeholder={placeholder} rows={minRows} aria-label={placeholder}
           className={cx("w-full min-w-0 resize-none bg-transparent px-5 pb-1 pt-4 text-[15px] leading-6 text-ink placeholder:text-dim focus:outline-none", !!lead && "pl-3", mono && "font-mono text-[13.5px]")} />
       </div>
       <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-1.5">

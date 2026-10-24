@@ -316,12 +316,16 @@ export default function CreateTab() {
         {!c.raw && person && !ch && (
           <>
             <Seg label="Character" value={c.subject} onChange={(v) => set({ subject: v })} options={[{ value: "woman", label: "Adult woman" }, { value: "man", label: "Adult man" }]} />
-            <div className="grid grid-cols-2 gap-2.5">
-              <TextIn label="Hair" value={c.hair} onChange={(v) => set({ hair: v })} />
-              <TextIn label="Eyes" value={c.eyes} onChange={(v) => set({ eyes: v })} />
-              <TextIn label="Outfit" value={c.outfit} onChange={(v) => set({ outfit: v })} />
-              <TextIn label="Pose" value={c.pose} onChange={(v) => set({ pose: v })} />
-            </div>
+            {/* rarely used: folded away until you open it (open by itself when one is filled in) */}
+            <details className="group" open={!!(c.hair || c.eyes || c.outfit || c.pose) || undefined}>
+              <summary className="cursor-pointer list-none text-[12.5px] text-muted hover:text-ink"><span className="group-open:hidden">▸</span><span className="hidden group-open:inline">▾</span> Hair, eyes, outfit, pose{c.hair || c.eyes || c.outfit || c.pose ? " · set" : ""}</summary>
+              <div className="mt-2 grid grid-cols-2 gap-2.5">
+                <TextIn label="Hair" value={c.hair} onChange={(v) => set({ hair: v })} />
+                <TextIn label="Eyes" value={c.eyes} onChange={(v) => set({ eyes: v })} />
+                <TextIn label="Outfit" value={c.outfit} onChange={(v) => set({ outfit: v })} />
+                <TextIn label="Pose" value={c.pose} onChange={(v) => set({ pose: v })} />
+              </div>
+            </details>
           </>
         )}
         {!c.raw && c.make !== "character" && <TextIn label="Background" value={c.background} onChange={(v) => set({ background: v })} />}

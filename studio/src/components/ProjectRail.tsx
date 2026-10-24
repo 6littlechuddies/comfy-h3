@@ -97,11 +97,16 @@ export function useActiveCharacter(): Character | null {
 export function ProjectRail() {
   const { list, sel, loaded } = useCharacters(useShallow((s) => ({ list: s.list, sel: s.sel, loaded: s.loaded })));
   const tab = useSettings((s) => s.s.tab);
-  const [small, setSmall] = useState(() => pref("h3.rail.small", "0") === "1");
+  // narrow by default where you work on pictures (Create, Edit, Animate, Batch…), wide in Characters and Scenes;
+  // each tab remembers if you change it
+  const wideByDefault = (t: string) => t === "characters" || t === "scenes";
+  const smallFor = (t: string) => pref(`h3.rail.small.${t}`, wideByDefault(t) ? "0" : "1") === "1";
+  const [small, setSmall] = useState(() => smallFor(tab));
+  useEffect(() => { setSmall(smallFor(tab)); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [open, setOpen] = useState<Set<string>>(() => new Set(sel ? [sel] : []));
   const [q, setQ] = useState("");
   useEffect(() => { if (sel) setOpen((o) => (o.has(sel) ? o : new Set([...o, sel]))); }, [sel]);
-  const toggleSmall = () => { setSmall((v) => { setPref("h3.rail.small", v ? "0" : "1"); return !v; }); };
+  const toggleSmall = () => { setSmall((v) => { setPref(`h3.rail.small.${tab}`, v ? "0" : "1"); return !v; }); };
   const shown = q ? list.filter((c) => c.name.toLowerCase().includes(q.toLowerCase())) : list;
 
   const zipIn = useRef<HTMLInputElement>(null);

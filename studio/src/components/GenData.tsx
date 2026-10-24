@@ -85,6 +85,31 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
 
   // every LoRA it used, downloaded, kept as a LoRA preset per model (Krea 2 / Anima / Illustrious / H3) — like a playlist
   const allLoras = gen.resources.filter((r) => r.kind === "lora" && (r.installed || (r.model_id && r.version_id)));
+  // which of its LoRAs to use in Create (ticked: the ones made for the model it copies to)
+  const rk = (r: CivitResource) => String(r.version_id ?? r.name);
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set(createLoras.map(rk)));
+  useEffect(() => { setTicked(new Set(createLoras.map(rk))); }, [gen.id, gen.resources.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** its prompt into Create's prompt box — this window stays open */
+  const putPrompt = () => {
+    useSettings.getState().set("create", { extra: cleanPrompt(prompt) });
+    toast("In Create's prompt box — this stays open so you can take its LoRAs too", "good");
+  };
+  /** the ticked LoRAs become Create's LoRA list (replacing what was there; downloaded if needed) — not saved as a preset */
+  const useLoras = async () => {
+    const pick = gen.resources.filter((r) => r.kind === "lora" && ticked.has(rk(r)));
+    if (!pick.length || busy) return;
+    setBusy("Adding");
+    try {
+      const { picks, failed } = await ensureLoras(pick, undefined, onEach);
+      const { modelOf, pickModel } = await import("../lib/settings");
+      const st = useSettings.getState(); const t = createTargetOf(gen);
+      const mi = modelOf(st.s.create, undefined, t);
+      st.set("create", { ...(mi.family !== modelOf(st.s.create).family ? pickModel(t) : {}), [mi.lorasKey]: picks });
+      toast(`Create's LoRAs are now its ${picks.length}: ${picks.map((l) => l.name.split("/").pop()!.replace(/\.safetensors$/, "")).join(", ")} — strengths as it used them`, "good");
+      if (failed.length) toast(`Couldn't add: ${failed.join("; ")}`, "bad");
+      bump((n) => n + 1);
+    } finally { setBusy(null); }
+  };
   const savePreset = async () => {
     if (busy || !allLoras.length) return;
     const name = await askText("Name this LoRA preset", `${gen.username ? `${gen.username} · ` : ""}${gen.base || "CivitAI"} ${gen.id ?? ""}`.trim(), "Save preset");
@@ -130,6 +155,7 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
               {(["pieces", "text"] as const).map((v) => <button key={v} onClick={() => setView(v)} className={cx("micro", view === v ? "text-accent" : "text-dim hover:text-ink")}>{v === "pieces" ? "PIECES" : "TEXT"}</button>)}
               {edited !== startPrompt && <button className="micro text-dim hover:text-ink" onClick={() => setEdited(startPrompt)}>RESET</button>}
               <button onClick={() => copy(prompt, "Prompt")} className="micro text-muted hover:text-ink">COPY</button>
+              {!gen.video && <button onClick={putPrompt} title="Put this prompt in Create's prompt box (replaces what's there) — this window stays open" className="micro text-accent hover:underline">PUT IN PROMPT</button>}
             </div>
           </div>
           {view === "pieces"
@@ -162,14 +188,17 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
           {loading ? <span className="micro ml-auto text-dim">LOADING…</span>
             : todo.length > 0 && <button disabled={!!busy} onClick={addAll} title="Download every LoRA this picture used, so you can copy its exact look"
               className="press ml-auto border border-line px-2 py-1 text-[11.5px] font-semibold text-ink hover:border-accent disabled:opacity-40">{busy?.startsWith("Adding") ? "Adding…" : `Add all LoRAs · ${todo.length}`}</button>}
+          {!loading && !gen.video && allLoras.length > 0 && <button disabled={!!busy || !ticked.size} onClick={useLoras} title="The ticked LoRAs become Create's LoRA list (replacing what's there), downloaded if needed — not saved as a preset"
+            className={cx("press border border-accent bg-accent/15 px-2 py-1 text-[11.5px] font-semibold text-accent hover:bg-accent/25 disabled:opacity-40", todo.length === 0 && "ml-auto", todo.length > 0 && "ml-1.5")}>{busy === "Adding" ? "Adding…" : `Use these LoRAs · ${ticked.size}`}</button>}
           {!loading && allLoras.length > 0 && <button disabled={!!busy} onClick={savePreset} title="Download its LoRAs and keep them together, with their strengths, as a LoRA preset you can switch to in one click"
-            className={cx("press border border-accent/60 px-2 py-1 text-[11.5px] font-semibold text-accent hover:bg-accent/10 disabled:opacity-40", todo.length === 0 && "ml-auto", todo.length > 0 && "ml-1.5")}>Save as LoRA preset</button>}</div>
+            className="press ml-1.5 border border-line px-2 py-1 text-[11.5px] font-semibold text-muted hover:text-ink disabled:opacity-40">Save as preset</button>}</div>
         {gen.resources.length === 0 && !loading && <p className="text-[12px] text-dim">CivitAI doesn't list the resources for this one.</p>}
         <ul className="flex flex-col gap-px border border-line bg-line">
           {gen.resources.map((r) => (
             <li key={`${r.version_id ?? r.name}`} className="relative flex items-center gap-2 bg-panel px-2.5 py-2">
               {prog[String(r.version_id ?? r.name)] != null && prog[String(r.version_id ?? r.name)] >= 0 && prog[String(r.version_id ?? r.name)] < 1 && (
                 <span className="absolute inset-x-0 bottom-0 h-[3px] bg-raised2"><span className="block h-full bg-good transition-[width] duration-300" style={{ width: `${Math.max(3, prog[String(r.version_id ?? r.name)] * 100)}%` }} /></span>)}
+              {r.kind === "lora" && !gen.video ? <input type="checkbox" aria-label={`Use ${r.name}`} title="Tick the LoRAs to use in Create" checked={ticked.has(rk(r))} onChange={() => setTicked((t) => { const n = new Set(t); n.has(rk(r)) ? n.delete(rk(r)) : n.add(rk(r)); return n; })} className="shrink-0" /> : null}
               <span className={cx("micro w-[46px] shrink-0", r.kind === "lora" ? "text-accent" : "text-dim")}>{KIND[r.kind] ?? r.kind.toUpperCase().slice(0, 6)}</span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12.5px] font-medium text-ink" title={`${r.name} ${r.version}`}>{r.name}{r.version && <span className="ml-1 font-normal text-dim">{r.version}</span>}</div>
