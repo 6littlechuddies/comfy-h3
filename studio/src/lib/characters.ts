@@ -195,6 +195,14 @@ export function exportCharacters(ids?: string[]) {
   const a = document.createElement("a");
   a.href = `/studio-api/characters/export${ids?.length ? `?ids=${encodeURIComponent(ids.join(","))}` : ""}`;
   a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+  // Export all also puts a fresh copy on your Google Drive (when backups are set up) — the newest one there is what
+  // the next rental brings back
+  if (!ids?.length) fetch("/studio-api/proton?force=1", { method: "POST" }).then(async (r) => {
+    if (!r.ok) return;
+    const st = await (await fetch("/studio-api/proton")).json().catch(() => ({}));
+    const { useJobs } = await import("./jobs");
+    useJobs.getState().toast(`Also sending a copy to ${st.cloud || "your drive"} (H3 Studio → exports) — the next rental brings it back`, "good");
+  }).catch(() => {});
 }
 /** bring characters back from an Export .zip: new ones are added, ones you already have are updated */
 export async function importCharacters(file: File): Promise<ImportResult> {

@@ -2261,7 +2261,7 @@ def _redact(t: str) -> str:
     return t
 
 
-async def proton_sync(full: bool = False) -> None:
+async def proton_sync(full: bool = False, force: bool = False) -> None:
     """new results (studio outputs) + today's export .zip → Proton Drive. `full` also re-checks older results."""
     if not _proton_on() or PROTON["running"]: return
     PROTON.update(running=True, last_try=time.time(), state="sending")
@@ -2280,7 +2280,7 @@ async def proton_sync(full: bool = False) -> None:
         except (OSError, ValueError): n_chars = 0
         if not n_chars:  # nothing to save yet — and an empty export must never replace a real one
             PROTON.update(state="ok", last_ok=time.time(), error=""); return
-        if last_change() and last_change() <= PROTON.get("sent_change", 0):  # nothing new since the last upload or restore
+        if not force and last_change() and last_change() <= PROTON.get("sent_change", 0):  # nothing new since the last upload or restore
             PROTON.update(state="ok", last_ok=time.time(), error=""); return
         stamp = last_change()
         path, name = await asyncio.to_thread(_build_export, set(), False)
@@ -2552,7 +2552,7 @@ async def _proton_loop():
 async def proton_status(req):
     if req.method == "POST":
         if not _proton_on(): return web.json_response({"error": "Backups aren't set up — add GDRIVE_TOKEN (Google Drive) or PROTON_USER + PROTON_PASSWORD (Proton Drive) to the Vast template"}, status=400)
-        asyncio.create_task(proton_sync(full=True))
+        asyncio.create_task(proton_sync(full=True, force=req.query.get("force") == "1"))
         return web.json_response({"ok": True})
     return web.json_response({"on": _proton_on(), "cloud": _cloud(), "folder": (os.environ.get("PROTON_FOLDER") or "H3 Studio"), **{k: v for k, v in PROTON.items()}})
 
