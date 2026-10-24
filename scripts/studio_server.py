@@ -2340,7 +2340,8 @@ async def _proton_boot():
     await _proton_restore()
 
 
-KEY_REQ = {"at": 0.0, "reason": "", "keys_then": 0, "auto": 0.0}
+KEY_REQ = {"at": 0.0, "reason": "", "keys_then": 0, "auto": 0.0, "slow_since": 0.0}
+KEY_BATCH = max(1, min(5, int(os.environ.get("HF_KEY_BATCH", "2") or 2)))  # fresh keys asked for at a time
 
 
 def _key_count() -> int:
@@ -2356,7 +2357,7 @@ async def _ask_pc_for_key(reason: str) -> None:
     folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, dir=WORK) as f:
-        json.dump({"at": int(time.time()), "reason": reason[:200], "rental": os.environ.get("CONTAINER_ID", "")}, f)
+        json.dump({"at": int(time.time()), "reason": reason[:200], "count": KEY_BATCH, "rental": os.environ.get("CONTAINER_ID", "")}, f)
         tmp = f.name
     try:
         rc, out = await _rclone("copyto", tmp, f"proton:{folder}/hf_key_request.txt", timeout=120)
@@ -2382,21 +2383,26 @@ async def hf_key_request(req):
 
 
 async def _keys_refresh_loop():
-    """while models are still downloading, fetch the Hugging Face keys file from your drive again every 2 minutes: keys
+    """while models are still downloading, fetch the Hugging Face keys file from your drive again every minute: keys
     you make on Hugging Face and add to hf_tokens.txt reach this rental without a reboot (the downloader re-reads it)"""
     run_dir = os.environ.get("H3_RUN", "/opt/h3/run")
-    for _ in range(180):  # at most 6 hours
-        await asyncio.sleep(120)
+    for _ in range(360):  # at most 6 hours
+        await asyncio.sleep(60)
         try: active = json.load(open(os.path.join(run_dir, "downloads.json"))).get("active", True)
         except (OSError, ValueError): active = True
         if not active: return
         if not _proton_on(): return
-        # every key tried and still slow: ask your PC for a fresh one by itself (at most every 30 minutes)
+        # stuck slow: ask your PC for fresh keys by itself — when every key was tried, or when Hugging Face has stayed
+        # under 60 MB/s for 4 minutes in a row (switching keys didn't help). At most every 20 minutes.
         try:
             k = json.load(open(os.path.join(run_dir, "downloads.json"))).get("hf_key") or {}
-            if str(k.get("last") or "").startswith("every key tried") and time.time() - KEY_REQ["auto"] > 1800:
+            mb = k.get("mbps")
+            if mb is not None and mb < 60: KEY_REQ["slow_since"] = KEY_REQ["slow_since"] or time.time()
+            elif mb is not None: KEY_REQ["slow_since"] = 0.0
+            stuck = str(k.get("last") or "").startswith("every key tried") or (KEY_REQ["slow_since"] and time.time() - KEY_REQ["slow_since"] >= 240)
+            if stuck and time.time() - KEY_REQ["auto"] > 1200 and time.time() - KEY_REQ["at"] > 600:
                 KEY_REQ["auto"] = time.time()
-                await _ask_pc_for_key("every key was slow on this rental")
+                await _ask_pc_for_key(f"Hugging Face stuck at {mb} MB/s on this rental")
         except Exception as e:  # noqa: BLE001
             print("!! asking for a fresh key:", _redact(str(e))[:200], flush=True)
         before = ""
