@@ -2341,7 +2341,7 @@ async def _proton_boot():
 
 
 KEY_REQ = {"at": 0.0, "reason": "", "keys_then": 0, "auto": 0.0, "slow_since": 0.0}
-KEY_BATCH = max(1, min(5, int(os.environ.get("HF_KEY_BATCH", "2") or 2)))  # fresh keys asked for at a time
+KEY_BATCH = max(1, min(5, int(os.environ.get("HF_KEY_BATCH", "5") or 5)))  # fresh keys asked for at a time
 
 
 def _key_count() -> int:
@@ -2393,13 +2393,13 @@ async def _keys_refresh_loop():
         if not active: return
         if not _proton_on(): return
         # stuck slow: ask your PC for fresh keys by itself — when every key was tried, or when Hugging Face has stayed
-        # under 60 MB/s for 4 minutes in a row (switching keys didn't help). At most every 20 minutes.
+        # under 100 MB/s for 2 minutes in a row (switching keys didn't help). At most every 20 minutes.
         try:
             k = json.load(open(os.path.join(run_dir, "downloads.json"))).get("hf_key") or {}
             mb = k.get("mbps")
-            if mb is not None and mb < 60: KEY_REQ["slow_since"] = KEY_REQ["slow_since"] or time.time()
+            if mb is not None and mb < 100: KEY_REQ["slow_since"] = KEY_REQ["slow_since"] or time.time()
             elif mb is not None: KEY_REQ["slow_since"] = 0.0
-            stuck = str(k.get("last") or "").startswith("every key tried") or (KEY_REQ["slow_since"] and time.time() - KEY_REQ["slow_since"] >= 240)
+            stuck = str(k.get("last") or "").startswith("every key tried") or (KEY_REQ["slow_since"] and time.time() - KEY_REQ["slow_since"] >= 120)
             if stuck and time.time() - KEY_REQ["auto"] > 1200 and time.time() - KEY_REQ["at"] > 600:
                 KEY_REQ["auto"] = time.time()
                 await _ask_pc_for_key(f"Hugging Face stuck at {mb} MB/s on this rental")

@@ -175,7 +175,7 @@
   // key in your logged-in Chrome and adds it to hf_tokens.txt — this rental picks it up within ~2 minutes, no reboot
   let keyReq = { asked: null, new_keys: 0, msg: "" };
   function keyAsk(k) {
-    const slow = k && k.mbps != null && k.mbps < 60;
+    const slow = k && k.mbps != null && k.mbps < 100;
     const st = keyReq.asked ? (keyReq.new_keys ? ` <span style="color:#7be08a">· ${keyReq.new_keys} new key(s) arrived from your drive</span>` : ` · asked your PC ${Math.max(1, Math.round((Date.now() / 1000 - keyReq.asked) / 60))} min ago — waiting for the new key (your PC has to be on)`) : "";
     return `<br><button type="button" onclick="askKey(this)" style="margin-top:6px;padding:4px 10px;border:1px solid ${slow ? "#d4ff3a" : "#555"};background:transparent;color:${slow ? "#d4ff3a" : "inherit"};font:inherit;cursor:pointer">Get a fresh key from my PC</button>${keyReq.msg ? ` ${keyReq.msg}` : st}`;
   }
