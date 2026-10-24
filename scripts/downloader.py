@@ -59,14 +59,15 @@ if __name__ == "__main__": _wait_for_key_file()
 HF_KEYS = _keys()
 HF_TOKEN = HF_KEYS[0] if HF_KEYS else ""
 ROTATE_MBPS = float(os.environ.get("HF_ROTATE_MBPS", "100"))   # Hugging Face slower than this for a while -> next key
-# How patient the switching is. Every switch restarts all downloads, and a restart needs ~30-60 s to get back up to
-# speed, so switching too eagerly is itself what makes it slow.
-ROT_WARMUP = float(os.environ.get("H3_ROT_WARMUP", "45"))        # seconds after a (re)start before speed is judged at all (connections ramping up)
-ROT_WINDOW = float(os.environ.get("H3_ROT_WINDOW", "30"))        # speed is measured over this long, not a 3-second blip
-ROT_SLOW_FOR = float(os.environ.get("H3_ROT_SLOW_FOR", "30"))      # must stay under ROTATE_MBPS this long before switching...
-ROT_SLOW_FOR_FAST = float(os.environ.get("H3_ROT_SLOW_FOR_FAST", "45"))  # ...or this long if this key already did STAY_MBPS on this rental (a dip, not a throttle)
+# How patient the switching is: a slow key is dropped about 30 s after it turns slow (15 s to warm up, 15 s measured
+# slow), and switches are at least 30 s apart. Every switch restarts the downloads (finished pieces are kept); the
+# H3_ROT_* variables in the template make it more patient again if that ever costs more than it saves.
+ROT_WARMUP = float(os.environ.get("H3_ROT_WARMUP", "15"))        # seconds after a (re)start before speed is judged at all (connections ramping up)
+ROT_WINDOW = float(os.environ.get("H3_ROT_WINDOW", "15"))        # speed is measured over this long, not a 3-second blip
+ROT_SLOW_FOR = float(os.environ.get("H3_ROT_SLOW_FOR", "15"))      # must stay under ROTATE_MBPS this long before switching...
+ROT_SLOW_FOR_FAST = float(os.environ.get("H3_ROT_SLOW_FOR_FAST", "15"))  # ...or this long if this key already did STAY_MBPS on this rental (a dip, not a throttle)
 STAY_MBPS = float(os.environ.get("HF_STAY_MBPS", "200"))
-ROT_GAP = float(os.environ.get("H3_ROT_GAP", "90"))  # at least this long between two switches
+ROT_GAP = float(os.environ.get("H3_ROT_GAP", "30"))  # at least this long between two switches
 HF_BASE = os.environ.get("H3_HF_BASE", "https://huggingface.co/")  # the local test points this at a fake server
 JOBS = max(1, int(os.environ.get("DL_JOBS") or 8))  # files downloaded at once (each uses up to 16 connections); 16 at once (256 connections) got throttled
 # a connection slower than this for a while is dropped and retried. Keep it low: 8 files x 16 connections share the line,
