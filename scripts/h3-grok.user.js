@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         H3 Studio → Grok
 // @namespace    h3-studio
-// @version      1.1
+// @version      1.2
+// @updateURL    https://raw.githubusercontent.com/6littlechuddies/comfy-h3/main/scripts/h3-grok.user.js
+// @downloadURL  https://raw.githubusercontent.com/6littlechuddies/comfy-h3/main/scripts/h3-grok.user.js
 // @description  Lets the H3 Studio write prompts with your own Grok tab: picks up the Studio's requests, types them into Grok, sends Grok's reply back.
 // @match        https://grok.com/*
 // @grant        GM_xmlhttpRequest
@@ -30,10 +32,34 @@
   }
   const conn = () => GM_getValue("conn", null);
 
-  // ---- little status badge, bottom left
+  // ---- little status badge: above Grok's "Plugins" row (not over your account at the very bottom). Drag it anywhere —
+  // it remembers where; double-click shrinks it to a dot (and back).
   const badge = document.createElement("div");
-  badge.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;border-radius:8px;background:#1d1d22;color:#ddd;border:1px solid #444;box-shadow:0 2px 10px #0006;max-width:340px;cursor:default";
-  const say = (t, tone) => { badge.textContent = "H3 Studio · " + t; badge.style.borderColor = tone === "bad" ? "#c0392b" : tone === "busy" ? "#d4a017" : tone === "good" ? "#27ae60" : "#444"; };
+  const pos = GM_getValue("badgePos", { left: 12, bottom: 150 });
+  badge.style.cssText = `position:fixed;left:${pos.left}px;bottom:${pos.bottom}px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;border-radius:8px;background:#1d1d22;color:#ddd;border:1px solid #444;box-shadow:0 2px 10px #0006;max-width:300px;cursor:move;user-select:none`;
+  let mini = GM_getValue("badgeMini", false), lastText = "", lastTone = "";
+  const paint = () => {
+    badge.textContent = mini ? "●" : "H3 Studio · " + lastText;
+    badge.title = mini ? "H3 Studio · " + lastText + " (double-click to open)" : "Drag to move · double-click to shrink";
+    badge.style.padding = mini ? "2px 7px" : "6px 10px";
+    const col = lastTone === "bad" ? "#c0392b" : lastTone === "busy" ? "#d4a017" : lastTone === "good" ? "#27ae60" : "#444";
+    badge.style.borderColor = col; badge.style.color = mini ? col : "#ddd";
+  };
+  const say = (t, tone) => { lastText = t; lastTone = tone || ""; paint(); };
+  badge.addEventListener("dblclick", () => { mini = !mini; GM_setValue("badgeMini", mini); paint(); });
+  badge.addEventListener("mousedown", (e) => {
+    const sx = e.clientX, sy = e.clientY, r0 = badge.getBoundingClientRect();
+    const move = (ev) => {
+      const left = Math.max(0, Math.min(window.innerWidth - 40, r0.left + ev.clientX - sx));
+      const bottom = Math.max(0, Math.min(window.innerHeight - 20, window.innerHeight - r0.bottom - (ev.clientY - sy)));
+      badge.style.left = left + "px"; badge.style.bottom = bottom + "px";
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      GM_setValue("badgePos", { left: parseInt(badge.style.left, 10) || 12, bottom: parseInt(badge.style.bottom, 10) || 150 });
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  });
   (document.body || document.documentElement).appendChild(badge);
   say(conn() ? "waiting for prompts" : "not connected — open Grok from the Studio's panel (Connect Grok tab)", conn() ? "" : "bad");
 
