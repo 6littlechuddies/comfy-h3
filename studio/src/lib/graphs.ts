@@ -29,13 +29,17 @@ export interface LoraPick {
 export const activeLoras = (ls: LoraPick[]) => ls.filter((l) => !l.off && l.strength !== 0);
 /** add the trigger words of the switched-on LoRAs that aren't in the prompt yet */
 export function withTriggers(prompt: string, ls: LoraPick[]): string {
+  // Only the trigger WORD itself (the first one in the LoRA's list, e.g. "acmc") — not the creator's whole list of
+  // suggested tags. Those lists are recipes for the character's default look ("twintails, brown hair, striped armor…");
+  // adding all of them dragged every picture back to that look, whatever the prompt said (a goth girl came out in
+  // armour). And when your prompt already has the trigger, nothing is added: your words decide the rest.
   const low = prompt.toLowerCase();
   const add: string[] = [];
   for (const l of activeLoras(ls)) {
     if (l.noAuto || !l.trigger) continue;
-    for (const w of l.trigger.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean)) {
-      if (!low.includes(w.toLowerCase()) && !add.some((a) => a.toLowerCase() === w.toLowerCase())) add.push(w);
-    }
+    const word = l.trigger.split(/\s*[,\n]\s*/).map((x) => x.trim()).find(Boolean);
+    if (!word || low.includes(word.toLowerCase()) || add.some((a) => a.toLowerCase() === word.toLowerCase())) continue;
+    add.push(word);
   }
   return add.length ? `${add.join(", ")}, ${prompt}` : prompt;
 }
