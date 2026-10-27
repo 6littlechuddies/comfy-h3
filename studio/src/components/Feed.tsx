@@ -111,6 +111,11 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
         <span className="text-xs text-dim">{all ? "all projects" : selName ? `${selName}'s project` : "Free work"}{items.length ? ` · ${items.length}` : ""}</span>
         {(elsewhere > 0 || all) && <button onClick={() => setAll((v) => !v)} className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">{all ? "Only this project" : `+ ${elsewhere} in other projects`}</button>}
         <button onClick={() => import("./Catalog").then((m) => m.openCatalog())} title="Every picture and video on this rental, including older ones" className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Catalog · all of them</button>
+        <form role="search" onSubmit={(e) => { e.preventDefault(); const q = new FormData(e.currentTarget).get("q")?.toString().trim(); if (q) import("./Catalog").then((m) => m.searchResults(q)); }} className="relative hidden md:block">
+          <Icon name="search" size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-dim" />
+          <input name="q" placeholder="Search all results…" aria-label="Search every project's results by their words" title="Finds results in every project by the words they were made from — Enter to search"
+            className="inset h-7 w-44 border border-line bg-transparent pl-7 pr-2 text-[12px] text-ink placeholder:text-dim focus:w-60 focus:border-accent focus:outline-none" />
+        </form>
         {items.length > 0 && (selecting ? (
           <span className="ml-auto flex items-center gap-2 text-[12px]">
             <span className="text-ink">{nPicked} picked</span>

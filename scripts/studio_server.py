@@ -128,31 +128,50 @@ async def put_state(req):
 
 # ------------------------------------------------------------------ files
 async def delete_output(req):
-    """delete one result file (Results → Delete); only inside ComfyUI's output folder"""
+    """delete one result file (Results → Delete), or {files: [...]} several (Storage → clean up); only inside ComfyUI's
+    output folder. Gone for good: also out of the catalog notes and the drive backup's results (a restore would bring
+    them back otherwise) — deleted outright, not into the drive's trash."""
     d = await req.json()
-    sub, fn = str(d.get("subfolder") or ""), str(d.get("filename") or "")
-    if not fn or "/" in fn or fn.startswith("."): raise web.HTTPBadRequest(text="bad name")
-    p = safe_join(OUTPUT, sub, fn) if sub else safe_join(OUTPUT, fn)
-    try: os.remove(p)
-    except FileNotFoundError: pass
-    # gone for good: also out of the catalog notes and the cloud backup's results (a restore would bring it back otherwise)
-    key = f"{sub}/{fn}"
+    many = d["files"][:5000] if isinstance(d.get("files"), list) else [d]
     meta = _state_json("catalog_meta", {}) or {}
-    if isinstance(meta, dict) and meta.pop(key, None) is not None: _state_write("catalog_meta", meta)
+    meta_changed, cloud, n = False, [], 0
+    studio_dir = os.path.abspath(os.path.join(OUTPUT, "studio"))
+    for f in many:
+        if not isinstance(f, dict): continue
+        sub, fn = str(f.get("subfolder") or ""), str(f.get("filename") or "")
+        if not fn or "/" in fn or fn.startswith("."):
+            if len(many) == 1: raise web.HTTPBadRequest(text="bad name")
+            continue
+        try: p = safe_join(OUTPUT, sub, fn) if sub else safe_join(OUTPUT, fn)
+        except web.HTTPException:
+            continue
+        try: os.remove(p)
+        except FileNotFoundError: pass
+        n += 1
+        if isinstance(meta, dict) and meta.pop(f"{sub}/{fn}", None) is not None: meta_changed = True
+        if os.path.abspath(p).startswith(studio_dir + os.sep):
+            cloud.append(os.path.relpath(os.path.abspath(p), studio_dir).replace(os.sep, "/"))
+    if meta_changed: _state_write("catalog_meta", meta)
     _CAT["at"] = 0.0
-    studio_dir = os.path.join(OUTPUT, "studio")
-    if _proton_on() and os.path.abspath(p).startswith(os.path.abspath(studio_dir) + os.sep):
-        rel = os.path.relpath(p, studio_dir).replace(os.sep, "/")
+    if cloud and _proton_on():
         folder_ = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
         async def _cloud_delete():
             try:
                 await _proton_setup()
-                # straight out, not into Google Drive's trash (where it would still use your storage for 30 days)
-                await _rclone("deletefile", "--drive-use-trash=false", f"proton:{folder_}/results/{rel}", timeout=120)
+                if len(cloud) == 1:
+                    await _rclone("deletefile", "--drive-use-trash=false", f"proton:{folder_}/results/{cloud[0]}", timeout=120)
+                else:  # one rclone run for the lot
+                    lst = os.path.join(STATE, f".delete-{uuid.uuid4().hex[:8]}.txt")
+                    os.makedirs(STATE, exist_ok=True)
+                    with open(lst, "w") as fh: fh.write("\n".join(cloud))
+                    try: await _rclone("delete", "--drive-use-trash=false", "--files-from-raw", lst, f"proton:{folder_}/results", timeout=1800)
+                    finally:
+                        try: os.remove(lst)
+                        except OSError: pass
             except Exception as e:  # noqa: BLE001
                 print("!! deleting from the backup:", _redact(str(e))[:200], flush=True)
         _spawn(_cloud_delete())
-    return web.json_response({"ok": True})
+    return web.json_response({"ok": True, "deleted": n})
 
 
 async def upload(req):
@@ -525,6 +544,110 @@ def civitai_auth() -> dict:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+# ------------------------------------------------------------------ storage page
+STORAGE: dict = {"at": 0.0, "drive": None, "busy": False}
+
+
+def _dir_bytes(path: str) -> tuple[int, int]:
+    n = b = 0
+    for dp, _, fs in os.walk(path):
+        for f in fs:
+            try: b += os.lstat(os.path.join(dp, f)).st_size; n += 1
+            except OSError: pass
+    return b, n
+
+
+async def _drive_storage() -> dict | None:
+    """your drive: how full it is, its trash, the Studio's folder and its exports (rclone; a few seconds)"""
+    if not _proton_on(): return None
+    folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+    out: dict = {"name": _cloud(), "folder": folder}
+    try:
+        await _proton_setup()
+        (rc1, about), (rc2, size), (rc3, ex) = await asyncio.gather(
+            _rclone("about", "proton:", "--json", timeout=60),
+            _rclone("size", f"proton:{folder}", "--json", timeout=120),
+            _rclone("lsjson", f"proton:{folder}/exports", timeout=60))
+        def js(t: str, a: str = "{", b: str = "}"):
+            try: return json.loads(t[t.index(a): t.rindex(b) + 1])
+            except ValueError: return None
+        if rc1 == 0 and (a := js(about)): out.update({k: a.get(k) for k in ("total", "used", "trashed", "free")})
+        if rc2 == 0 and (z := js(size)): out.update(studio_bytes=z.get("bytes"), studio_files=z.get("count"))
+        if rc3 == 0 and isinstance(e := js(ex, "[", "]"), list):
+            out["exports"] = sorted(({"name": f.get("Name"), "size": f.get("Size", 0), "when": f.get("ModTime", "")} for f in e if not f.get("IsDir")),
+                                    key=lambda f: f["when"], reverse=True)
+    except Exception as e:  # noqa: BLE001
+        out["error"] = _redact(str(e))[:200]
+    return out
+
+
+async def storage(req):
+    """GET (?refresh=1) → the rental's disk (models / results / other), results by project, and your drive"""
+    du = shutil.disk_usage(COMFY_DIR)
+    (mb, _), (rb, rn), (ib, _) = await asyncio.gather(*(asyncio.to_thread(_dir_bytes, d) for d in (MODELS, OUTPUT, INPUT)))
+    items = await asyncio.to_thread(_catalog_scan)
+    proj: dict = {}
+    for it in items:
+        k = it["folder"] or "Older results"
+        if k == "Testing": continue
+        p = proj.setdefault(k, {"name": k, "bytes": 0, "count": 0})
+        p["bytes"] += it["size"]; p["count"] += 1
+    if req.query.get("refresh") or (time.time() - STORAGE["at"] > 300 and not STORAGE["busy"]):
+        STORAGE["busy"] = True
+        try: STORAGE.update(drive=await _drive_storage(), at=time.time())
+        finally: STORAGE["busy"] = False
+    return web.json_response({
+        "disk": {"total": du.total, "used": du.used, "free": du.free},
+        "models": mb, "results": rb, "results_files": rn, "inputs": ib,
+        "projects": sorted(proj.values(), key=lambda p: -p["bytes"]),
+        "drive": STORAGE["drive"], "drive_checked": STORAGE["at"],
+    })
+
+
+async def storage_act(req):
+    """POST {do: "empty-trash" | "prune-exports", keep?: n}"""
+    d = await req.json()
+    if not _proton_on(): raise web.HTTPBadRequest(text="No drive is set up in the template")
+    await _proton_setup()
+    folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+    if d.get("do") == "empty-trash":
+        rc, out = await _rclone("cleanup", "proton:", timeout=600)
+        if rc: raise web.HTTPBadGateway(text=f"Couldn't empty the trash: {_redact(out)[-200:]}")
+        msg = "Your drive's trash is empty"
+    elif d.get("do") == "prune-exports":
+        keep = max(1, int(d.get("keep") or 3))
+        rc, out = await _rclone("lsjson", f"proton:{folder}/exports", timeout=120)
+        try: files = [f for f in json.loads(out[out.index("["): out.rindex("]") + 1]) if not f.get("IsDir") and str(f.get("Name", "")).endswith(".zip")]
+        except ValueError: files = []
+        files.sort(key=lambda f: f.get("ModTime", ""), reverse=True)
+        for f in files[keep:]:
+            await _rclone("deletefile", "--drive-use-trash=false", f"proton:{folder}/exports/{f['Name']}", timeout=240)
+        msg = f"Deleted {max(0, len(files) - keep)} older export{'s' if len(files) - keep != 1 else ''} — kept the newest {keep}"
+    else:
+        raise web.HTTPBadRequest(text="unknown action")
+    STORAGE["at"] = 0.0
+    return web.json_response({"ok": True, "message": msg})
+
+
+async def activity(req):
+    """you used the Studio (a click, typing, scrolling): the idle shutdown starts counting again. {hours: 2} = "Keep it on
+    for 2 hours" (the mark goes that far into the future). GET: how long until it would shut down."""
+    f = os.path.join(os.environ.get("H3_RUN", "/opt/h3/run"), "activity")
+    if req.method == "POST":
+        try: hours = float((await req.json()).get("hours") or 0)
+        except Exception: hours = 0.0  # noqa: BLE001
+        until = time.time() + max(0.0, min(hours, 12.0)) * 3600
+        try: cur = os.path.getmtime(f)
+        except OSError: cur = 0.0
+        if until > cur or hours == 0 and cur <= time.time():
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            with open(f, "a"): pass
+            os.utime(f, (until, until))
+    try: m = os.path.getmtime(f)
+    except OSError: m = 0.0
+    return web.json_response({"used_at": m, "kept_on_until": m if m > time.time() + 60 else None})
+
+
 async def client_error(req):
     """a crash in the browser: written to the log so the debug report and Claude on the rental can see it"""
     try:
@@ -535,11 +658,44 @@ async def client_error(req):
     return web.json_response({"ok": True})
 
 
+CIV_CHECK: dict = {"at": 0.0, "keys": [], "running": False}
+
+
+async def _civitai_check() -> None:
+    """one small request per CivitAI key (your liked LoRAs, 1 item): which keys CivitAI still accepts. Runs in the
+    background a minute after start and when the ⋯ menu asks; never touches the downloads. Keys are never shown."""
+    if CIV_CHECK["running"]: return
+    CIV_CHECK["running"] = True
+    try:
+        out = []
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+            for i, k in enumerate(civitai_tokens(), 1):
+                st = None
+                try:
+                    async with s.get(f"{CIVITAI}/api/v1/models", params={"limit": "1", "favorites": "true"}, headers={"Authorization": f"Bearer {k}"}) as resp:
+                        st = resp.status
+                except Exception:  # noqa: BLE001
+                    pass
+                out.append({"n": i, "ok": True if st == 200 else False if st in (401, 403) else None,
+                            "why": "" if st == 200 else "CivitAI refused it (expired or deleted?)" if st in (401, 403) else f"couldn't check ({st or 'no answer'})"})
+        CIV_CHECK.update(at=time.time(), keys=out)
+        bad = [x["n"] for x in out if x["ok"] is False]
+        if out: print(f"CivitAI keys: {len(out) - len(bad)} of {len(out)} work" + (f" — key {', '.join(map(str, bad))} refused" if bad else ""), flush=True)
+    finally:
+        CIV_CHECK["running"] = False
+
+
+async def _civitai_check_later() -> None:
+    await asyncio.sleep(60)  # after the drive has brought civitai_keys.txt in
+    await _civitai_check()
+
+
 async def civitai_key(req):
     if req.method == "GET":
         n = len(civitai_tokens())
         src = "template" if (os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_TOKENS") or os.environ.get("CIVITAI_API_KEY")) else "studio" if os.path.exists(KEY_FILE) else "drive" if n else None
-        return web.json_response({"set": bool(n), "source": src, "count": n})
+        if req.query.get("check") and time.time() - CIV_CHECK["at"] > 120: _spawn(_civitai_check())
+        return web.json_response({"set": bool(n), "source": src, "count": n, "check": {"at": CIV_CHECK["at"], "keys": CIV_CHECK["keys"]}})
     if req.method == "DELETE":
         if os.path.exists(KEY_FILE): os.remove(KEY_FILE)
         return web.json_response({"ok": True})
@@ -550,6 +706,7 @@ async def civitai_key(req):
     os.makedirs(STATE, exist_ok=True)
     fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f: f.write(key)
+    _spawn(_civitai_check())
     # LoRAs CivitAI refused without a key: try them again now
     try: _fetch_missing_loras(load_reg())
     except Exception: pass  # noqa: BLE001
@@ -2479,7 +2636,7 @@ async def _keys_refresh_loop():
 
 
 async def _proton_prune(folder: str) -> None:
-    """keep the newest PROTON_KEEP (3) exports the rental made in "<folder>/exports"; older ones go to Proton's trash.
+    """keep the newest PROTON_KEEP (3) exports the rental made in "<folder>/exports"; older ones are deleted outright (not into the drive's trash, where they'd still use space).
     Only that folder, and only h3-….zip files — a folder you made yourself is never touched."""
     keep = int(os.environ.get("PROTON_KEEP", "3") or 0)
     if keep <= 0: return
@@ -2489,7 +2646,7 @@ async def _proton_prune(folder: str) -> None:
     ours = sorted((f for f in files if re.match(r"^h3-.*\d{4}-\d{2}-\d{2}(-\d{6})?\.zip$", str(f.get("Name", ""))) and not f.get("IsDir")),
                   key=_export_when, reverse=True)
     for f in ours[keep:]:
-        await _rclone("deletefile", f"proton:{folder}/exports/{f['Name']}", timeout=240)
+        await _rclone("deletefile", "--drive-use-trash=false", f"proton:{folder}/exports/{f['Name']}", timeout=240)
 
 
 async def import_restore(req):
@@ -2625,6 +2782,7 @@ async def on_start(app):
     app["tips"] = asyncio.create_task(_backfill_tips())
     app["proton_restore"] = asyncio.create_task(_proton_boot())
     app["proton"] = asyncio.create_task(_proton_loop())
+    app["civitai_check"] = asyncio.create_task(_civitai_check_later())
     try:
         materialize_packs()
     except Exception as e:  # noqa: BLE001
@@ -4204,7 +4362,12 @@ async def catalog(req):
     for it in items: counts[it["folder"]] = counts.get(it["folder"], 0) + 1
     sel = [it for it in items if (not folder or it["folder"] == folder) and (not kind or it["kind"] == kind) and it["folder"] != "Testing"]
     if q:
-        sel = [it for it in sel if q in json.dumps(meta.get(f"{it['subfolder']}/{it['filename']}", {})).lower() or q in it["filename"].lower()]
+        # every word must be there ("nun outfit" finds pictures whose words have both), in any order
+        words = q.split()
+        def hay(it):
+            m = meta.get(f"{it['subfolder']}/{it['filename']}", {})
+            return (" ".join(str(v) for v in m.values()) + " " + it["filename"] + " " + it["folder"]).lower() if isinstance(m, dict) else it["filename"].lower()
+        sel = [it for it, h in ((it, hay(it)) for it in sel) if all(w in h for w in words)]
     off, lim = max(0, int(req.query.get("offset", 0) or 0)), min(500, max(1, int(req.query.get("limit", 120) or 120)))
     page = [{**it, **({"meta": meta[k]} if (k := f"{it['subfolder']}/{it['filename']}") in meta else {})} for it in sel[off:off + lim]]
     return web.json_response({"items": page, "total": len(sel), "folders": sorted(({"name": k, "count": v} for k, v in counts.items() if k != "Testing"), key=lambda x: -x["count"])})
@@ -4504,6 +4667,8 @@ def main():
         web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora),
         web.post("/studio-api/loras/upload", upload_lora),
         web.post("/studio-api/client-error", client_error),
+        web.get("/studio-api/storage", storage), web.post("/studio-api/storage", storage_act),
+        web.post("/studio-api/activity", activity), web.get("/studio-api/activity", activity),
         web.get("/studio-api/civitai/key", civitai_key), web.put("/studio-api/civitai/key", civitai_key), web.delete("/studio-api/civitai/key", civitai_key), web.post("/studio-api/sheet/split", sheet_split),
         web.get("/studio-api/civitai/search", civitai_search), web.get("/studio-api/civitai/model/{id}", civitai_model),
         web.get("/studio-api/civitai/images", civitai_images), web.get("/studio-api/civitai/workflows", civitai_workflows), web.post("/studio-api/civitai/workflows/zip", civitai_workflows_zip),

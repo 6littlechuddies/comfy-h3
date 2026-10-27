@@ -1,4 +1,5 @@
 import { Crash } from "./components/Crash";
+import { IdleGuard } from "./components/IdleGuard";
 import { BUILT } from "./lib/selfcheck";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { create } from "zustand";
@@ -27,6 +28,7 @@ import { importCharacters, useCharacters } from "./lib/characters";
 import { viewUrl } from "./lib/api";
 import { ImportCard } from "./components/ImportCard";
 import { CatalogHost, openCatalog } from "./components/Catalog";
+import { StorageHost, openStorage } from "./components/Storage";
 import { setHistoryProject } from "./lib/promptHistory";
 import { useImport } from "./lib/importer";
 import { LoraBrowser, openLoraBrowser } from "./components/LoraBrowser";
@@ -187,6 +189,7 @@ export default function App() {
       </main>
       <Crash where="tray"><Tray /></Crash>
       <Toasts />
+      <IdleGuard />
       <DropAnywhere tab={tab} />
       <TitleProgress />
       <BootGate />
@@ -200,6 +203,7 @@ export default function App() {
       <RecipeEditorHost />
       <ImportCard />
       <CatalogHost />
+      <StorageHost />
       <SelfCheck />
       {loaded && <Assistant />}
       <Viewer />
@@ -299,8 +303,19 @@ function Header({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
 
 function MoreMenu() {
   const [open, setOpen] = useState(false);
-  const [key, setKey] = useState<{ set: boolean; source: string | null; count?: number }>({ set: true, source: null });
-  useEffect(() => { if (open) civitKeyStatus().then(setKey); }, [open]);
+  const [key, setKey] = useState<Awaited<ReturnType<typeof civitKeyStatus>>>({ set: true, source: null });
+  useEffect(() => { if (open) civitKeyStatus(true).then(setKey); }, [open]);
+  // a key CivitAI no longer accepts: said once, a couple of minutes after the rental starts (the check runs in the background)
+  useEffect(() => {
+    const t = setTimeout(() => civitKeyStatus().then((k) => {
+      const ks = k.check?.keys ?? [];
+      const bad = ks.filter((x) => x.ok === false);
+      if (bad.length) useJobs.getState().toast(`CivitAI keys: ${ks.length - bad.length} of ${ks.length} work — key ${bad.map((x) => x.n).join(", ")} was refused (expired or deleted?). Replace it in civitai_keys.txt on your drive.`, "bad");
+    }), 100_000);
+    return () => clearTimeout(t);
+  }, []);
+  const ks = key.check?.keys ?? [];
+  const badKeys = ks.filter((x) => x.ok === false);
   const [https, setHttps] = useState<string | null>(null);
   useEffect(() => { if (!window.isSecureContext) getHttpsLink().then(setHttps); }, [open]);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13.5px] text-ink hover:bg-hover";
@@ -310,14 +325,15 @@ function MoreMenu() {
       {open && <>
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div className="zoom-in absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-panel p-1.5 shadow-[0_24px_60px_-16px_rgba(0,0,0,.8)]" onClick={() => setOpen(false)}>
+          <button className={item} onClick={() => openStorage()}><Icon name="layers" size={15} className="text-muted" /><span className="flex flex-col"><span>Storage &amp; clean-up</span><span className="text-[12px] text-dim">What's using space · delete old results</span></span></button>
           <a className={item} href="/outputs/" target="_blank" rel="noreferrer"><Icon name="folder" size={15} className="text-muted" />All output files<Icon name="external" size={13} className="ml-auto text-dim" /></a>
           <a className={item} href="/" target="_blank" rel="noreferrer"><Icon name="layers" size={15} className="text-muted" />ComfyUI node editor<Icon name="external" size={13} className="ml-auto text-dim" /></a>
           {https && <a className={item} href={`${https}/studio/`}><Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>Secure link</span><span className="text-[12px] text-dim">Needed for the microphone</span></span></a>}
           <button className={item} onClick={() => openLoraBrowser()}><Icon name="search" size={15} className="text-muted" />Browse LoRAs</button>
           <button className={item} onClick={() => openImageImport()}><Icon name="link" size={15} className="text-muted" />CivitAI: collections, links, files</button>
           <button className={item} onClick={() => askCivitKey().then((ok) => { if (ok) civitKeyStatus().then(setKey); })}>
-            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${(key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
-            <span className={cx("ml-auto h-2 w-2 rounded-full", key.set ? "bg-good" : "bg-bad")} /></button>
+            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${ks.length ? (badKeys.length ? `${ks.length - badKeys.length} of ${ks.length} work (key ${badKeys.map((x) => x.n).join(", ")} refused) · ` : `${ks.length === 1 ? "works" : `all ${ks.length} work`} · `) : (key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
+            <span className={cx("ml-auto h-2 w-2 shrink-0 rounded-full", !key.set ? "bg-bad" : badKeys.length ? "bg-[#f0a845]" : "bg-good")} /></button>
           <a className={item} href="/terminal/?arg=claude" target="_blank" rel="noreferrer"><Icon name="chat" size={15} className="shrink-0 text-accent" /><span className="flex min-w-0 flex-col"><span>Claude on this rental</span><span className="text-[12px] text-dim">Reads the logs, finds and fixes problems</span></span><Icon name="external" size={13} className="ml-auto shrink-0 text-dim" /></a>
           <AlertsItem cls={item} https={https} />
           <button className={item} onClick={() => { copyDebugReport(); }}><Icon name="script" size={15} className="shrink-0 text-muted" /><span className="flex min-w-0 flex-col"><span>Copy debug report</span><span className="text-[12px] text-dim">Errors, logs, GPU · passwords hidden</span></span></button>

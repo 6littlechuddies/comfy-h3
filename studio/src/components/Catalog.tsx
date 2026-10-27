@@ -12,9 +12,11 @@ import { openViewer } from "./Viewer";
 import { Icon, cx } from "./ui";
 
 interface CatItem extends FileRef { kind: "image" | "video"; mtime: number; folder: string; tab: string; meta?: { label?: string; prompt?: string; character?: string } }
-export const useCatalog = create<{ open: boolean; folder: string | null }>(() => ({ open: false, folder: null }));
+export const useCatalog = create<{ open: boolean; folder: string | null; q: string }>(() => ({ open: false, folder: null, q: "" }));
 /** open the catalog, on a project's folder (null = the project you're in) */
-export const openCatalog = (folder?: string | null) => useCatalog.setState({ open: true, folder: folder ?? null });
+export const openCatalog = (folder?: string | null, q = "") => useCatalog.setState({ open: true, folder: folder ?? null, q });
+/** search every project's results by the words they were made from */
+export const searchResults = (q: string) => openCatalog("", q);
 const cleanFolder = (n: string) => n.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/^\.+/, "").trim().slice(0, 60) || "Untitled";
 const TAB_NAME: Record<string, string> = { create: "Create", edit: "Edit", animate: "Animate", characters: "Characters", finish: "Finish", batch: "Batch", scenes: "Scenes", prompt: "Prompt" };
 
@@ -28,7 +30,7 @@ function CatalogPanel() {
   const sel = useCharacters((s) => s.list.find((c) => c.id === s.sel) ?? null);
   const [folder, setFolder] = useState<string>(() => want ?? (sel ? cleanFolder(sel.name) : ""));
   const [kind, setKind] = useState<"" | "image" | "video">("");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => useCatalog.getState().q);
   const [items, setItems] = useState<CatItem[]>([]);
   const [total, setTotal] = useState(0);
   const [folders, setFolders] = useState<{ name: string; count: number }[]>([]);

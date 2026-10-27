@@ -45,6 +45,8 @@ interface JobState {
   toast: (text: string, tone?: Toast["tone"], tab?: Tab) => void;
   /** delete results: the files go too (a job with nothing left disappears) */
   removeOutputs: (items: { jobId: string; filename: string; subfolder: string }[]) => void;
+  /** take results off the lists only (the files were already deleted another way, e.g. Storage → clean up) */
+  forgetOutputs: (items: { filename: string; subfolder: string }[]) => void;
   dismiss: (id: number) => void;
   eta: (key: string) => number | undefined;
 }
@@ -103,6 +105,14 @@ export const useJobs = create<JobState>((set, get) => ({
     set((s) => ({ jobs: trimJobs([job, ...s.jobs]) }));
     if (tab === "animate") import("./notify").then(({ useNotify, watchJobs }) => { if (useNotify.getState().every) watchJobs([id], `Video ready: ${label}`); });
     return job;
+  },
+  forgetOutputs: (items) => {
+    const gone = new Set(items.map((x) => `${x.subfolder}|${x.filename}`));
+    set((s) => ({
+      jobs: s.jobs.map((j) => (j.outputs.some((o) => gone.has(`${o.subfolder}|${o.filename}`)) ? { ...j, outputs: j.outputs.filter((o) => !gone.has(`${o.subfolder}|${o.filename}`)) } : j))
+        .filter((j) => j.status !== "done" || j.outputs.length > 0 || Object.keys(j.texts).length > 0),
+    }));
+    import("./tray").then(({ useTray }) => useTray.setState((t) => ({ items: t.items.filter((i) => !(i.src.type === "output" && gone.has(`${i.src.subfolder}|${i.src.filename}`))) }))).catch(() => {});
   },
   removeOutputs: (items) => {
     const gone = new Set(items.map((x) => `${x.jobId}|${x.subfolder}|${x.filename}`));

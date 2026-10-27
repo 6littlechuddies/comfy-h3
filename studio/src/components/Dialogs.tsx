@@ -21,7 +21,7 @@ export function Modal({ children, onClose, width = 420, label }: { children: Rea
     window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true);
   }, [onClose]);
   return createPortal(
-    <div className="fade-in fixed inset-0 z-[60] flex items-start justify-center bg-black/55 px-4 pt-[14vh] backdrop-blur-[3px]" onMouseDown={onClose} role="dialog" aria-label={label} aria-modal>
+    <div className="fade-in fixed inset-0 z-[100] flex items-start justify-center bg-black/55 px-4 pt-[14vh] backdrop-blur-[3px]" onMouseDown={onClose} role="dialog" aria-label={label} aria-modal>
       <div className="zoom-in ticks frame card w-full border border-line" style={{ maxWidth: width }} onMouseDown={(e) => e.stopPropagation()}>{children}</div>
     </div>, document.body);
 }

@@ -11,7 +11,7 @@
 #   KILL_MBPS=10                  below this the host is unusable: it stops (and destroys itself, see below)
 #   SPEED_CHECK_SECONDS=120       how long to measure before judging the host
 #   AUTO_DESTROY_SLOW=1           destroy this instance if it fails the speed check
-#   IDLE_MINUTES=45               destroy after this many minutes unused: no jobs AND no browser tab open (0 = never)
+#   IDLE_MINUTES=30               shut down after this many minutes unused: no jobs, no downloads, nobody using the Studio (0 = never)
 #   EXTRA_NODES                   comma-separated GitHub links of extra custom nodes to install at boot (no rebuild)
 #   HF_TOKEN                      Hugging Face token (sent to huggingface.co only) — makes downloads ~300 MB/s
 #   HF_TOKENS                     several keys, comma-separated: when Hugging Face slows one down, the next is used
@@ -55,7 +55,7 @@ MIN_MBPS="${MIN_MBPS:-25}"
 KILL_MBPS="${KILL_MBPS:-}"
 SPEED_CHECK_SECONDS="${SPEED_CHECK_SECONDS:-120}"
 AUTO_DESTROY_SLOW="${AUTO_DESTROY_SLOW:-1}"
-export IDLE_MINUTES="${IDLE_MINUTES:-45}"
+export IDLE_MINUTES="${IDLE_MINUTES:-30}"
 # the template's example value (b2:YOUR-BUCKET-NAME/…) isn't a real backup: treat it as no backup at all
 if [[ "${RCLONE_REMOTE:-}" == *YOUR-BUCKET* || "${RCLONE_REMOTE:-}" == *your-bucket* ]]; then
   echo "RCLONE_REMOTE is still the example value — backup to it is off"; unset RCLONE_REMOTE

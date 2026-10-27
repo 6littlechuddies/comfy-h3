@@ -3,8 +3,9 @@
 Backup: every new file in ComfyUI's output folder is uploaded to your cloud storage within ~30 s
 of being created (rclone; set RCLONE_REMOTE + RCLONE_CONFIG_* env vars, e.g. Backblaze B2).
 
-Idle shutdown: after IDLE_MINUTES with no jobs queued AND no ComfyUI tab open, the instance shuts
-itself down so a forgotten GPU can't keep billing you. It never throws away unsaved outputs:
+Idle shutdown: after IDLE_MINUTES (default 30) with no jobs, no model downloads and nobody using the Studio (clicks,
+typing, scrolling — a tab merely left open doesn't count), the instance shuts itself down so a forgotten GPU can't keep
+billing you. The Studio warns 5 minutes before, with "Keep it on". It never throws away unsaved outputs:
   * backup configured and the final upload succeeded (or there are no outputs) -> DESTROY (billing stops)
   * otherwise (no backup set up, or the upload failed)                        -> STOP instead: the GPU
     is released, the disk and your outputs are kept (small daily storage fee) until you start the
@@ -14,11 +15,13 @@ import json, os, subprocess, time, urllib.request
 
 COMFY = "http://127.0.0.1:18188"
 PUBLIC_PORT = "8188"
-IDLE_MINUTES = float(os.environ.get("IDLE_MINUTES", "45"))
+IDLE_MINUTES = float(os.environ.get("IDLE_MINUTES", "30"))
 REMOTE = os.environ.get("RCLONE_REMOTE", "").strip()
 CID = os.environ.get("CONTAINER_ID", "")
 OUT_DIR = os.path.join(os.environ.get("COMFY_DIR", "/opt/ComfyUI"), "output")
 STATUS = "/opt/h3/run/status.json"
+# touched by the Studio page whenever you use it (and pushed into the future by "Keep it on for 2 hours")
+ACTIVITY = "/opt/h3/run/activity"
 STUDIO_STATE = os.path.join(os.environ.get("COMFY_DIR", "/opt/ComfyUI"), "user", "default", "studio")
 STUDIO_SERVER = "/opt/h3/studio_server.py"
 CHECK_EVERY = 30  # seconds
@@ -54,6 +57,17 @@ def claude_working(window=180):
         try: newest = max(newest, os.path.getmtime(f))
         except OSError: pass
     return time.time() - newest < window
+
+
+def downloading():
+    """models still coming in (aria2c running): never idle — a fresh rental is often left alone while it downloads"""
+    return subprocess.run(["pgrep", "-x", "aria2c"], capture_output=True).returncode == 0
+
+
+def last_used():
+    """when you last used the Studio (0 = no Studio page has said anything since this rental started)"""
+    try: return os.path.getmtime(ACTIVITY)
+    except OSError: return 0.0
 
 
 def outputs_signature():
@@ -125,11 +139,12 @@ def studio_upkeep(state_sig):
     return state_sig
 
 
-def write_status(idle_s, tab_open, busy, sig, claude=False):
+def write_status(idle_s, tab_open, busy, sig, claude=False, dl=False):
     left = max(0, int(IDLE_MINUTES * 60 - idle_s)) if IDLE_MINUTES > 0 else None
-    msg = "ComfyUI is up" + (" · generating" if busy else "") + (" · browser tab open" if tab_open else "") + (" · Claude is working" if claude else "")
+    msg = "ComfyUI is up" + (" · generating" if busy else "") + (" · downloading models" if dl else "") + (" · browser tab open" if tab_open else "") + (" · Claude is working" if claude else "")
     s = {"phase": "ready", "message": msg, "idle_s": int(idle_s), "auto_shutdown_in_s": left,
          "auto_destroy_in_s": left, "browser_open": tab_open, "busy": busy,
+         "idle_limit_s": int(IDLE_MINUTES * 60) if IDLE_MINUTES > 0 else None, "downloading": dl,
          "outputs": sig[0], "backup": REMOTE or None,
          "all_outputs_backed_up": (sig == state["backed_up_sig"]) if REMOTE else None,
          "last_backup_ok": state["last_backup_ok"], "last_backup_at": state["last_backup_at"]}
@@ -156,13 +171,14 @@ def shutdown():
         state["backed_up_sig"] = outputs_signature()
         print("idle, outputs backed up -> destroying", flush=True); vast("destroy"); return
     if not REMOTE and proton_final():
-        print("idle, results and export saved to Proton Drive -> destroying", flush=True); vast("destroy"); return
-    why = "backup failed" if REMOTE else "Proton Drive save failed" if PROTON else "no backup configured"
+        print("idle, results and export saved to your drive -> destroying", flush=True); vast("destroy"); return
+    why = "backup failed" if REMOTE else "the save to your drive failed" if PROTON else "no backup configured"
     print(f"idle, {why} -> STOPPING (not destroying) so your outputs are kept", flush=True)
     vast("stop")
 
 
-PROTON = bool(os.environ.get("PROTON_USER") and os.environ.get("PROTON_PASSWORD"))
+# your Google Drive (GDRIVE_TOKEN) or Proton Drive: one last save there, then the rental can be destroyed
+PROTON = bool(os.environ.get("GDRIVE_TOKEN") or (os.environ.get("PROTON_USER") and os.environ.get("PROTON_PASSWORD")))
 STUDIO_API = "http://127.0.0.1:18190/studio-api/proton"
 
 
@@ -207,9 +223,14 @@ def main():
         # dead and out of restarts -> don't treat "unreachable" as busy, so idle shutdown still happens
         busy = queue_busy() if alive else False
         claude = claude_working()
-        if busy or tab_open or claude:
+        dl = downloading()
+        used = last_used()
+        # once the Studio reports when you use it, an open tab alone no longer keeps the rental on (a tab forgotten
+        # overnight used to); before that (e.g. only the node editor is open) an open tab still counts
+        if busy or claude or dl or (tab_open and not used):
             last_active = now
-        idle = now - last_active
+        last_active = max(last_active, used)  # "Keep it on for 2 hours" puts this in the future
+        idle = max(0.0, now - last_active)
 
         # upload new outputs as soon as they appear (and the file has stopped changing)
         sig = outputs_signature()
@@ -218,7 +239,7 @@ def main():
                 state["backed_up_sig"] = sig
 
         state_sig = studio_upkeep(state_sig)
-        write_status(idle, tab_open, busy, sig, claude)
+        write_status(idle, tab_open, busy, sig, claude, dl)
         if IDLE_MINUTES > 0 and idle >= IDLE_MINUTES * 60:
             shutdown()
             return

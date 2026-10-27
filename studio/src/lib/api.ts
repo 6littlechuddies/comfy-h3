@@ -146,7 +146,7 @@ export const finishStatus = async (id: string) => j<FinishJob>(await fetch(`/stu
 export interface Cost { dph: number; hours: number | null; total: number | null }
 export async function getCost(): Promise<Cost | null> { try { return await j(await fetch("/studio-api/cost")); } catch { return null; } }
 export interface InstanceStatus {
-  phase: string; message: string; busy?: boolean; browser_open?: boolean; auto_shutdown_in_s?: number | null;
+  phase: string; message: string; busy?: boolean; browser_open?: boolean; auto_shutdown_in_s?: number | null; idle_limit_s?: number | null; downloading?: boolean;
   all_outputs_backed_up?: boolean | null; backup?: string | null; percent?: number;
 }
 export async function getStatus(): Promise<InstanceStatus | null> { try { return await j(await fetch("/h3-status", { cache: "no-store" })); } catch { return null; } }
@@ -323,8 +323,9 @@ export async function splitSheet(from: FileRef, n = 4): Promise<FileRef[]> {
 }
 
 // ------------------------------------------------------------------ CivitAI key (pasted in the Studio, kept with your settings)
-export async function civitKeyStatus(): Promise<{ set: boolean; source: "template" | "studio" | "drive" | null; count?: number }> {
-  try { return await j(await fetch("/studio-api/civitai/key")); } catch { return { set: false, source: null }; }
+export interface CivitKeyCheck { at: number; keys: { n: number; ok: boolean | null; why: string }[] }
+export async function civitKeyStatus(check = false): Promise<{ set: boolean; source: "template" | "studio" | "drive" | null; count?: number; check?: CivitKeyCheck }> {
+  try { return await j(await fetch(`/studio-api/civitai/key${check ? "?check=1" : ""}`)); } catch { return { set: false, source: null }; }
 }
 export async function saveCivitKey(key: string) {
   const r = await fetch("/studio-api/civitai/key", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
@@ -338,4 +339,10 @@ export async function askCivitKey(): Promise<boolean> {
   if (!k) return false;
   try { await saveCivitKey(k); useJobs.getState().toast("CivitAI key saved — kept with your settings, so it works on every rental.", "good"); return true; }
   catch (e) { useJobs.getState().toast((e as Error).message, "bad"); return false; }
+}
+
+// ------------------------------------------------------------------ idle shutdown
+/** you're using the Studio: the rental's idle shutdown starts over (hours > 0: keep it on that long whatever happens) */
+export async function markUsed(hours = 0): Promise<{ kept_on_until: number | null } | null> {
+  try { return await j(await fetch("/studio-api/activity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hours }) })); } catch { return null; }
 }
