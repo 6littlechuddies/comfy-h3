@@ -13,6 +13,7 @@ import { trayIdOf, useTray } from "../lib/tray";
 import { viewUrl } from "../lib/api";
 import { askConfirm } from "./Dialogs";
 import { RecipeMenu } from "./MyRecipes";
+import { countLabel, moveResults } from "../lib/move";
 import { Icon, cx } from "./ui";
 
 /** each picture through `fn`, two at a time; failures are counted and the first one is shown */
@@ -32,6 +33,8 @@ export function SelectionBar() {
   const favs = useFavs((s) => s.set);
   const toast = useJobs((s) => s.toast);
   const [menu, setMenu] = useState(false);
+  const [moveMenu, setMoveMenu] = useState(false);
+  const chars = useCharacters((s) => s.list);
   const its = Object.values(items);
   // leaving the tab, or Esc, lets go of the selection
   useEffect(() => { if (tab && cur !== tab) clear(); }, [cur, tab, clear]);
@@ -40,7 +43,7 @@ export function SelectionBar() {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("[role=dialog]")) { if (menu) setMenu(false); else clear(); } };
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
   }, [its.length, menu, clear]);
-  useEffect(() => { if (!its.length) setMenu(false); }, [its.length]);
+  useEffect(() => { if (!its.length) { setMenu(false); setMoveMenu(false); } }, [its.length]);
   if (!tab || !its.length) return null;
 
   const pics = its.filter((it) => it.o.kind === "image");
@@ -117,6 +120,20 @@ export function SelectionBar() {
       <span className="relative shrink-0">
         <button onClick={() => setMenu((v) => !v)} disabled={!pics.length} aria-expanded={menu} title={noPics ?? "Run one of your recipes on these"} className={cx(btn, menu && "bg-white/10")}><Icon name="layers" size={14} className="text-accent" />Recipe<Icon name="chev" size={12} className="text-muted" /></button>
         {menu && <div className="absolute bottom-full right-0 mb-2"><RecipeMenu pics={pics.map(ref)} tab={t} onDone={() => { setMenu(false); clear(); }} /></div>}
+      </span>
+      <span className="relative shrink-0">
+        <button onClick={() => setMoveMenu((v) => !v)} aria-expanded={moveMenu} title="Move these to another project (or drag them onto one on the left)" className={cx(btn, moveMenu && "bg-white/10")}><Icon name="folder" size={14} className="text-muted" />Move to<Icon name="chev" size={12} className="text-muted" /></button>
+        {moveMenu && (
+          <div role="menu" className="absolute bottom-full right-0 mb-2 max-h-[50vh] w-60 overflow-y-auto rounded-xl border border-line bg-raised2 py-1 shadow-2xl">
+            {[{ id: null as string | null, name: "Free work" }, ...chars.map((x) => ({ id: x.id as string | null, name: x.name }))].map((p) => (
+              <button key={p.id ?? "free"} role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-ink hover:bg-hover" onClick={() => {
+                const k = moveResults(its.map((it) => ({ jobId: it.j.id, filename: it.o.filename, subfolder: it.o.subfolder })), p.id);
+                setMoveMenu(false); clear();
+                toast(k ? `Moved ${countLabel(k)} to ${p.id ? `${p.name}'s project` : "Free work"}` : `Already in ${p.name}`, k ? "good" : "info", t);
+              }}><Icon name={p.id ? "user" : "sparkle"} size={13} className="text-muted" /><span className="truncate">{p.name}</span></button>
+            ))}
+          </div>
+        )}
       </span>
       <span className="mx-1 h-5 w-px bg-line" aria-hidden />
       <button onClick={() => its.forEach((it) => { if (isFav(favs, it.o) === allFav) toggleFav(it.o); })} title={allFav ? "Remove from favourites" : "Add to favourites"} aria-label="Favourite" className={cx(btn, "w-9 justify-center px-0")}>

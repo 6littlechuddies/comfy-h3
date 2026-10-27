@@ -13,6 +13,7 @@ import { sendTo } from "../App";
 import { Icon, JobBar, MediaView, cx, fmtDur } from "./ui";
 import { copyText } from "../lib/copy";
 import { pickKey, useSelect, type Picked } from "../lib/select";
+import { MOVE_DRAG, useMoveDrag } from "../lib/move";
 
 const NONE: Record<string, Picked> = {};
 
@@ -205,11 +206,18 @@ function FeedCard({ it, fav, acts, onOpen, delay, size, count = 1, onDeleteAll, 
   const drag = (e: React.DragEvent) => {
     // drag a result anywhere: a slot, the Create box, Animate…
     const item = useTray.getState().addOutput(o, j.label);
-    if (item) { e.dataTransfer.setData(DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = "copy"; }
+    if (item) e.dataTransfer.setData(DRAG_TYPE, item.id);
+    e.dataTransfer.effectAllowed = "copyMove";
+    // …or onto a project on the left to move it there: every picked result goes along when this one is picked
+    const st = useSelect.getState();
+    const group = on && Object.keys(st.items).length ? Object.values(st.items) : [it];
+    e.dataTransfer.setData(MOVE_DRAG, JSON.stringify(group.map((p) => ({ jobId: p.j.id, filename: p.o.filename, subfolder: p.o.subfolder }))));
+    useMoveDrag.setState({ n: group.length });
+    if (group.length > 1) e.dataTransfer.setDragImage(stackGhost(group.map((p) => p.o)), 30, 30);
   };
   return (
     <div className={cx("fade-up card-hover group relative break-inside-avoid overflow-hidden rounded-xl border bg-black", on ? "border-accent ring-2 ring-accent" : "border-line")} style={{ animationDelay: `${delay}ms` }}>
-      <button onClick={(e) => (sel.selecting || e.shiftKey ? sel.onPick(it, e.shiftKey) : onOpen())} draggable onDragStart={drag} className={cx("block min-h-[120px] w-full", o.filename.includes("cutout") && "checker")} aria-label="Open full screen">
+      <button onClick={(e) => (sel.selecting || e.shiftKey ? sel.onPick(it, e.shiftKey) : onOpen())} draggable onDragStart={drag} onDragEnd={() => useMoveDrag.setState({ n: 0 })} className={cx("block min-h-[120px] w-full", o.filename.includes("cutout") && "checker")} aria-label="Open full screen">
         {o.kind === "video"
           ? <video src={viewUrl(o)} muted loop playsInline preload="metadata" className="block w-full" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} />
           : <img src={viewUrl(o)} alt="" loading="lazy" draggable={false} onContextMenu={(e) => openPictureMenu(e, { output: o, label: j.label })} className="block w-full transition-transform duration-500 group-hover:scale-[1.015]" />}
@@ -240,6 +248,17 @@ function FeedCard({ it, fav, acts, onOpen, delay, size, count = 1, onDeleteAll, 
       </div>
     </div>
   );
+}
+
+/** the drag picture for several results: a little fanned stack + "5 pictures · drop on a project to move" */
+function stackGhost(os: Output[]): HTMLElement {
+  const el = document.createElement("div");
+  el.style.cssText = "position:fixed;top:-300px;left:-400px;display:flex;align-items:center;gap:12px;padding:8px 14px 8px 8px;border-radius:14px;background:#15151a;border:2px solid var(--color-accent,#d4ff3a);box-shadow:0 8px 30px rgba(0,0,0,.5);font:600 13px system-ui,sans-serif;color:#fff;z-index:9999";
+  const pics = os.filter((o) => o.kind === "image").slice(0, 3);
+  el.innerHTML = `<span style="position:relative;width:52px;height:52px;display:block">${pics.map((o, i) => `<img src="${viewUrl(o)}" style="position:absolute;left:${i * 6}px;top:${i * 4}px;width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,.5)">`).join("")}</span><span style="display:flex;flex-direction:column;line-height:1.25"><span>${os.length} pictures</span><span style="font-weight:500;font-size:11px;opacity:.7">Drop on a project to move them</span></span>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 0);
+  return el;
 }
 
 function Lightbox({ items, index, setIndex, acts }: { items: Item[]; index: number; setIndex: (i: number | null) => void; acts: (it: Item) => Act[] }) {

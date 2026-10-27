@@ -18,6 +18,35 @@ import { useJobs } from "../lib/jobs";
 import { useWork } from "../lib/work";
 import { DRAG_TYPE, useTray } from "../lib/tray";
 import { QueuePanel } from "./QueueDock";
+import { MOVE_DRAG, countLabel, moveResults, useMoveDrag, type MoveItem } from "../lib/move";
+import { useSelect } from "../lib/select";
+
+/** a project as a drop target for results dragged from the results grid: they move into this project */
+function useMoveTarget(project: string | null) {
+  const [over, setOver] = useState(false);
+  const armed = useMoveDrag((s) => s.n > 0);
+  const n = useMoveDrag((s) => s.n);
+  const has = (e: React.DragEvent) => e.dataTransfer.types.includes(MOVE_DRAG);
+  const props = {
+    onDragOver: (e: React.DragEvent) => { if (!has(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!over) setOver(true); },
+    onDragLeave: (e: React.DragEvent) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setOver(false); },
+    onDrop: (e: React.DragEvent) => {
+      setOver(false);
+      if (!has(e)) return;
+      e.preventDefault(); // the page's own drop (into this tab) leaves it alone
+      let items: MoveItem[] = [];
+      try { items = JSON.parse(e.dataTransfer.getData(MOVE_DRAG)); } catch { return; }
+      useMoveDrag.setState({ n: 0 });
+      const k = moveResults(items, project);
+      const name = project ? useCharacters.getState().list.find((c) => c.id === project)?.name ?? "that project" : "Free work";
+      useSelect.getState().clear();
+      useJobs.getState().toast(k ? `Moved ${countLabel(k)} to ${project ? `${name}'s project` : "Free work"}` : `Already in ${project ? `${name}'s project` : "Free work"}`, k ? "good" : "info");
+    },
+  };
+  return { props, over, armed, n };
+}
+/** the ring a drop target gets while results are being dragged */
+const dropRing = (armed: boolean, over: boolean) => (over ? "!border-accent bg-accent/15 outline outline-2 outline-accent" : armed ? "outline outline-1 outline-dashed outline-accent/50" : "");
 export const CHAR_DRAG = "application/x-h3-character";
 /** the character being dragged right now (from the rail): the drop overlay and the slots show it as a character, not a photo */
 export const useCharDrag = create<{ id: string | null }>(() => ({ id: null }));
@@ -133,9 +162,9 @@ export function ProjectRail() {
     <RailMenu />
     <aside aria-label="Characters" className="flex w-[58px] shrink-0 flex-col items-center gap-2 border-r border-line2 bg-panel py-3">
       <button onClick={toggleSmall} title="Show the character list" aria-label="Show the character list" className="press flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="rail" size={16} /></button>
-      <button onClick={() => pick(null)} title="Free work — no character" className={cx("press flex h-10 w-10 items-center justify-center border", !sel ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}><Icon name="sparkle" size={15} /></button>
-      <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto">
-        {list.map((c) => <Avatar key={c.id} c={c} on={c.id === sel} onClick={() => pick(c.id)} size={40} />)}
+      <FreeDrop narrow on={!sel} onClick={() => pick(null)} />
+      <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto p-0.5">
+        {list.map((c) => <DropAvatar key={c.id} c={c} on={c.id === sel} onClick={() => pick(c.id)} />)}
       </div>
       <QueuePanel narrow />
       <button onClick={add} title="New character" className="press flex h-9 w-9 items-center justify-center border border-line text-muted hover:border-accent hover:text-ink"><Icon name="plus" size={14} /></button>
@@ -157,10 +186,7 @@ export function ProjectRail() {
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
-        <button onClick={() => pick(null)} className={cx("flex items-center gap-2.5 border-l-2 px-2 py-2 text-left text-[13px]", !sel ? "border-accent bg-hover text-ink" : "border-transparent text-muted hover:bg-hover hover:text-ink")}>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-line"><Icon name="sparkle" size={14} /></span>
-          <span className="flex flex-col leading-tight"><span>Free work</span><span className="text-[11.5px] text-dim">no character</span></span>
-        </button>
+        <FreeDrop on={!sel} onClick={() => pick(null)} />
         {!loaded && <p className="px-2 py-2 text-[12.5px] text-muted">Loading…</p>}
         {loaded && list.length === 0 && <p className="px-2 py-3 text-[12.5px] leading-relaxed text-muted">No characters yet. Press <b className="text-ink">New</b>, or import profiles in Characters.</p>}
         {shown.map((c) => (
@@ -188,6 +214,24 @@ export function ProjectRail() {
   </>);
 }
 
+function FreeDrop({ on, onClick, narrow }: { on: boolean; onClick: () => void; narrow?: boolean }) {
+  const t = useMoveTarget(null);
+  if (narrow) return (
+    <button {...t.props} onClick={onClick} title={t.armed ? "Drop here to move them to Free work" : "Free work — no character"}
+      className={cx("press flex h-10 w-10 items-center justify-center border", on ? "border-accent text-accent" : "border-line text-muted hover:text-ink", dropRing(t.armed, t.over))}><Icon name="sparkle" size={15} /></button>
+  );
+  return (
+    <button {...t.props} onClick={onClick} className={cx("flex items-center gap-2.5 border-l-2 px-2 py-2 text-left text-[13px]", on ? "border-accent bg-hover text-ink" : "border-transparent text-muted hover:bg-hover hover:text-ink", dropRing(t.armed, t.over))}>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-line"><Icon name="sparkle" size={14} /></span>
+      <span className="flex flex-col leading-tight"><span>Free work</span><span className="text-[11.5px] text-dim">{t.over ? `Drop to move ${countLabel(t.n)} here` : "no character"}</span></span>
+    </button>
+  );
+}
+function DropAvatar({ c, on, onClick }: { c: Character; on: boolean; onClick: () => void }) {
+  const t = useMoveTarget(c.id);
+  return <div {...t.props} title={t.armed ? `Drop here to move them to ${c.name}` : c.name} className={cx("shrink-0", dropRing(t.armed, t.over))}><Avatar c={c} on={on} onClick={onClick} size={40} /></div>;
+}
+
 function Avatar({ c, on, onClick, size = 36 }: { c: Character; on?: boolean; onClick?: () => void; size?: number }) {
   const f = c.views.face || c.views.front;
   return (
@@ -199,6 +243,7 @@ function Avatar({ c, on, onClick, size = 36 }: { c: Character; on?: boolean; onC
 }
 
 function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean; tab: Tab; open: boolean; toggle: () => void; pick: (go?: Tab) => void }) {
+  const drop = useMoveTarget(c.id);
   const scenes = useScenes(useShallow((s) => s.list.filter((x) => x.cast.includes(c.id))));
   const sceneSel = useScenes((s) => s.sel);
   const views = Object.keys(c.views).length;
@@ -231,11 +276,12 @@ function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean
           useCharDrag.setState({ id: c.id });
         }}
         onDragEnd={() => useCharDrag.setState({ id: null })}
-        className={cx("flex cursor-grab items-center gap-2 border-l-2 px-2 py-1.5 active:cursor-grabbing", on ? "border-accent bg-hover" : "border-transparent hover:bg-hover")}>
+        {...drop.props}
+        className={cx("flex cursor-grab items-center gap-2 border-l-2 px-2 py-1.5 active:cursor-grabbing", on ? "border-accent bg-hover" : "border-transparent hover:bg-hover", dropRing(drop.armed, drop.over))}>
         <Avatar c={c} on={on} onClick={() => { pick(); if (!open) toggle(); }} />
         <button onClick={() => { pick(); if (!open || on) toggle(); }} className="min-w-0 flex-1 text-left">
           <div className={cx("truncate text-[13px] font-medium", on ? "text-ink" : "text-ink/85")}>{c.name}</div>
-          <div className="text-[11.5px] text-dim">{c.style === "anime" ? "Anime" : "Realistic"} · {views} pic{views === 1 ? "" : "s"}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</div>
+          <div className="text-[11.5px] text-dim">{drop.over ? <span className="text-accent">Drop to move {countLabel(drop.n)} here</span> : <>{c.style === "anime" ? "Anime" : "Realistic"} · {views} pic{views === 1 ? "" : "s"}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</>}</div>
         </button>
         <button onClick={toggle} aria-label={open ? "Fold" : "Unfold"} aria-expanded={open} className="press flex h-6 w-6 items-center justify-center text-dim hover:text-ink">
           <Icon name="chev" size={13} className={cx("transition-transform", !open && "-rotate-90")} />
