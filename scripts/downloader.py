@@ -59,15 +59,16 @@ if __name__ == "__main__": _wait_for_key_file()
 HF_KEYS = _keys()
 HF_TOKEN = HF_KEYS[0] if HF_KEYS else ""
 ROTATE_MBPS = float(os.environ.get("HF_ROTATE_MBPS", "100"))   # Hugging Face slower than this for a while -> next key
-# How patient the switching is: a slow key is dropped about 30 s after it turns slow (15 s to warm up, 15 s measured
-# slow), and switches are at least 30 s apart. Every switch restarts the downloads (finished pieces are kept); the
+# How patient the switching is: a key gets 40 s to get going after a (re)start, is dropped after 20 s measured slow,
+# and switches are at least 60 s apart — and a key that hasn't started moving data yet is never judged (a restart takes
+# 30-60 s to reconnect every file; judging it at "0 MB/s" made the downloader throw away good keys one after another). Every switch restarts the downloads (finished pieces are kept); the
 # H3_ROT_* variables in the template make it more patient again if that ever costs more than it saves.
-ROT_WARMUP = float(os.environ.get("H3_ROT_WARMUP", "15"))        # seconds after a (re)start before speed is judged at all (connections ramping up)
-ROT_WINDOW = float(os.environ.get("H3_ROT_WINDOW", "15"))        # speed is measured over this long, not a 3-second blip
-ROT_SLOW_FOR = float(os.environ.get("H3_ROT_SLOW_FOR", "15"))      # must stay under ROTATE_MBPS this long before switching...
-ROT_SLOW_FOR_FAST = float(os.environ.get("H3_ROT_SLOW_FOR_FAST", "15"))  # ...or this long if this key already did STAY_MBPS on this rental (a dip, not a throttle)
+ROT_WARMUP = float(os.environ.get("H3_ROT_WARMUP", "40"))        # seconds after a (re)start before speed is judged at all (connections ramping up)
+ROT_WINDOW = float(os.environ.get("H3_ROT_WINDOW", "20"))        # speed is measured over this long, not a 3-second blip
+ROT_SLOW_FOR = float(os.environ.get("H3_ROT_SLOW_FOR", "20"))      # must stay under ROTATE_MBPS this long before switching...
+ROT_SLOW_FOR_FAST = float(os.environ.get("H3_ROT_SLOW_FOR_FAST", "20"))  # ...or this long if this key already did STAY_MBPS on this rental (a dip, not a throttle)
 STAY_MBPS = float(os.environ.get("HF_STAY_MBPS", "200"))
-ROT_GAP = float(os.environ.get("H3_ROT_GAP", "30"))  # at least this long between two switches
+ROT_GAP = float(os.environ.get("H3_ROT_GAP", "60"))  # at least this long between two switches
 HF_BASE = os.environ.get("H3_HF_BASE", "https://huggingface.co/")  # the local test points this at a fake server
 JOBS = max(1, int(os.environ.get("DL_JOBS") or 8))  # files downloaded at once (each uses up to 16 connections); 16 at once (256 connections) got throttled
 # a connection slower than this for a while is dropped and retried. Keep it low: 8 files x 16 connections share the line,
@@ -740,7 +741,10 @@ def main() -> int:
                     pass
             # only judge with a fair picture: past the ramp-up, a full window, and at least 3 files still going
             # (2 big files at the end can't fill the line by themselves — that's the tail, not a throttle)
-            fair = hf_rate is not None and now - launched_at >= ROT_WARMUP and min(n for t, _, n in hf_samples if t >= old[0]) >= 3
+            # still starting (under 50 MB moved since this key began, for up to 90 s): not judged yet
+            started = hf_samples and (hb - hf_samples[0][1]) >= 50 * 1048576
+            fair = hf_rate is not None and now - launched_at >= ROT_WARMUP and min(n for t, _, n in hf_samples if t >= old[0]) >= 3 \
+                and (started or now - launched_at >= 90)
             # slow = under half of what this key did here (it started fast, then got throttled), or under ROTATE_MBPS
             mine = ROT["best"].get(HF_TOKEN, 0.0)
             slow_mark = min(ROTATE_MBPS, mine * 0.5) if mine >= 20 else ROTATE_MBPS
