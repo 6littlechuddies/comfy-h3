@@ -147,7 +147,8 @@ async def delete_output(req):
         async def _cloud_delete():
             try:
                 await _proton_setup()
-                await _rclone("deletefile", f"proton:{folder_}/results/{rel}", timeout=120)
+                # straight out, not into Google Drive's trash (where it would still use your storage for 30 days)
+                await _rclone("deletefile", "--drive-use-trash=false", f"proton:{folder_}/results/{rel}", timeout=120)
             except Exception as e:  # noqa: BLE001
                 print("!! deleting from the backup:", _redact(str(e))[:200], flush=True)
         _spawn(_cloud_delete())
