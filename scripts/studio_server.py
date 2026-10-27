@@ -2614,17 +2614,20 @@ async def _keys_refresh_loop():
         if not _proton_on(): return
         # stuck slow: ask your PC for fresh keys by itself — when every key was tried, or when Hugging Face has stayed
         # under 100 MB/s for 2 minutes in a row (switching keys didn't help). At most every 20 minutes.
-        try:
-            k = json.load(open(os.path.join(run_dir, "downloads.json"))).get("hf_key") or {}
-            mb = k.get("mbps")
-            if mb is not None and mb < 100: KEY_REQ["slow_since"] = KEY_REQ["slow_since"] or time.time()
-            elif mb is not None: KEY_REQ["slow_since"] = 0.0
-            stuck = str(k.get("last") or "").startswith("every key tried") or (KEY_REQ["slow_since"] and time.time() - KEY_REQ["slow_since"] >= 120)
-            if stuck and time.time() - KEY_REQ["auto"] > 1200 and time.time() - KEY_REQ["at"] > 600:
-                KEY_REQ["auto"] = time.time()
-                await _ask_pc_for_key(f"Hugging Face stuck at {mb} MB/s on this rental")
-        except Exception as e:  # noqa: BLE001
-            print("!! asking for a fresh key:", _redact(str(e))[:200], flush=True)
+        # OFF unless the template says HF_KEY_AUTO=1: each ask opens the key helper's Chrome window on your PC, and it kept
+        # popping up. "Get a fresh key from my PC" on the start page still asks when you press it.
+        if os.environ.get("HF_KEY_AUTO", "0") == "1":
+            try:
+                k = json.load(open(os.path.join(run_dir, "downloads.json"))).get("hf_key") or {}
+                mb = k.get("mbps")
+                if mb is not None and mb < 100: KEY_REQ["slow_since"] = KEY_REQ["slow_since"] or time.time()
+                elif mb is not None: KEY_REQ["slow_since"] = 0.0
+                stuck = str(k.get("last") or "").startswith("every key tried") or (KEY_REQ["slow_since"] and time.time() - KEY_REQ["slow_since"] >= 120)
+                if stuck and time.time() - KEY_REQ["auto"] > 1200 and time.time() - KEY_REQ["at"] > 600:
+                    KEY_REQ["auto"] = time.time()
+                    await _ask_pc_for_key(f"Hugging Face stuck at {mb} MB/s on this rental")
+            except Exception as e:  # noqa: BLE001
+                print("!! asking for a fresh key:", _redact(str(e))[:200], flush=True)
         before = ""
         try: before = open(HF_KEYS_FILE).read()
         except OSError: pass
