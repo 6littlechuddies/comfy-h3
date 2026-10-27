@@ -494,15 +494,29 @@ CIVITAI = os.environ.get("STUDIO_CIVITAI_BASE", "https://civitai.com")  # overri
 KEY_FILE = os.path.join(STATE, "civitai_key")
 
 
-def civitai_token() -> str:
-    """the template's CIVITAI_TOKEN, or the key you pasted into the Studio (kept with your settings)"""
-    t = os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_API_KEY") or ""
-    if not t:
+CIVITAI_KEYS_FILE = os.environ.get("CIVITAI_KEYS_FILE") or os.path.expanduser("~/.h3/civitai_keys.txt")
+CIVITAI_GOOD: dict = {"key": ""}  # the key that last worked: tried first next time
+
+
+def civitai_tokens() -> list[str]:
+    """every CivitAI key: the template (CIVITAI_TOKEN / CIVITAI_TOKENS / CIVITAI_API_KEY, several separated by commas),
+    the one pasted into the Studio, and civitai_keys.txt (or any key file) on your drive. The last one that worked first."""
+    raw = ",".join(os.environ.get(n, "") for n in sorted(os.environ) if re.fullmatch(r"CIVITAI_(TOKENS?|API_KEY)(_?\d+)?", n))
+    for p in (KEY_FILE, CIVITAI_KEYS_FILE):
         try:
-            with open(KEY_FILE) as f: t = f.read().strip()
-        except FileNotFoundError:
+            with open(p) as f: raw += "," + f.read()
+        except OSError:
             pass
-    return t
+    out: list[str] = []
+    for k in re.split(r"[\s,;]+", raw):
+        if re.fullmatch(r"[A-Za-z0-9_-]{20,128}", k or "") and not k.startswith("hf_") and k not in out: out.append(k)
+    if CIVITAI_GOOD["key"] in out: out.remove(CIVITAI_GOOD["key"]); out.insert(0, CIVITAI_GOOD["key"])
+    return out
+
+
+def civitai_token() -> str:
+    t = civitai_tokens()
+    return t[0] if t else ""
 
 
 def civitai_auth() -> dict:
@@ -512,13 +526,16 @@ def civitai_auth() -> dict:
 
 async def civitai_key(req):
     if req.method == "GET":
-        src = "template" if (os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_API_KEY")) else "studio" if os.path.exists(KEY_FILE) else None
-        return web.json_response({"set": bool(src), "source": src})
+        n = len(civitai_tokens())
+        src = "template" if (os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_TOKENS") or os.environ.get("CIVITAI_API_KEY")) else "studio" if os.path.exists(KEY_FILE) else "drive" if n else None
+        return web.json_response({"set": bool(n), "source": src, "count": n})
     if req.method == "DELETE":
         if os.path.exists(KEY_FILE): os.remove(KEY_FILE)
         return web.json_response({"ok": True})
-    key = str((await req.json()).get("key", "")).strip()
-    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key): raise web.HTTPBadRequest(text="That doesn't look like a CivitAI API key")
+    # one key, or several (one per line, or separated by commas): each is tried in turn when CivitAI says no
+    keys = [k for k in re.split(r"[\s,;]+", str((await req.json()).get("key", ""))) if k]
+    if not keys or not all(re.fullmatch(r"[A-Za-z0-9_-]{16,128}", k) for k in keys): raise web.HTTPBadRequest(text="That doesn't look like a CivitAI API key")
+    key = "\n".join(dict.fromkeys(keys))
     os.makedirs(STATE, exist_ok=True)
     fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f: f.write(key)
@@ -869,15 +886,22 @@ async def lora_job(job: dict, url: str):
                 for pth in (path0, f"/api/download/models/{vid}" + ("?type=Model&format=SafeTensor" if is_model else ""), f"/api/download/models/{vid}"):
                     if f"{h}{pth}" not in cands: cands.append(f"{h}{pth}")
             loc, dl, statuses = None, cands[0], []
-            for cand in cands:
-                async with s.get(cand, headers=auth, allow_redirects=False) as r:
-                    statuses.append(r.status)
-                    if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location"):
-                        loc, dl = r.headers["Location"], cand; break
-                    if r.status == 200: dl = cand; break
-            else:
+            got_it = False
+            # every CivitAI key you have, one after another, when CivitAI says no (401/403) to one
+            for key in (civitai_tokens() or [""]):
+                auth = {"Authorization": f"Bearer {key}"} if key else {}
+                for cand in cands:
+                    async with s.get(cand, headers=auth, allow_redirects=False) as r:
+                        statuses.append(r.status)
+                        if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location") and "/login" not in r.headers["Location"]:
+                            loc, dl, got_it = r.headers["Location"], cand, True; break
+                        if r.status == 200: dl, got_it = cand, True; break
+                if got_it:
+                    if key: CIVITAI_GOOD["key"] = key
+                    break
+            if not got_it:
                 if 401 in statuses or 403 in statuses:
-                    raise RuntimeError("CivitAI wants your API key for this one — set CIVITAI_TOKEN in the template (or ⋯ menu → CivitAI key)")
+                    raise RuntimeError(f"CivitAI said no to all {len(civitai_tokens())} of your keys for this one — it may be early access / members-only for its creator's supporters, or a key has expired (add more in civitai_keys.txt on your drive)")
                 raise RuntimeError(f"CivitAI wouldn't hand out the file (tried {len(cands)} links: {', '.join(map(str, sorted(set(statuses))))}) — it may be early access or removed")
             target = loc or dl
             # a signed download link: fetch it with 8 connections at once (much faster from CivitAI's storage)
@@ -1486,7 +1510,7 @@ async def civitai_debug(req):
                 d, err = await _civitai_get_from(h, f"/api/v1/images?{'postId' if POST_LINK.search(req.query['link']) else 'imageId'}={iid}&nsfw=X&limit=1")
                 out[f"v1 {h}"] = err or f"{len((d or {}).get('items') or [])} item(s)"
         return web.json_response(out)
-    out: dict = {"key": "template" if (os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_API_KEY")) else "studio" if civitai_token() else "none", "hosts": []}
+    out: dict = {"key": "template" if (os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_API_KEY")) else "studio" if civitai_token() else "none", "hosts": [], "keys": len(civitai_tokens())}
     for h in civitai_hosts():
         d, err = await _civitai_get_from(h, "/api/v1/models?limit=1&nsfw=true")
         out["hosts"].append({"host": h, "ok": not err, "error": err, "got": len((d or {}).get("items") or []) if isinstance(d, dict) else 0})
@@ -2309,13 +2333,14 @@ async def _proton_keys():
     file whose name mentions hf / hugging / token / key, in "H3 Studio" or at the top of the drive (every hf_… in it
     counts). The file is always written (empty when there's none), so the downloader knows to stop waiting for it."""
     keys: list[str] = []
+    civ: list[str] = []
     try:
         if _proton_on() and os.environ.get("PROTON_KEYS", "1") != "0":
             await _proton_setup()
             folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
             # any text file whose name mentions hf / hugging / token / key, in "H3 Studio" or at the top of the drive
             # (hf_tokens.txt, "HF keys (2).txt", tokens.md …) — renamed or re-uploaded copies are still found
-            names_ok = re.compile(r"(hf|hugging|token|key)", re.I)
+            names_ok = re.compile(r"(hf|hugging|token|key|civit)", re.I)
             for where in (folder, ""):
                 rc, out = await _rclone("lsjson", f"proton:{where}", "--files-only", timeout=120)
                 try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 else []
@@ -2326,9 +2351,19 @@ async def _proton_keys():
                     rc2, txt = await _rclone("cat", f"proton:{where + '/' if where else ''}{nm}", timeout=120)
                     if rc2 == 0:
                         keys += [k for k in re.findall(r"hf_[A-Za-z0-9]{20,}", txt) if k not in keys]
+                        # CivitAI keys (32 letters/digits, 0-9 a-f): civitai_keys.txt, or in the same file
+                        civ += [k for k in re.findall(r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])", txt) if k not in civ]
     except Exception as e:  # noqa: BLE001
         print(f"!! Hugging Face keys from {_cloud()}:", _redact(str(e))[:300], flush=True)
     finally:
+        try:  # CivitAI keys first: the downloader starts once the Hugging Face file below is written
+            os.makedirs(os.path.dirname(CIVITAI_KEYS_FILE), mode=0o700, exist_ok=True)
+            fd = os.open(CIVITAI_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f: f.write("\n".join(civ))
+            os.replace(CIVITAI_KEYS_FILE + ".tmp", CIVITAI_KEYS_FILE)
+            if civ: print(f"CivitAI: {len(civ)} key(s) from {_cloud()}", flush=True)
+        except OSError as e:
+            print("!! couldn't save the CivitAI keys:", e, flush=True)
         try:
             os.makedirs(os.path.dirname(HF_KEYS_FILE), mode=0o700, exist_ok=True)
             fd = os.open(HF_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

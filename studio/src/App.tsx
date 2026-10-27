@@ -298,7 +298,7 @@ function Header({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
 
 function MoreMenu() {
   const [open, setOpen] = useState(false);
-  const [key, setKey] = useState<{ set: boolean; source: string | null }>({ set: true, source: null });
+  const [key, setKey] = useState<{ set: boolean; source: string | null; count?: number }>({ set: true, source: null });
   useEffect(() => { if (open) civitKeyStatus().then(setKey); }, [open]);
   const [https, setHttps] = useState<string | null>(null);
   useEffect(() => { if (!window.isSecureContext) getHttpsLink().then(setHttps); }, [open]);
@@ -314,8 +314,8 @@ function MoreMenu() {
           {https && <a className={item} href={`${https}/studio/`}><Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>Secure link</span><span className="text-[12px] text-dim">Needed for the microphone</span></span></a>}
           <button className={item} onClick={() => openLoraBrowser()}><Icon name="search" size={15} className="text-muted" />Browse LoRAs</button>
           <button className={item} onClick={() => openImageImport()}><Icon name="link" size={15} className="text-muted" />CivitAI: collections, links, files</button>
-          <button className={item} onClick={() => askCivitKey().then((ok) => ok && setKey({ set: true, source: "studio" }))}>
-            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? (key.source === "template" ? "Set in your Vast template" : "Saved — press to replace") : "Needed for many LoRAs"}</span></span>
+          <button className={item} onClick={() => askCivitKey().then((ok) => { if (ok) civitKeyStatus().then(setKey); })}>
+            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${(key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
             <span className={cx("ml-auto h-2 w-2 rounded-full", key.set ? "bg-good" : "bg-bad")} /></button>
           <a className={item} href="/terminal/?arg=claude" target="_blank" rel="noreferrer"><Icon name="chat" size={15} className="shrink-0 text-accent" /><span className="flex min-w-0 flex-col"><span>Claude on this rental</span><span className="text-[12px] text-dim">Reads the logs, finds and fixes problems</span></span><Icon name="external" size={13} className="ml-auto shrink-0 text-dim" /></a>
           <AlertsItem cls={item} https={https} />

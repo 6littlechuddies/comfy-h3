@@ -323,7 +323,7 @@ export async function splitSheet(from: FileRef, n = 4): Promise<FileRef[]> {
 }
 
 // ------------------------------------------------------------------ CivitAI key (pasted in the Studio, kept with your settings)
-export async function civitKeyStatus(): Promise<{ set: boolean; source: "template" | "studio" | null }> {
+export async function civitKeyStatus(): Promise<{ set: boolean; source: "template" | "studio" | "drive" | null; count?: number }> {
   try { return await j(await fetch("/studio-api/civitai/key")); } catch { return { set: false, source: null }; }
 }
 export async function saveCivitKey(key: string) {
@@ -334,7 +334,7 @@ export async function saveCivitKey(key: string) {
 export async function askCivitKey(): Promise<boolean> {
   const { askText } = await import("../components/Dialogs");
   const { useJobs } = await import("./jobs");
-  const k = await askText("Paste your CivitAI API key (civitai.com → Settings → API Keys)", "", "Save key");
+  const k = await askText("Paste your CivitAI API key (civitai.com → Settings → API Keys). Several? Separate them with commas — when CivitAI refuses one, the next is tried.", "", "Save key");
   if (!k) return false;
   try { await saveCivitKey(k); useJobs.getState().toast("CivitAI key saved — kept with your settings, so it works on every rental.", "good"); return true; }
   catch (e) { useJobs.getState().toast((e as Error).message, "bad"); return false; }

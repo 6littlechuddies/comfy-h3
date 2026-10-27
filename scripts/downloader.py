@@ -77,12 +77,19 @@ LOWEST = os.environ.get("DL_LOWEST_SPEED", "0")
 # connections per file. 16 x 8 files = 128 at once, and every slow one dropped and reopened every few seconds, is what got the
 # network flagged by Hugging Face ("suspicious activity", 403 for ~30 min) — 8 per file and no dropping keeps it ordinary
 CONNS = max(1, int(os.environ.get("DL_CONNS") or 8))
-CIVITAI_TOKEN = os.environ.get("CIVITAI_TOKEN") or os.environ.get("CIVITAI_API_KEY") or ""
-if not CIVITAI_TOKEN:  # the key pasted into the Studio (restored with your settings before this runs)
-    try:
-        CIVITAI_TOKEN = open(os.path.join(COMFY_DIR, "user", "default", "studio", "civitai_key")).read().strip()
-    except OSError:
-        pass
+# every CivitAI key: the template (CIVITAI_TOKEN / CIVITAI_TOKENS / CIVITAI_API_KEY, comma-separated), the one pasted in
+# the Studio, and civitai_keys.txt on your drive — when CivitAI says no to one, the next is tried
+def _civitai_keys() -> list[str]:
+    raw = ",".join(os.environ.get(n, "") for n in sorted(os.environ) if re.fullmatch(r"CIVITAI_(TOKENS?|API_KEY)(_?\d+)?", n))
+    for p in (os.path.join(COMFY_DIR, "user", "default", "studio", "civitai_key"), os.environ.get("CIVITAI_KEYS_FILE") or os.path.expanduser("~/.h3/civitai_keys.txt")):
+        try: raw += "," + open(p).read()
+        except OSError: pass
+    out: list[str] = []
+    for k in re.split(r"[\s,;]+", raw):
+        if re.fullmatch(r"[A-Za-z0-9_-]{20,128}", k or "") and not k.startswith("hf_") and k not in out: out.append(k)
+    return out
+CIVITAI_KEYS = _civitai_keys()
+CIVITAI_TOKEN = CIVITAI_KEYS[0] if CIVITAI_KEYS else ""
 REMOTE = os.environ.get("RCLONE_REMOTE", "")
 # groups to leave out (Vast template: SKIP_MODELS=anime,autoprompter …). The AutoPrompter extras are only used by the
 # old imported workflow in the node editor, so they're skipped unless you set SKIP_MODELS to something else (or empty).
@@ -286,7 +293,10 @@ def resolve(fl: dict) -> None:
     try:
         m = re.match(r"civitai-file:(\d+):(.+)$", url)
         if m:  # one file of a CivitAI version picked by a word in its name (versions with several files: bf16 / int8 / ...)
-            r = requests.get(f"https://civitai.com/api/v1/model-versions/{m.group(1)}", headers={"Authorization": f"Bearer {CIVITAI_TOKEN}"} if CIVITAI_TOKEN else {}, timeout=30)
+            r = None
+            for key in (_civitai_keys() or [""]):
+                r = requests.get(f"https://civitai.com/api/v1/model-versions/{m.group(1)}", headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=30)
+                if r.status_code not in (401, 403): break
             files = (r.json() if r.ok else {}).get("files") or []
             models = [f for f in files if (f.get("type") or "Model") == "Model"] or files
             word = m.group(2).lower()
@@ -300,8 +310,11 @@ def resolve(fl: dict) -> None:
                 log(f"{fl['name']}: {fl['error']}"); fl["get"] = url; fl["size"] = 0; return
             url = hit["downloadUrl"]
         if url.startswith("https://civitai.com/"):
-            r = requests.get(url, headers={"Authorization": f"Bearer {CIVITAI_TOKEN}"} if CIVITAI_TOKEN else {}, allow_redirects=False, timeout=30)
-            loc = r.headers.get("Location") or ""
+            loc, r = "", None
+            for key in (_civitai_keys() or [""]):  # each key until CivitAI hands out the file
+                r = requests.get(url, headers={"Authorization": f"Bearer {key}"} if key else {}, allow_redirects=False, timeout=30)
+                loc = r.headers.get("Location") or ""
+                if loc and "/login" not in loc: break
             if loc and "/login" not in loc:  # without a key, some models redirect to the sign-in page instead of the file
                 url = loc
             elif fl.get("fallback"):
@@ -355,7 +368,7 @@ def refused(url: str, code: int) -> str:
                 f"with the account your HF keys belong to, press 'Agree and access', then Retry" if HF_TOKEN else
                 f"Hugging Face needs a key for this file ({code}): add HF_TOKENS to the template (and accept huggingface.co/{hf.group(1)}'s licence)")
     if hf and code == 404: return f"Hugging Face says this file isn't there any more (404) — {hf.group(1)} may have renamed it"
-    if "civitai" in url and code in (401, 403): return f"CivitAI refused ({code}) — check CIVITAI_TOKEN, or the creator made it members-only"
+    if "civitai" in url and code in (401, 403): return f"CivitAI refused ({code}) with all {len(_civitai_keys())} of your keys — early access / members-only for the creator's supporters, or the keys expired (add more in civitai_keys.txt on your drive)"
     if "civitai" in url and code == 404: return "CivitAI says this version was removed (404) — re-add the LoRA from its page"
     if code == 429: return "too many requests right now (429) — Retry in a few minutes"
     return f"the server answered {code}"
