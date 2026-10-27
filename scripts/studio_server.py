@@ -524,6 +524,16 @@ def civitai_auth() -> dict:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+async def client_error(req):
+    """a crash in the browser: written to the log so the debug report and Claude on the rental can see it"""
+    try:
+        d = await req.json()
+        print(f"!! Studio page error {str(d.get('text', ''))[:6000]}", flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+    return web.json_response({"ok": True})
+
+
 async def civitai_key(req):
     if req.method == "GET":
         n = len(civitai_tokens())
@@ -4492,6 +4502,7 @@ def main():
         web.get("/studio-api/loras", list_loras), web.post("/studio-api/loras/fetch-missing", fetch_missing_loras), web.post("/studio-api/loras/add", add_lora),
         web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora),
         web.post("/studio-api/loras/upload", upload_lora),
+        web.post("/studio-api/client-error", client_error),
         web.get("/studio-api/civitai/key", civitai_key), web.put("/studio-api/civitai/key", civitai_key), web.delete("/studio-api/civitai/key", civitai_key), web.post("/studio-api/sheet/split", sheet_split),
         web.get("/studio-api/civitai/search", civitai_search), web.get("/studio-api/civitai/model/{id}", civitai_model),
         web.get("/studio-api/civitai/images", civitai_images), web.get("/studio-api/civitai/workflows", civitai_workflows), web.post("/studio-api/civitai/workflows/zip", civitai_workflows_zip),

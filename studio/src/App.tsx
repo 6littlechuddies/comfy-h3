@@ -1,3 +1,4 @@
+import { Crash } from "./components/Crash";
 import { BUILT } from "./lib/selfcheck";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { create } from "zustand";
@@ -170,7 +171,7 @@ export default function App() {
     <div className="scan flex h-full min-h-[640px] flex-col">
       <Header tab={tab} setTab={setTab} />
       <main className="flex min-h-0 flex-1">
-        {loaded && <ProjectRail />}
+        {loaded && <Crash where="projects"><ProjectRail /></Crash>}
         {!loaded ? <div className="m-auto text-muted">Loading your settings…</div> : (
           ([
             ["characters", CharactersTab], ["scenes", ScenesTab], ["create", CreateTab], ["edit", EditTab],
@@ -179,12 +180,12 @@ export default function App() {
             <div key={id} data-tab={id} className={cx("min-h-0 min-w-0 flex-1 flex-col", tab === id ? "fade-in flex" : "hidden")}>
               <SubTabs tab={id} />
               <GuideBanner tab={id} />
-              <div className="flex min-h-0 min-w-0 flex-1"><C /></div>
+              <div className="flex min-h-0 min-w-0 flex-1"><Crash where={`tab ${id}`}><C /></Crash></div>
             </div>
           ))
         )}
       </main>
-      <Tray />
+      <Crash where="tray"><Tray /></Crash>
       <Toasts />
       <DropAnywhere tab={tab} />
       <TitleProgress />
