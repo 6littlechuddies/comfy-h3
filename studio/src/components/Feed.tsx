@@ -3,7 +3,7 @@ import { openPictureMenu } from "./PictureMenu";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl } from "../lib/api";
-import { useJobs, type Job, type Output, type Tab } from "../lib/jobs";
+import { missingKey, useJobs, useMissing, type Job, type Output, type Tab } from "../lib/jobs";
 import { isFav, toggleFav, useFavs } from "../lib/favs";
 import { canRemix, editPicture, remix } from "../lib/remix";
 import { DRAG_TYPE, trayIdOf, useTray } from "../lib/tray";
@@ -70,7 +70,8 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
   const [onlyFav, setOnlyFav] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const active = jobs.filter((j) => j.status === "running" || j.status === "queued");
-  const items: Item[] = jobs.filter((j) => j.status === "done").flatMap((j) => j.outputs.filter((o) => kinds.includes(o.kind) && o.type === "output").map((o) => ({ o, j })));
+  const missing = useMissing((m) => m.keys);
+  const items: Item[] = jobs.filter((j) => j.status === "done").flatMap((j) => j.outputs.filter((o) => kinds.includes(o.kind) && o.type === "output" && !missing[missingKey(o)]).map((o) => ({ o, j })));
   const shown = onlyFav ? items.filter((it) => isFav(favs, it.o)) : items;
   // one press = one stack: a ×4 batch, or More like this / Remix variants on the picture they came from — arrows flip through
   const stacks: Item[][] = [];
@@ -158,6 +159,13 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
   );
 }
 
+/** a picture that didn't load: if its file isn't on this rental, the card goes (instead of an empty black box) */
+function goneCheck(o: Output) {
+  fetch(viewUrl(o), { method: "HEAD" }).then((r) => {
+    if (r.status === 404) useMissing.setState((m) => ({ keys: { ...m.keys, [missingKey(o)]: true } }));
+  }).catch(() => {});
+}
+
 function Star({ on, size = 16 }: { on: boolean; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill={on ? "#F0A845" : "none"} stroke={on ? "#F0A845" : "currentColor"} strokeWidth="2" aria-hidden><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" /></svg>;
 }
@@ -225,7 +233,7 @@ function FeedCard({ it, fav, acts, onOpen, delay, size, count = 1, onDeleteAll, 
       <button onClick={(e) => (sel.selecting || e.shiftKey ? sel.onPick(it, e.shiftKey) : onOpen())} draggable onDragStart={drag} onDragEnd={() => useMoveDrag.setState({ n: 0 })} className={cx("block min-h-[120px] w-full", o.filename.includes("cutout") && "checker")} aria-label="Open full screen">
         {o.kind === "video"
           ? <video src={viewUrl(o)} muted loop playsInline preload="metadata" className="block w-full" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} />
-          : <img src={viewUrl(o)} alt="" loading="lazy" draggable={false} onContextMenu={(e) => openPictureMenu(e, { output: o, label: j.label })} className="block w-full transition-transform duration-500 group-hover:scale-[1.015]" />}
+          : <img src={viewUrl(o)} alt="" loading="lazy" draggable={false} onError={() => goneCheck(o)} onContextMenu={(e) => openPictureMenu(e, { output: o, label: j.label })} className="block w-full transition-transform duration-500 group-hover:scale-[1.015]" />}
       </button>
       <button onClick={(e) => sel.onPick(it, e.shiftKey)} aria-label={on ? "Unselect" : "Select"} aria-pressed={on} title="Select (Shift+click: everything in between)"
         className={cx("press absolute left-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-full border-2 transition-opacity", on ? "border-accent bg-accent text-accentink opacity-100" : "border-white/80 bg-black/40 text-transparent hover:text-white/80", on || sel.selecting ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100")}>

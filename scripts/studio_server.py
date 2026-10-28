@@ -3853,6 +3853,27 @@ def _import_run(it):
         except OSError: pass
 
 
+def _restoring() -> bool:
+    """an import or a drive restore is still bringing files in (results may still be arriving)"""
+    return any(v.get("state") in ("finding", "fetching", "waiting", "unpacking") or v.get("results") == "copying" for v in IMPORTS.values())
+
+
+async def results_missing(req):
+    """POST {files: [{subfolder, filename}]} → which of these result files aren't on this rental. A fresh rental's results
+    list comes from your newest export, which can still name pictures you deleted after making it — those files are gone
+    from your drive too, so they'd show as empty black cards. {restoring: true} = files may still be on their way."""
+    d = await req.json()
+    missing = []
+    for f in (d.get("files") or [])[:5000]:
+        if not isinstance(f, dict): continue
+        sub, fn = str(f.get("subfolder") or ""), str(f.get("filename") or "")
+        if not fn or "/" in fn: continue
+        try: p = safe_join(OUTPUT, sub, fn) if sub else safe_join(OUTPUT, fn)
+        except web.HTTPException: continue
+        if not os.path.exists(p): missing.append({"subfolder": sub, "filename": fn})
+    return web.json_response({"missing": missing, "restoring": _restoring()})
+
+
 async def import_status(req):
     it = IMPORTS.get(req.match_info["id"])
     if not it: raise web.HTTPNotFound()
@@ -4671,6 +4692,7 @@ def main():
         web.post("/studio-api/loras/upload", upload_lora),
         web.post("/studio-api/client-error", client_error),
         web.get("/studio-api/storage", storage), web.post("/studio-api/storage", storage_act),
+        web.post("/studio-api/results/missing", results_missing),
         web.post("/studio-api/activity", activity), web.get("/studio-api/activity", activity),
         web.get("/studio-api/civitai/key", civitai_key), web.put("/studio-api/civitai/key", civitai_key), web.delete("/studio-api/civitai/key", civitai_key), web.post("/studio-api/sheet/split", sheet_split),
         web.get("/studio-api/civitai/search", civitai_search), web.get("/studio-api/civitai/model/{id}", civitai_model),

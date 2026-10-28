@@ -376,6 +376,37 @@ let keepReady = false; // don't overwrite what's saved before it has been read b
 const keepable = () => trimJobs(useJobs.getState().jobs).map(({ preview: _p, ...j }, i) => ({ ...j, titles: {}, classes: j.status === "done" || j.status === "error" || j.status === "cancelled" ? {} : j.classes,
   // the settings snapshot (for Remix) only on the newer ones — it's the bulk of what's saved
   ...(i > 250 && j.meta?.snapshot ? { meta: { ...j.meta, snapshot: undefined } } : {}) }));
+/** result files that aren't on this rental (hidden right away; dropped from the list once no restore is still bringing
+ *  files in). A fresh rental's list comes from your newest export, which can name pictures deleted after it was made. */
+export const useMissing = create<{ keys: Record<string, true> }>(() => ({ keys: {} }));
+export const missingKey = (o: { subfolder: string; filename: string }) => `${o.subfolder}|${o.filename}`;
+export async function pruneMissing(): Promise<boolean> {
+  const outs = useJobs.getState().jobs.filter((j) => j.status === "done")
+    .flatMap((j) => j.outputs.filter((o) => o.type === "output" && (o.kind === "image" || o.kind === "video")).map((o) => ({ subfolder: o.subfolder, filename: o.filename })));
+  if (!outs.length) return true;
+  const missing: { subfolder: string; filename: string }[] = [];
+  let restoring = false;
+  for (let i = 0; i < outs.length; i += 2000) {
+    const r = await fetch("/studio-api/results/missing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: outs.slice(i, i + 2000) }) });
+    if (!r.ok) return false;
+    const d = await r.json();
+    missing.push(...(d.missing ?? []));
+    restoring ||= !!d.restoring;
+  }
+  if (missing.length) {
+    useMissing.setState((m) => ({ keys: { ...m.keys, ...Object.fromEntries(missing.map((x) => [missingKey(x), true as const])) } }));
+    if (!restoring) useJobs.getState().forgetOutputs(missing);
+  }
+  return !restoring;
+}
+// once after the page opens (again every minute while a restore is still running), then every 15 minutes
+(() => {
+  let tries = 0;
+  const go = () => pruneMissing().then((done) => { if (!done && ++tries < 120) setTimeout(go, 60_000); }).catch(() => setTimeout(go, 60_000));
+  setTimeout(go, 20_000);
+  setInterval(() => { pruneMissing().catch(() => {}); }, 15 * 60_000);
+})();
+
 // a restore that finishes while this page is open: its results join in within a minute
 setInterval(() => { if (keepReady) syncJobs({ save: false }).catch(() => {}); }, 60_000);
 // jobs this page removed on purpose (deleted, trimmed): the saved list on the rental mustn't bring them back
