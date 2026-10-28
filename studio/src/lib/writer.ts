@@ -6,7 +6,7 @@ import { useJobs, waitForJob, type Tab } from "./jobs";
 import { activePack, fillTemplate, packText, usePacks, type Stage } from "./packs";
 import { askOutside, grokSees, grokStatus, writerOutside } from "./outside";
 import { newSeed } from "./settings";
-import { ADULT_NOTE, explicitStop, minorWords, stopMessage } from "./adult";
+import { ADULT_NOTE, explicitStop, described, minorWords, stopMessage } from "./adult";
 
 const ready = (id: string) => { const g = useDownloads.getState().groups.find((x) => x.id === id); return !g || g.state === "done"; };
 const known = (id: string) => useDownloads.getState().groups.some((x) => x.id === id);
@@ -22,6 +22,8 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
   if (!usePacks.getState().loaded) await usePacks.getState().load();
   const pack = activePack(stage);
   if (!pack) throw new Error("No prompt file for this step");
+  // the writer reads only what the age check read (no pasted "Negative prompt:" part, no quoted stop messages)
+  vars = Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, typeof v === "string" ? described(v) : v]));
   const texts = Object.values(vars);
   const hits = minorWords(...texts);
   if (hits.length) throw new Error(explicitStop(hits));

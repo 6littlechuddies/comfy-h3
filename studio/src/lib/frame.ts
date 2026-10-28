@@ -2,7 +2,7 @@ import { writerFast } from "./models";
 // A character's starting frame: the picture everything else is built from. Pick the model (your own fine-tunes too),
 // LoRAs and a full prompt (written by the local writer from the profile, a picture or a saved CivitAI post), make a
 // batch, and click the one that looks right — it becomes their front picture, and the reference sheet follows from it.
-import { ADULT_NOTE, explicitStop, minorWords, stopMessage } from "./adult";
+import { ADULT_NOTE, explicitStop, described, minorWords, stopMessage } from "./adult";
 import { civitImage, type CivitGen } from "./api";
 import { cleanPrompt, createTargetOf, ensureLoras } from "./civitUse";
 import { useCharacters, type Character } from "./characters";
@@ -56,6 +56,7 @@ function writer(): { big: boolean } {
 
 /** the local writer turns the character (+ what the frame should show, + optional pictures) into a full Krea 2 prompt */
 export async function writeFramePrompt(c: Character, frame: string, aspect: string, images: string[] = []): Promise<string> {
+  frame = described(frame); // the writer reads only what the age check reads
   if (!usePacks.getState().loaded) await usePacks.getState().load();
   const pack = activePack("krea");
   if (!pack) throw new Error("No prompt file for the Krea 2 frame builder");

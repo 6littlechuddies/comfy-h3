@@ -247,6 +247,8 @@ function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean
   const scenes = useScenes(useShallow((s) => s.list.filter((x) => x.cast.includes(c.id))));
   const sceneSel = useScenes((s) => s.sel);
   const views = Object.keys(c.views).length;
+  // the pictures and videos in this project (what you made or moved here), not just their sheet pictures
+  const made = useJobs((st) => st.jobs.reduce((n, j) => (j.status === "done" && j.meta?.project === c.id ? n + j.outputs.filter((o) => o.type === "output" && (o.kind === "image" || o.kind === "video")).length : n), 0));
   const row = (label: string, icon: string, go: Tab, extra?: string, active?: boolean) => (
     <button onClick={() => pick(go)} className={cx("flex w-full items-center gap-2 py-1.5 pl-2 pr-1 text-left text-[12.5px]", active ? "text-ink" : "text-muted hover:text-ink")}>
       <Icon name={icon} size={12.5} className={active ? "text-accent" : "text-dim"} /><span className="flex-1 truncate">{label}</span>{extra && <span className="micro text-dim">{extra}</span>}
@@ -281,7 +283,7 @@ function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean
         <Avatar c={c} on={on} onClick={() => { pick(); if (!open) toggle(); }} />
         <button onClick={() => { pick(); if (!open || on) toggle(); }} className="min-w-0 flex-1 text-left">
           <div className={cx("truncate text-[13px] font-medium", on ? "text-ink" : "text-ink/85")}>{c.name}</div>
-          <div className="text-[11.5px] text-dim">{drop.over ? <span className="text-accent">Drop to move {countLabel(drop.n)} here</span> : <>{c.style === "anime" ? "Anime" : "Realistic"} · {views} pic{views === 1 ? "" : "s"}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</>}</div>
+          <div className="text-[11.5px] text-dim">{drop.over ? <span className="text-accent">Drop to move {countLabel(drop.n)} here</span> : <>{c.style === "anime" ? "Anime" : "Realistic"} · {made} result{made === 1 ? "" : "s"}{views ? ` · ${views} sheet` : ""}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</>}</div>
         </button>
         <button onClick={toggle} aria-label={open ? "Fold" : "Unfold"} aria-expanded={open} className="press flex h-6 w-6 items-center justify-center text-dim hover:text-ink">
           <Icon name="chev" size={13} className={cx("transition-transform", !open && "-rotate-90")} />

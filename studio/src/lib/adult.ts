@@ -6,11 +6,18 @@ const EXPLICIT = /\b(loli|lolis|lolicon|shota|shotacon|toddler|toddlers|child|ch
 const AGE = /\b(\d{1,2})\s?(?:yo|y\/o|-?years?[- ]old|-?year-old)\b/gi;
 const SOUNDS_YOUNG = /\b(girl|girls|petite|tiny|small|cute|young|youthful|teen|teens|teenage|teenager|schoolgirl|school uniform|student|baby|little|flat chest|short stature|childlike|innocent)\b/gi;
 
+/** the part that describes the picture: a pasted "Negative prompt:" lists what to avoid (often "child, kids, loli" to keep
+ *  everyone adult), and an earlier stop message quoted in a chat isn't a description either. The writer is given only
+ *  this part too (writer.ts / frame.ts), so nothing it reads goes unchecked. */
+const STOPPED = /Stopped: “[^”]*”(?:, “[^”]*”)* describes someone under 18\.(?: Everyone must be an adult\.)?/g;
+export const described = (t: string) => t.split(/\bnegative prompt\s*:/i)[0].replace(STOPPED, "");
+
 /** words in the text that clearly mean someone under 18 */
 export function minorWords(...texts: (string | undefined | null)[]): string[] {
   const out = new Set<string>();
-  for (const t of texts) {
+  for (let t of texts) {
     if (!t) continue;
+    t = described(t);
     for (const m of t.matchAll(EXPLICIT)) out.add(m[0].toLowerCase());
     for (const m of t.matchAll(AGE)) if (Number(m[1]) < 18) out.add(m[0]);
   }
