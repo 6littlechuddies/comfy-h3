@@ -209,6 +209,15 @@ export function PictureMenuHost() {
         return upscalePicture(m, fam === "anima" ? "anima" : fam === "sdxl" ? "sdxl" : "krea2");
       },
     },
+    ...(["16:9", "21:9"] as const).map((r) => ({
+      key: `ext${r}`, icon: "expand", label: r === "16:9" ? "Extend to wallpaper (16:9)" : "Extend to ultrawide (21:9)", hide: isVideo, run: async () => {
+        const m = await toMedia(t);
+        const { extendPicture } = await import("../lib/extend");
+        useSettings.getState().setTab("edit");
+        await closeWindows();
+        return extendPicture(m, r);
+      },
+    })),
     {
       key: "face", icon: "sparkle", label: "Sharpen the face", hide: isVideo, run: async () => {
         const m = await toMedia(t);

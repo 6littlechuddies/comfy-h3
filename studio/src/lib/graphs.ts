@@ -340,6 +340,47 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   return g.graph;
 }
 
+/** "Extend to wallpaper": a wider (or taller) canvas with the picture in the middle. Krea 2 Edit sees the whole thing and
+ *  draws only the new strips (the middle's latent is held by a noise mask), at about 2 MP; the result is scaled up to the full
+ *  canvas and the ORIGINAL picture is pasted back over the middle pixel for pixel — only a thin blended seam where they meet,
+ *  so the person and every fine detail stay exactly as they were. */
+export function buildExtend(p: { image: string; w: number; h: number; left: number; right: number; top: number; bottom: number;
+  sceneW: number; sceneH: number; prompt: string; seed: number; steps: number; cfg: number; sampler: string; scheduler: string; prefix: string }): ApiGraph {
+  const g = new G();
+  const W = p.w + p.left + p.right, H = p.h + p.top + p.bottom;
+  const unet = g.add("UNETLoader", { unet_name: M.kreaUnet, weight_dtype: "default" });
+  const model = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: kreaEditV2() ? M.kreaGeneralV2 : M.kreaEditLora, strength_model: 1 }));
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const orig = g.add("LoadImage", { image: p.image });
+  // the new space starts as the picture's own colours, smeared (a tiny copy blown up) — something to continue, not grey
+  const tiny = g.add("ImageScale", { image: o(orig), upscale_method: "area", width: 16, height: 16, crop: "disabled" });
+  const smear = g.add("ImageScale", { image: o(tiny), upscale_method: "bilinear", width: W, height: H, crop: "disabled" });
+  const canvas = g.add("ImageCompositeMasked", { destination: o(smear), source: o(orig), x: p.left, y: p.top, resize_source: false });
+  // the working size has exactly the canvas's shape (chosen in extend.ts), so the new parts line up with the original to the pixel
+  const scene = g.add("ImageScale", { image: o(canvas), upscale_method: "lanczos", width: p.sceneW, height: p.sceneH, crop: "disabled" });
+  const target = g.add("VAEEncode", { pixels: o(scene), vae: o(vae) });
+  // only the new strips (plus a little overlap into the picture, for a seamless join) are redrawn
+  const m = Math.max(16, Math.round(Math.min(p.w, p.h) * 0.03));
+  const full = g.add("SolidMask", { value: 1, width: W, height: H });
+  const keepW = p.w - (p.left ? m : 0) - (p.right ? m : 0), keepH = p.h - (p.top ? m : 0) - (p.bottom ? m : 0);
+  const hole = g.add("SolidMask", { value: 0, width: Math.max(8, keepW), height: Math.max(8, keepH) });
+  const sides = g.add("MaskComposite", { destination: o(full), source: o(hole), x: p.left + (p.left ? m : 0), y: p.top + (p.top ? m : 0), operation: "multiply" });
+  const noised = g.add("SetLatentNoiseMask", { samples: o(target), mask: o(sides) });
+  const patched = g.add("Krea2EditModelPatch", { model, source_latent: o(target), ref_boost: 4, ref_boost_a: 1, fit_mode: "fit", vae: o(vae), source_image: o(scene), target_latent: o(target) });
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: p.prompt, grounding_px: 768, system_prompt: "", image: o(scene) });
+  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(scene) });
+  const ks = g.add("KSampler", { model: o(patched), seed: p.seed, steps: p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler, positive: o(pos), negative: o(neg), latent_image: o(noised), denoise: 1 });
+  const out = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
+  const big = g.add("ImageScale", { image: o(out), upscale_method: "lanczos", width: W, height: H, crop: "disabled" });
+  // the original on top, untouched; its edges facing the new parts fade in over the overlap
+  const f = Math.max(8, Math.round(m * 0.8));
+  const soft = g.add("FeatherMask", { mask: o(g.add("SolidMask", { value: 1, width: p.w, height: p.h })), left: p.left ? f : 0, top: p.top ? f : 0, right: p.right ? f : 0, bottom: p.bottom ? f : 0 });
+  const img = g.add("ImageCompositeMasked", { destination: o(big), source: o(orig), x: p.left, y: p.top, resize_source: false, mask: o(soft) });
+  g.add("SaveImage", { images: o(img), filename_prefix: p.prefix }, "result");
+  return g.graph;
+}
+
 /** Qwen-Image-Edit-2511 (ComfyUI's official "Image Edit (Qwen-Image 2511)" template): image1 is the picture being changed,
  *  image2/image3 are references; the prompt calls them Picture 1/2/3. Best = Qwen's own settings (40 steps, CFG 4);
  *  fast = the 4-step Lightning LoRA (CFG 1). full = the bf16 model instead of fp8 (big cards). The output keeps image1's shape

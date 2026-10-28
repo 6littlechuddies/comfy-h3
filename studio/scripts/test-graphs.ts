@@ -1,7 +1,7 @@
 // Validates every Studio graph against a real ComfyUI (models can be empty dummy files):
 //   COMFY=http://127.0.0.1:18288 npx tsx scripts/test-graphs.ts
 // ComfyUI validates node types, inputs, links and combo values before queueing; we then cancel the queue.
-import { buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
+import { buildExtend, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
 
 const COMFY = process.env.COMFY || "http://127.0.0.1:18288";
 const s = { sampler: "euler_ancestral", scheduler: "normal", steps: 28, cfg: 5.5, seed: 123456789012345 };
@@ -21,6 +21,7 @@ const cases: [string, ApiGraph][] = [
   ["create krea 2", buildCreate({ ...s, sampler: "euler", scheduler: "simple", steps: 8, cfg: 1, style: "realistic", realModel: "krea2", positive: "a woman", negative: "", loras: lora, width: 928, height: 1664, count: 2, cutout: false, prefix: "studio/create/k" })],
   ["create krea 2 cfg>1 cutout", buildCreate({ ...s, sampler: "euler", scheduler: "simple", steps: 8, cfg: 2, style: "realistic", realModel: "krea2", positive: "a woman", negative: "blurry", loras: [], width: 1024, height: 1024, count: 1, cutout: true, prefix: "studio/create/k" })],
   ["create krea own checkpoint", buildCreate({ ...s, sampler: "euler", scheduler: "beta", steps: 6, cfg: 1, style: "realistic", realModel: "krea2", unet: "civitai/muse_v35_int8.safetensors", positive: "photo", negative: "", loras: [], width: 1440, height: 2560, count: 4, cutout: false, prefix: "studio/characters/x_frame" })],
+  ["extend to 16:9", buildExtend({ image: "test.png", w: 1088, h: 1920, left: 1164, right: 1164, top: 0, bottom: 0, sceneW: 1936, sceneH: 1088, prompt: "extend the room", seed: 1, steps: 10, cfg: 1, sampler: "euler", scheduler: "simple", prefix: "studio/edit/extend" })],
   ["edit krea single", buildEdit({ ...s, sampler: "euler", scheduler: "simple", steps: 10, cfg: 1, images: ["test.png"], instruction: "change her jacket to red", negative: "", enhance: false, resolution: 1024, prefix: "studio/edit/e" })],
   ["edit krea two pictures", buildEdit({ ...s, sampler: "euler", scheduler: "simple", steps: 10, cfg: 1, images: ["test.png", "test2.png"], instruction: "put this person at the table", negative: "", enhance: false, resolution: 1024, prefix: "studio/edit/e", refBoost: 4 })],
   ["edit krea brush + cfg", buildEdit({ ...s, sampler: "euler", scheduler: "simple", steps: 20, cfg: 3, images: ["test.png"], instruction: "remove the lamp", negative: "blurry", enhance: false, resolution: 1024, prefix: "studio/edit/e", mask: "test2.png", maskSoftness: 40 })],

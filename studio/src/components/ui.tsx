@@ -37,6 +37,7 @@ const P: Record<string, string> = {
   arrow: "M5 12h14 M13 6l6 6-6 6",
   back: "M19 12H5 M11 18l-6-6 6-6",
   refresh: "M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7",
+  expand: "M9 4H4v5 M15 4h5v5 M9 20H4v-5 M15 20h5v-5",
   trash: "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13",
   search: "M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14 M20 20l-4-4",
   user: "M12 4a4 4 0 1 0 0 8a4 4 0 1 0 0-8 M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6",
