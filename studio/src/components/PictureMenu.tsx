@@ -212,10 +212,13 @@ export function PictureMenuHost() {
     ...(["16:9", "21:9"] as const).map((r) => ({
       key: `ext${r}`, icon: "expand", label: r === "16:9" ? "Extend to wallpaper (16:9)" : "Extend to ultrawide (21:9)", hide: isVideo, run: async () => {
         const m = await toMedia(t);
+        // anime pictures get their sides drawn by Anima, everything else by Krea 2 (same style as the picture)
+        const g = await genOf(t).catch(() => null);
+        const anime = !!g && (g.family === "anima" || g.family === "sdxl" || (g.family === "unknown" && createTargetOf(g) !== "krea2"));
         const { extendPicture } = await import("../lib/extend");
         useSettings.getState().setTab("edit");
         await closeWindows();
-        return extendPicture(m, r);
+        return extendPicture(m, r, anime);
       },
     })),
     {
