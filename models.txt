@@ -87,6 +87,9 @@ loras             https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras
 diffusion_models  https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 # Turbo LoRA used by the H3 Still workflows (strength ~0.38, 20 steps, er_sde)
 loras/minimax     https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/main/minimax_h3_turbo_v4_step600_ema.safetensors
+# Character swap (huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA, v1.5, 155 MB; MiniMax H3 Community License): replaces
+# the person in a reference video with the character in a reference picture, keeping the video's movement. Animate → Character swap.
+loras/minimax     https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/main/h3_character_swap_v1.5.safetensors
 
 # @group writer_xl Big prompt writer (27B)
 # --- Qwen3.8-27B-Uncensored (huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF), Q5_K_M (no MTP head) + vision ---

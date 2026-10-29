@@ -5,13 +5,13 @@ import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
 import { useJobs, type Job, type Output } from "../lib/jobs";
-import { RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { M, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
 import { newSeed, seedFor, useSection, useSettings } from "../lib/settings";
 import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
 import { LIMITS, makeRef, useAnimateUndo, useWork, type AnimateState } from "../lib/work";
 import { sendTo, usePrimaryAction, useHandoffInto } from "../App";
-import { Advanced, Btn, Check, EtaText, H1, Icon, Label, LoraList, Panel, PresetBar, Seg, Slider, Slot, TextArea } from "../components/ui";
+import { Advanced, Btn, Check, EtaText, H1, Icon, Label, LoraList, Panel, PresetBar, Seg, Slider, Slot, TextArea, cx } from "../components/ui";
 import { openImageImport } from "../components/ImageImport";
 import { RefList } from "../components/RefList";
 import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
@@ -224,8 +224,37 @@ export default function AnimateTab() {
     ? [{ value: "1f", label: `1 take · full` }, { value: "1t", label: "1 take · turbo" }, { value: "2t", label: "2 quick previews" }]
     : [{ value: "1f", label: "1 take" }, { value: "2f", label: "2 takes" }];
   const speedVal = a.takes === 2 ? (turboOk ? "2t" : "2f") : turboOk && a.turbo ? "1t" : "1f";
+  // Character swap (akatz-ai's H3 LoRA): the person in a reference video becomes the character in a reference picture —
+  // their movement, expression and the scene stay. One press sets up the LoRA, its prompt, its sampler and the video's length.
+  const swapOn = a.mode === "ref" && a.loras.some((l) => l.name === M.h3Swap && !l.off);
+  const swapSetup = () => {
+    const toast = useJobs.getState().toast;
+    const rs = useWork.getState().animateRefs;
+    const vid = rs.find((r) => r.media.kind === "video");
+    const pic = rs.find((r) => r.media.kind === "image");
+    if (!vid || !pic) {
+      if (a.mode !== "ref") set({ mode: "ref" });
+      toast("Character swap: add two references — the video with the person to replace, and a picture of your character (drag them in, or pick a character with @) — then press Character swap again", "info", "animate");
+      return;
+    }
+    remember();
+    const tags = tagsFor(rs);
+    const vt = tags[vid.id], pt = tags[pic.id];
+    const len = Math.round(Math.max(2, Math.min(15, vid.end - vid.start)));
+    set({
+      mode: "ref", plan: false, turbo: true, takes: 1, seconds: len,
+      loras: [...a.loras.filter((l) => l.name !== M.h3Swap), { name: M.h3Swap, strength: 1 }],
+      adv: { ...a.adv, sampler: "er_sde", scheduler: "normal" },
+      prompt: `Replace the person in ${vt} with the character in ${pt}. Keep the face, hair and clothing of the character in ${pt} exactly. Follow the pose, gaze, expression and every movement of the person in ${vt}. Keep the scene, the lighting, the camera and any other people from ${vt} unchanged.`,
+    });
+    toast(`Character swap is set up: ${pt} replaces the person in ${vt} (${len} s). If there are several people in the video, say which one in the box (e.g. “the woman on the left”).`, "good", "animate");
+  };
   const chips = (
     <>
+      <button type="button" onClick={swapSetup} title="Put your character into a video in place of the person in it — their movement, expression and the scene stay. Needs a video and a picture in References."
+        className={cx("press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3 text-[12.5px]", swapOn ? "!border-accent text-ink" : "text-muted hover:text-ink")}>
+        <Icon name="user" size={13} />Character swap{swapOn ? " · on" : ""}
+      </button>
       <Chip title="Video type" value={a.mode} onChange={(v) => set({ mode: v })} options={[{ value: "ref", label: "References" }, { value: "i2v", label: "Image → video" }, { value: "fl", label: "First → last" }, { value: "loop", label: "Seamless loop" }]} />
       <Chip title="Length" value={a.seconds} onChange={(v) => set({ seconds: v })} options={Array.from({ length: 14 }, (_, i) => i + 2).map((n) => ({ value: n, label: `${n} s` }))} />
       <Chip title="Shape" value={a.aspect} onChange={(v) => set({ aspect: v })} options={[{ value: "auto", label: ratio ? `Match the picture (${ratioLabel(ratio)})` : "Match the picture" }, { value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }, { value: "1:1", label: "1:1" }]} />

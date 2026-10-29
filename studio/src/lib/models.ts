@@ -61,6 +61,8 @@ export const M = {
   h3Vae: "minimax_h3_video_vae_int8_convrot.safetensors",
   h3AudioVae: "minimax_h3_audio_vae_fp32.safetensors",
   h3TurboRef: "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+  /** Character swap LoRA v1.5 (akatz-ai): the person in a reference video becomes the character in a reference picture */
+  h3Swap: "minimax/h3_character_swap_v1.5.safetensors",
   llmWriter: "Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-Q8_0.gguf",
   llmWriterVision: "mmproj-F16.gguf",
   llmBig: "Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf",
