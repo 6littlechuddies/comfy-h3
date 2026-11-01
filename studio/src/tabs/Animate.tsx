@@ -118,6 +118,13 @@ export default function AnimateTab() {
   const nFrames = h3Frames(a.seconds);
   const ref = a.mode === "ref";
   const swap = a.mode === "swap";
+  // the first "Character swap" button left its LoRA (and prompt) in References mode, with no off switch: take it out once —
+  // swapping is its own video type now and doesn't use this list
+  useEffect(() => {
+    if (!a.loras.some((l) => /h3_character_swap/i.test(l.name))) return;
+    set({ loras: a.loras.filter((l) => !/h3_character_swap/i.test(l.name)), ...(/^Replace the person in <Video \d+> with the character in <Picture \d+>/.test(a.prompt) ? { prompt: "" } : {}) });
+    toast("Took the old Character swap LoRA out of References — swapping is now Video type → Swap the person", "info");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const refsMode = ref || swap;
   const dl = useGroup("video");
   const swapVid = refs.find((r) => r.media.kind === "video");
