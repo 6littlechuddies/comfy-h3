@@ -63,6 +63,9 @@ export const M = {
   h3TurboRef: "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
   /** Character swap LoRA v1.5 (akatz-ai): the person in a reference video becomes the character in a reference picture */
   h3Swap: "minimax/h3_character_swap_v1.5.safetensors",
+  /** H3 Relay's swap recipe: the full-precision video VAE (also in the Video group) and the FL2V 8-step 768p turbo */
+  h3VaeFp16: "minimax_h3_video_vae_fp16.safetensors",
+  h3TurboFl8: "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
   llmWriter: "Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-Q8_0.gguf",
   llmWriterVision: "mmproj-F16.gguf",
   llmBig: "Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf",

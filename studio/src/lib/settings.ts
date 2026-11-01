@@ -88,7 +88,9 @@ export interface PromptS {
   writer?: "small" | "big";
 }
 export interface AnimateS {
-  mode: "ref" | "i2v" | "fl" | "loop";
+  mode: "ref" | "i2v" | "fl" | "loop" | "swap";
+  /** Swap the person: who in the video to replace (words SAM looks for), which one if several match, and the working size */
+  swapWho?: string; swapPick?: "largest" | "leftmost" | "rightmost"; swapRes?: "480" | "768";
   prompt: string; seconds: number; aspect: "auto" | "16:9" | "9:16" | "1:1"; mp: number;
   turbo: boolean; takes: 1 | 2; loras: LoraPick[]; refImageSize: "match" | "max"; lowMemDecode: boolean; adv: Adv;
   /** plain words: the video prompt writer (Plan a video) plans it second by second first, with your references (default on) */

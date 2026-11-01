@@ -674,6 +674,69 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
 
 // ---------------------------------------------------------------- Prompt helper (local LLMs)
 export interface PromptRefPicture { file: string; tag: string; label: string }
+/** "Swap the person" — H3 Relay's Character Swap V1.5 recipe (github.com/akatz-ai/h3-relay, example_workflows/toolkit/
+ *  H3-Character-Swap.api.json), node for node: the source video is the base (its movement, camera, background and sound stay);
+ *  SAM 3.1 finds the person from words on the first frame and tracks them through every frame; only that person is redrawn,
+ *  from the reference pictures, by Ref2VA + the FL2V 8-step turbo + the Character Swap LoRA. Long clips go in overlapping
+ *  windows (124 frames, 18 carried over) inside a native loop, then the source's own audio is put back. */
+export function buildSwap(p: { video: string; pictures: string[]; who: string; pick: "largest" | "leftmost" | "rightmost"; resolution: "480" | "768";
+  seconds: number; notes: string; seed: number; kitchen: boolean; prefix: string }): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: M.h3Ref, weight_dtype: "default" });
+  let model: Link = o(g.add("MiniMaxH3SigmaShift", { model: o(unet), shift_video: 12, shift_audio: 3 }));
+  if (p.kitchen) model = o(g.add("ModelAttentionBackend", { model, attention: "comfy kitchen attention" }));
+  const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
+  const text = g.add("H3RelayTextMemory", { clip: o(g.add("SelectCLIPDevice", { clip: o(clip), device: "gpu:0" })) });
+  const vvae = g.add("VAELoader", { vae_name: M.h3VaeFp16 });
+  const avae = g.add("VAELoader", { vae_name: M.h3AudioVae });
+  const turbo = g.add("LoraLoaderModelOnly", { model, lora_name: M.h3TurboFl8, strength_model: 1 });
+  const adapter = g.add("LoraLoaderModelOnly", { model: o(turbo), lora_name: M.h3Swap, strength_model: 1 });
+  const source = g.add("LoadVideo", { file: p.video });
+  const prep = g.add("H3RelayPrepareSource", { video: o(source), resolution: p.resolution, duration_seconds: Math.max(0, p.seconds), missing_audio: "silence" });
+  const dims = g.add("GetImageSize", { image: o(prep) });
+  // who to replace: SAM 3.1 on the first frame, the one you picked if several match, then tracked through the whole clip
+  const sam = g.add("CheckpointLoaderSimple", { ckpt_name: M.sam3 });
+  const subject = g.add("CLIPTextEncode", { clip: o(sam, 1), text: p.who || "person" });
+  const first = g.add("ImageFromBatch", { image: o(prep), batch_index: 0, length: 1 });
+  const detect = g.add("SAM3_Detect", { model: o(sam), image: o(first), conditioning: o(subject), threshold: 0.35, refine_iterations: 2, individual_masks: true });
+  const select = g.add("H3RelaySelectMask", { masks: o(detect), selection: p.pick, index: 0 });
+  const track = g.add("SAM3_VideoTrack", { model: o(sam), images: o(prep), initial_mask: o(select), conditioning: o(subject), detection_threshold: 0.5, max_objects: 1, detect_interval: 1 });
+  const masks = g.add("SAM3_TrackToMask", { track_data: o(track), object_indices: "" });
+  const recover = g.add("H3RelayRecoverMasks", { masks: o(masks), images: o(prep), source_frames: o(prep, 5), model: o(sam), conditioning: o(subject), selection: o(select, 1), recover_empty_frames: true });
+  const expand = g.add("H3RelayExpandMask", { masks: o(recover), images: o(prep), source_frames: o(prep, 5), expansion_px: 64 });
+  // overlapping windows in a native loop
+  const plan = g.add("H3RelayWindowPlan", { source_frames: o(prep, 5), window_frames: "124", history_frames: "18", seed: p.seed, schedule: "adaptive", seed_mode: "fixed", seed_overrides: "{}" });
+  const start = g.add("StartLoop", { mode: "simple", "mode.num_iterations": o(plan, 2), cache_iterations: false });
+  const win = g.add("H3RelayWindowInputs", { source: o(prep), window: o(plan, 3), iteration_index: o(start), previous: o(start, 4), reference_history: true, fps: 24,
+    resize_anchor: true, history_audio_mode: "source", source_audio: o(prep, 1), mask: o(expand) });
+  const prompt = [
+    "Replace the selected person with the reference character shown in the reference pictures — every picture shows this same character.",
+    "Keep the character's face, hair, body, outfit and accessories exactly as in the pictures.",
+    "Preserve the source performance (pose, movement, gaze and expression), the scene, the camera and the audio timing.",
+    p.notes.trim(),
+  ].filter(Boolean).join(" ");
+  const refs: Inputs = {};
+  p.pictures.slice(0, 8).forEach((f, i) => (refs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
+  const cond = g.add("MiniMaxH3ReferenceToVideo", { clip: o(text), prompt, width: o(dims, 0), height: o(dims, 1), length: o(win, 8), ref_image_size: "match",
+    "ref_videos.ref_video_0": o(win, 5), ...refs, vae: o(vvae), audio_vae: o(avae), "ref_audios.ref_audio_0": o(win, 6) });
+  const hist = g.add("H3RelayApplyHistory", { positive: o(cond), latent: o(cond, 1), vae: o(vvae), audio_vae: o(avae), frames: o(win, 3), history_frames: o(win, 7),
+    first_frame_guide: false, target_audio_guide: true, audio: o(win, 4) });
+  const enc = g.add("VAEEncode", { pixels: o(win), vae: o(vvae) });
+  const edit = g.add("H3RelayApplyEditMask", { latent: o(hist, 1), source_latent: o(enc), mask: o(win, 1) });
+  const guide = g.add("MiniMaxH3AddGuide", { positive: o(hist), latent: o(edit), frame_idx: 0, audio_vae: o(avae), audio: o(win, 2) });
+  const mem = g.add("H3RelaySamplingMemory", { model: o(adapter), latent: o(edit), conditioning: o(guide), activation_memory_gib: 17 });
+  const guider = g.add("CFGGuider", { model: o(mem), positive: o(guide), negative: o(guide), cfg: 1 });
+  const sample = g.add("SamplerCustomAdvanced", { noise: o(g.add("RandomNoise", { noise_seed: o(win, 10) })), guider: o(guider),
+    sampler: o(g.add("KSamplerSelect", { sampler_name: "er_sde" })), sigmas: o(g.add("BasicScheduler", { model: o(adapter), scheduler: "normal", steps: 8, denoise: 1 })), latent_image: o(edit) });
+  const dec = g.add("VAEDecode", { samples: o(g.add("LTXVSeparateAVLatent", { av_latent: o(sample) })), vae: o(vvae) });
+  const append = g.add("H3RelayAppendWindow", { frames: o(dec), window: o(win, 12), previous: o(start, 4) });
+  const end = g.add("EndLoop", { output_value: o(append), next_iteration_value: o(append), accumulate: false });
+  const fin = g.add("H3RelayFinishWindows", { state: o(end), audio_mode: "source", source_audio: o(prep, 1) });
+  const video = g.add("CreateVideo", { images: o(fin), fps: o(fin, 2), audio: o(fin, 1) });
+  g.add("SaveVideo", { video: o(video), filename_prefix: p.prefix, format: "auto", "format.codec": "auto" }, "result");
+  return g.graph;
+}
+
 export interface PromptRefVideo { file: string; tag: string; label: string; start: number; end: number; useSound: boolean }
 export interface PromptRefAudio { tag: string; label: string }
 export interface PromptOpts {

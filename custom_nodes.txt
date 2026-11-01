@@ -33,3 +33,7 @@ https://github.com/capitan01R/ComfyUI-Krea2T-Enhancer@02db4defe5483c8f5aacc0a9a7
 
 # --- IP-Adapter Plus: Illustrious draws a character's sheet while looking at their front picture ---
 https://github.com/cubiq/ComfyUI_IPAdapter_plus@a0f451a5113cf9becb0847b92884cb10cbdec0ef
+
+# --- H3 Relay 2.0 (akatz-ai; Apache-2.0): Animate → "Swap the person" — finds and tracks the person with SAM 3.1, redraws only
+#     them from your pictures with the Character Swap LoRA, long clips in overlapping windows, the source's sound kept ---
+https://github.com/akatz-ai/h3-relay@e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220

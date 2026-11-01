@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { activePack, planWriter, useBigPlanner } from "../lib/packs";
-import { buildAnimate, type AnimateOpts, type LoraPick } from "../lib/graphs";
+import { buildAnimate, buildSwap, type AnimateOpts, type LoraPick } from "../lib/graphs";
 import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
 import { useJobs, type Job, type Output } from "../lib/jobs";
-import { M, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
 import { newSeed, seedFor, useSection, useSettings } from "../lib/settings";
 import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
 import { LIMITS, makeRef, useAnimateUndo, useWork, type AnimateState } from "../lib/work";
 import { sendTo, usePrimaryAction, useHandoffInto } from "../App";
-import { Advanced, Btn, Check, EtaText, H1, Icon, Label, LoraList, Panel, PresetBar, Seg, Slider, Slot, TextArea, cx } from "../components/ui";
+import { Advanced, Btn, Check, EtaText, H1, Icon, Label, LoraList, Panel, PresetBar, Seg, Slider, Slot, TextArea } from "../components/ui";
 import { openImageImport } from "../components/ImageImport";
 import { RefList } from "../components/RefList";
 import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
@@ -92,7 +92,7 @@ export default function AnimateTab() {
     const start = items.find((x) => x.slot === "start" && x.media.kind === "image")?.media;
     if (start) {
       remember();
-      if (a.mode === "ref") set({ mode: "i2v" });
+      if (a.mode === "ref" || a.mode === "swap") set({ mode: "i2v" });
       setFrames((f) => [start, a.mode === "fl" ? f[1] : null]);
       const pr = useWork.getState().promptRefs.filter((r) => r.media.name !== start.name);
       setWork({ promptRefs: [{ ...makeRef(start), label: "first frame" }, ...pr.filter((r) => r.label !== "first frame")] });
@@ -100,12 +100,12 @@ export default function AnimateTab() {
       toast("It's the starting frame — Image → video. Describe what happens and press Make video.", "good");
       return;
     }
-    if (a.mode === "ref") setWork({ animateRefs: [...useWork.getState().animateRefs, ...items.map((i) => makeRef(i.media))] });
+    if (a.mode === "ref" || a.mode === "swap") setWork({ animateRefs: [...useWork.getState().animateRefs, ...items.map((i) => makeRef(i.media))] });
     else setFrames((f) => { const n = [...f]; for (const { media } of items) { const i = n.findIndex((x) => !x); n[i >= 0 ? i : 0] = media; } return n; });
   });
 
   // "Match the picture": the video takes the starting picture's shape (or the first reference picture's), so nothing is stretched
-  const shapeFrom = (a.mode === "ref" ? refs.find((r) => r.media.kind === "image")?.media : frames[0]) ?? null;
+  const shapeFrom = (a.mode === "ref" || a.mode === "swap" ? refs.find((r) => r.media.kind === "image")?.media : frames[0]) ?? null;
   const ratio = usePicRatio(shapeFrom);
   // a new starting picture switches the shape back to "Match the picture" (pick 16:9 etc. after it to override)
   const lastShape = useRef(shapeFrom?.name);
@@ -117,8 +117,23 @@ export default function AnimateTab() {
   const { width, height } = sizeOf(a.mp);
   const nFrames = h3Frames(a.seconds);
   const ref = a.mode === "ref";
+  const swap = a.mode === "swap";
+  const refsMode = ref || swap;
   const dl = useGroup("video");
-  const why = !dl.ready ? dl.why : (!a.prompt.trim() ? "Write a prompt (or send one from the Prompt helper)"
+  const swapVid = refs.find((r) => r.media.kind === "video");
+  const swapPics = refs.filter((r) => r.media.kind === "image");
+  // the whole clip (Relay works through long videos in windows), unless you pulled its end mark in
+  const swapSecs = (() => {
+    if (!swapVid) return { s: 0, trimmed: false };
+    const dur = swapVid.media.duration ?? swapVid.end;
+    const trimmed = swapVid.end < Math.min(dur, 15) - 0.05;
+    return { s: Math.round((trimmed ? swapVid.end : dur) * 10) / 10, trimmed };
+  })();
+  const why = !dl.ready ? dl.why : swap ? (!swapVid ? "Add the video with the person to replace"
+      : !swapPics.length ? "Add at least one picture of your character"
+      : refs.filter((r) => r.media.kind === "video").length > 1 ? "Swap uses one video — remove the others"
+      : busy ? "Sending…" : undefined)
+    : (!a.prompt.trim() ? "Write a prompt (or send one from the Prompt helper)"
     : !ref && !frames[0] ? "Add the starting picture"
     : a.mode === "fl" && !frames[1] ? "Add the last picture"
     : ref && refs.some((r) => r.media.kind === "video" && (r.end - r.start < 2 || r.end - r.start > 15)) ? "Reference clips must be 2–15 s long"
@@ -127,7 +142,7 @@ export default function AnimateTab() {
   const etaKey = `animate:${a.mode}:${turboOk && (a.turbo || a.takes === 2) ? "turbo" : "full"}:${a.seconds}s:${a.mp}`;
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
-    ...a.adv, seed, mode: a.mode, prompt: a.prompt, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
+    ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
     refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3",
     images: ref ? refs.filter((r) => r.media.kind === "image").map((r) => r.media.name) : (frames.filter(Boolean) as Media[]).map((m) => m.name),
     videos: ref ? refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
@@ -174,8 +189,25 @@ export default function AnimateTab() {
     setPlan({ from: a.prompt, to: text });
     return text;
   };
+  // Swap the person (H3 Relay's Character Swap): the video is the base, the person in it becomes the character in the pictures
+  const goSwap = async () => {
+    if (!swapVid) return;
+    setBusy(true); setTimeout(() => setBusy(false), 600);
+    try {
+      const oi = await fetch("/object_info/ModelAttentionBackend").then((r) => r.json()).catch(() => null);
+      const kitchen = JSON.stringify(oi ?? {}).includes("comfy kitchen attention");
+      const seed = seedFor(a.adv, (p) => set({ adv: { ...a.adv, ...p } }));
+      const g = buildSwap({ video: swapVid.media.name, pictures: swapPics.map((r) => r.media.name), who: (a.swapWho ?? "").trim() || "person", pick: a.swapPick ?? "largest",
+        resolution: a.swapRes ?? "768", seconds: swapSecs.trimmed ? swapVid.end : 0, notes: a.prompt, seed, kitchen, prefix: "studio/animate/swap" });
+      const secs = swapSecs.s;
+      await run("animate", `Swap the person · ${(a.swapWho ?? "").trim() || "person"} → ${swapPics.length} picture${swapPics.length > 1 ? "s" : ""}`, g, `animate:swap:${a.swapRes ?? "768"}:${Math.round(secs)}s`,
+        { snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
+      if (swapVid.start > 0.05) toast("Swap uses the video from its start — trim the clip itself if you only want part of it", "info");
+    } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); }
+  };
   const go = async () => {
     if (why) return;
+    if (swap) return goSwap();
     import("../lib/promptHistory").then(({ remember }) => remember("animate", a.prompt, "sent"));
     setBusy(true);
     setTimeout(() => setBusy(false), 600); // keep the button free: you can line up more while it plans
@@ -224,59 +256,38 @@ export default function AnimateTab() {
     ? [{ value: "1f", label: `1 take · full` }, { value: "1t", label: "1 take · turbo" }, { value: "2t", label: "2 quick previews" }]
     : [{ value: "1f", label: "1 take" }, { value: "2f", label: "2 takes" }];
   const speedVal = a.takes === 2 ? (turboOk ? "2t" : "2f") : turboOk && a.turbo ? "1t" : "1f";
-  // Character swap (akatz-ai's H3 LoRA): the person in a reference video becomes the character in a reference picture —
-  // their movement, expression and the scene stay. One press sets up the LoRA, its prompt, its sampler and the video's length.
-  const swapOn = a.mode === "ref" && a.loras.some((l) => l.name === M.h3Swap && !l.off);
-  const swapSetup = () => {
-    const toast = useJobs.getState().toast;
-    const rs = useWork.getState().animateRefs;
-    const vid = rs.find((r) => r.media.kind === "video");
-    const pic = rs.find((r) => r.media.kind === "image");
-    if (!vid || !pic) {
-      if (a.mode !== "ref") set({ mode: "ref" });
-      toast("Character swap: add two references — the video with the person to replace, and a picture of your character (drag them in, or pick a character with @) — then press Character swap again", "info", "animate");
-      return;
-    }
-    remember();
-    const tags = tagsFor(rs);
-    const vt = tags[vid.id], pt = tags[pic.id];
-    const len = Math.round(Math.max(2, Math.min(15, vid.end - vid.start)));
-    set({
-      mode: "ref", plan: false, turbo: true, takes: 1, seconds: len,
-      loras: [...a.loras.filter((l) => l.name !== M.h3Swap), { name: M.h3Swap, strength: 1 }],
-      adv: { ...a.adv, sampler: "er_sde", scheduler: "normal" },
-      prompt: `Replace the person in ${vt} with the character in ${pt}. Keep the face, hair and clothing of the character in ${pt} exactly. Follow the pose, gaze, expression and every movement of the person in ${vt}. Keep the scene, the lighting, the camera and any other people from ${vt} unchanged.`,
-    });
-    toast(`Character swap is set up: ${pt} replaces the person in ${vt} (${len} s). If there are several people in the video, say which one in the box (e.g. “the woman on the left”).`, "good", "animate");
-  };
   const chips = (
     <>
-      <button type="button" onClick={swapSetup} title="Put your character into a video in place of the person in it — their movement, expression and the scene stay. Needs a video and a picture in References."
-        className={cx("press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3 text-[12.5px]", swapOn ? "!border-accent text-ink" : "text-muted hover:text-ink")}>
-        <Icon name="user" size={13} />Character swap{swapOn ? " · on" : ""}
-      </button>
-      <Chip title="Video type" value={a.mode} onChange={(v) => set({ mode: v })} options={[{ value: "ref", label: "References" }, { value: "i2v", label: "Image → video" }, { value: "fl", label: "First → last" }, { value: "loop", label: "Seamless loop" }]} />
-      <Chip title="Length" value={a.seconds} onChange={(v) => set({ seconds: v })} options={Array.from({ length: 14 }, (_, i) => i + 2).map((n) => ({ value: n, label: `${n} s` }))} />
+      <Chip title="Video type" value={a.mode} onChange={(v) => set({ mode: v })} options={[{ value: "swap", label: "Swap the person" }, { value: "ref", label: "References" }, { value: "i2v", label: "Image → video" }, { value: "fl", label: "First → last" }, { value: "loop", label: "Seamless loop" }]} />
+      {swap && <>
+        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Who in the video becomes your character — plain words, e.g. “woman”, “man in a red shirt”, “dancer”">
+          Replace<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="person" aria-label="Who to replace" className="w-36 bg-transparent text-ink placeholder:text-dim focus:outline-none" />
+        </label>
+        <Chip title="If several match" value={a.swapPick ?? "largest"} onChange={(v) => set({ swapPick: v })} options={[{ value: "largest", label: "The biggest one" }, { value: "leftmost", label: "The one on the left" }, { value: "rightmost", label: "The one on the right" }]} />
+        <Chip title="Quality" value={a.swapRes ?? "768"} onChange={(v) => set({ swapRes: v })} options={[{ value: "768", label: "Sharp · 768p" }, { value: "480", label: "Fast · 480p" }]} />
+        <span className="ml-1 text-[11px] text-dim">{swapVid ? `${swapSecs.s} s · the video's own length and sound` : "add a video"}</span>
+      </>}
+      {!swap && <><Chip title="Length" value={a.seconds} onChange={(v) => set({ seconds: v })} options={Array.from({ length: 14 }, (_, i) => i + 2).map((n) => ({ value: n, label: `${n} s` }))} />
       <Chip title="Shape" value={a.aspect} onChange={(v) => set({ aspect: v })} options={[{ value: "auto", label: ratio ? `Match the picture (${ratioLabel(ratio)})` : "Match the picture" }, { value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }, { value: "1:1", label: "1:1" }]} />
       <Chip title="Size" value={a.mp} onChange={(v) => set({ mp: v })} options={[{ value: 0.4, label: "Draft 0.4 MP" }, { value: 0.6, label: "Good 0.6 MP" }, { value: 0.98, label: "Full 1 MP" }, { value: 1.2, label: "1.2 MP" }, { value: 1.5, label: "1.5 MP" }, { value: 2, label: "2 MP" },
         ...([0.4, 0.6, 0.98, 1.2, 1.5, 2].includes(a.mp) ? [] : [{ value: a.mp, label: `${a.mp} MP` }])]} />
       {!isPlan(a.prompt) && <Chip title="Plain words" value={a.plan === false ? 0 : 1} onChange={(v) => set({ plan: v === 1 })} options={[{ value: 1, label: "Writer plans it (recommended)" }, { value: 0, label: "Send my words as typed" }]} />}
       <Chip title="Takes & speed" value={speedVal} onChange={(v) => set({ takes: v.startsWith("2") ? 2 : 1, turbo: v.endsWith("t") })} options={speedOpts} />
-      <span className="ml-1 font-mono text-[11px] text-dim">{width}×{height} · {nFrames} frames</span>
+      <span className="ml-1 font-mono text-[11px] text-dim">{width}×{height} · {nFrames} frames</span></>}
     </>
   );
   // @ in the box: References mode → characters and pictures join the references; otherwise a picture is the first frame
   const mention: MentionTarget = {
-    hint: a.mode === "ref" ? { character: "their pictures join the references", picture: "joins the references" } : { character: "only in References mode", picture: "becomes the first frame" },
+    hint: a.mode === "ref" || a.mode === "swap" ? { character: "their pictures join the references", picture: "joins the references" } : { character: "only in References mode", picture: "becomes the first frame" },
     pick: async (pk) => {
       if (pk.kind === "character") {
-        if (a.mode !== "ref") throw new Error("Characters go in as references — set the mode to References first (in this mode the first frame decides who's in it)");
+        if (a.mode !== "ref" && a.mode !== "swap") throw new Error("Characters go in as references — set the mode to References first (in this mode the first frame decides who's in it)");
         remember(); setWork({ animateRefs: await withCharacter(pk.c, useWork.getState().animateRefs) });
         return pk.c.name;
       }
       const md = await useTray.getState().asMedia(pk.item.id);
       remember();
-      if (a.mode === "ref") { const cur = useWork.getState().animateRefs; if (!cur.some((r) => r.media.name === md.name)) setWork({ animateRefs: [...cur, makeRef(md)] }); }
+      if (a.mode === "ref" || a.mode === "swap") { const cur = useWork.getState().animateRefs; if (!cur.some((r) => r.media.name === md.name)) setWork({ animateRefs: [...cur, makeRef(md)] }); }
       else setFrames((f) => [md, a.mode === "fl" ? f[1] : null]);
       return "";
     },
@@ -284,7 +295,7 @@ export default function AnimateTab() {
   return (
     <Workspace needs={"video"} tab="animate" title="Animate" sub="MiniMax H3, video with sound"
       bar={<PromptBar value={a.prompt} onChange={(v) => set({ prompt: v })} chips={chips} minRows={3} maxRows={10} rewrite="animate" mention={mention}
-        placeholder="Say what happens in plain words — the writer plans it second by second with your references and characters (like Plan a video)…"
+        placeholder={swap ? "Optional notes — e.g. “keep her sunglasses on”, “his jacket stays open”. Leave empty to keep everything from the pictures." : "Say what happens in plain words — the writer plans it second by second with your references and characters (like Plan a video)…"}
         below={planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
         action={<GoButton onClick={go} disabled={!!why} why={why}>{a.takes === 2 ? "Make 2" : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
       drawer={<>
@@ -294,9 +305,14 @@ export default function AnimateTab() {
           <span className="min-w-0"><span className="block text-[13px] font-semibold text-ink">Copy a video from CivitAI</span>
             <span className="block text-[11.5px] text-muted">From your saved collections or a link — its prompt, LoRAs and the clip come in.</span></span>
         </button>
-        {ref ? (
+        {swap && (
+          <div className="border border-accent/40 bg-accent/[.05] px-3 py-2.5 text-[12.5px] leading-relaxed text-muted">
+            <b className="text-ink">Swap the person.</b> Add <b className="text-ink">one video</b> and <b className="text-ink">any pictures of your character</b> — face, outfit, accessories; they're all treated as the same character, no numbering. The video's movement, camera, background and sound stay; only the person you name above changes.
+          </div>
+        )}
+        {refsMode ? (
           <div><Label right={<span className="flex gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" title="Bring back the box, references, frames and LoRAs from before the last change (Ctrl+Z)" onClick={doUndo}>↶ Undo</button>}
-            <button className="text-xs text-accent hover:underline" title="Your references, words, length and LoRAs go along" onClick={planInPrompt}>Plan a video with these</button></span>}>References</Label>
+            {!swap && <button className="text-xs text-accent hover:underline" title="Your references, words, length and LoRAs go along" onClick={planInPrompt}>Plan a video with these</button>}</span>}>{swap ? "Video and pictures" : "References"}</Label>
             <div className="mb-2"><CharacterPicker refs={refs} onChange={(r) => { remember(); setWork({ animateRefs: r }); }} /></div>
             <RefList refs={refs} onChange={(r) => { if (r.length < refs.length) remember(); setWork({ animateRefs: r }); }} /></div>
         ) : (
@@ -305,9 +321,9 @@ export default function AnimateTab() {
             {a.mode === "fl" && <div><Label>Last frame</Label><Slot className="h-44" value={frames[1]} onChange={(m) => { remember(); setFrames((f) => [f[0], m]); }} label="Ending picture" /></div>}
           </div>
         )}
-        {!ref && <div className="flex justify-end gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" onClick={doUndo}>↶ Undo</button>}<button className="text-xs text-accent hover:underline" onClick={planInPrompt}>Plan a video with these</button></div>}
-        {!turboOk && <p className="text-xs text-muted">Turbo is only available for References videos — this type always uses full steps.</p>}
-        <LoraList family="h3" label="H3 LoRAs" value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />
+        {!refsMode && <div className="flex justify-end gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" onClick={doUndo}>↶ Undo</button>}<button className="text-xs text-accent hover:underline" onClick={planInPrompt}>Plan a video with these</button></div>}
+        {!turboOk && !swap && <p className="text-xs text-muted">Turbo is only available for References videos — this type always uses full steps.</p>}
+        {!swap && <LoraList family="h3" label="H3 LoRAs" value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />}
         <Advanced a={a.adv} set={(p) => set({ adv: { ...a.adv, ...p } })} hideCfg>
           <Slider label="Size (megapixels)" min={0.3} max={2.5} step={0.05} value={a.mp} show={`${a.mp.toFixed(2)} MP · ${width}×${height}`} onChange={(v) => set({ mp: Math.round(v * 100) / 100 })} />
           <p className="-mt-2 text-[11.5px] leading-relaxed text-dim">On a 5090: about 2 MP for 8 s, 1.5 MP for 12 s, 1.2 MP for 15 s. Bigger and longer needs more GPU memory — turn on low-memory decode if it runs out.</p>
