@@ -309,12 +309,23 @@ def resolve(fl: dict) -> None:
                                + ", ".join(f"{f.get('name')} {f.get('metadata') or ''}" for f in models)[:300] + ")")
                 log(f"{fl['name']}: {fl['error']}"); fl["get"] = url; fl["size"] = 0; return
             url = hit["downloadUrl"]
+            # CivitAI says itself when a version is early access (only people who paid the creator can download it yet)
+            info = r.json() if r is not None and r.ok else {}
+            ea = info.get("availability") == "EarlyAccess" or bool(info.get("earlyAccessEndsAt")) or bool((info.get("earlyAccessConfig") or {}).get("timeframe"))
+            if ea:
+                ends = str(info.get("earlyAccessEndsAt") or "")[:10]
+                fl["civitai_note"] = f"early access on CivitAI{f' until {ends}' if ends else ''} — only people who paid the creator's early-access fee can download it until then; your keys are fine"
         if url.startswith("https://civitai.com/"):
             loc, r = "", None
+            said = ""
             for key in (_civitai_keys() or [""]):  # each key until CivitAI hands out the file
                 r = requests.get(url, headers={"Authorization": f"Bearer {key}"} if key else {}, allow_redirects=False, timeout=30)
                 loc = r.headers.get("Location") or ""
                 if loc and "/login" not in loc: break
+                # what CivitAI itself says when it refuses (e.g. "early access", "you need to purchase") — never the key
+                try: said = said or re.sub(r"\s+", " ", (r.json().get("message") or r.json().get("error") or ""))[:160]
+                except ValueError: pass  # an HTML page, not a message
+            if said: fl["civitai_said"] = said
             if loc and "/login" not in loc:  # without a key, some models redirect to the sign-in page instead of the file
                 url = loc
             elif fl.get("fallback"):
@@ -343,6 +354,8 @@ def resolve(fl: dict) -> None:
         if fl.get("hf") and r.status_code < 400 and r.url and not r.url.startswith(HF_BASE):
             fl["get"] = r.url; fl["cdn"] = True
         why = refused(fl["url"], r.status_code)
+        if why and fl.get("civitai_note"): why = f"CivitAI refused ({r.status_code}): {fl['civitai_note']}"
+        elif why and fl.get("civitai_said"): why += f" — CivitAI says: “{fl['civitai_said']}”"
         if why and not fl.get("error"): fl["error"] = why; log(f"{fl['name']}: {why}")
     except Exception as e:  # noqa: BLE001
         if "get" not in fl and fl.get("fallback") and url.startswith("https://civitai.com/"):
