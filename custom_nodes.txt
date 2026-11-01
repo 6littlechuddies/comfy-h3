@@ -31,7 +31,7 @@ https://github.com/lbouaraba/comfyui-krea2edit@13ef60f20828949becada815d3cbc371e
 #     run it at 1.5; Create → "Follow the prompt harder"). Also has an image-only character LoRA loader, for testing ---
 # (the original repo, capitan01R/ComfyUI-Krea2T-Enhancer, was deleted ~2026-10-17; this community mirror keeps its full history —
 #  830b76f is the last original commit, unmodified)
-https://github.com/pekkAi-dev/ComfyUI-Krea2T-Enhancer@830b76f
+https://github.com/pekkAi-dev/ComfyUI-Krea2T-Enhancer@830b76faad079736b10038b2d40c58da7882aa7c
 
 # --- IP-Adapter Plus: Illustrious draws a character's sheet while looking at their front picture ---
 https://github.com/cubiq/ComfyUI_IPAdapter_plus@a0f451a5113cf9becb0847b92884cb10cbdec0ef
