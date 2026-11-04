@@ -146,7 +146,7 @@ RUN curl -fsSL -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloud
     && chmod +x /usr/local/bin/cloudflared && cloudflared --version
 
 COPY models.txt /opt/h3/models.txt
-COPY scripts/start.sh scripts/watchdog.py scripts/Caddyfile scripts/studio_server.py scripts/downloader.py scripts/h3-grok.user.js scripts/self_update.sh /opt/h3/
+COPY scripts/start.sh scripts/watchdog.py scripts/Caddyfile scripts/studio_server.py scripts/downloader.py scripts/comfy_router.py scripts/h3-grok.user.js scripts/self_update.sh /opt/h3/
 COPY scripts/boot.html /opt/h3/boot/boot.html
 COPY prompts/ /opt/h3/prompts/
 COPY scripts/claude/CLAUDE.md /opt/h3/CLAUDE.md

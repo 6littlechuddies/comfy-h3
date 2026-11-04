@@ -593,6 +593,8 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   refImageSize: "match" | "max";
   lowMemDecode: boolean;
   prefix: string;
+  /** split across this many cards with Raylight (sequence parallel); 1 or unset = one card, as always */
+  ray?: number;
 }
 
 export function buildAnimate(p: AnimateOpts): ApiGraph {
@@ -609,6 +611,10 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     steps = 4;
   }
   for (const l of activeLoras(p.loras)) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  // several cards (Raylight): the same LoRAs, loaded into its workers instead (Eros Max needs its own shift patch: one card)
+  const ray = (p.ray ?? 1) > 1 && !eros;
+  const rayN = p.ray ?? 1;
+  const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : []), ...activeLoras(p.loras)];
   // Eros Max beta6: its author's "10/3 shift" (video 10, audio 3; the official files keep their own 12/3) — ComfyUI's own node
   if (eros) model = o(g.add("MiniMaxH3SigmaShift", { model, shift_video: 10, shift_audio: 3 }));
   const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
@@ -644,11 +650,26 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
   }
-  const noise = g.add("RandomNoise", { noise_seed: p.seed });
-  const guider = g.add("BasicGuider", { model, conditioning: o(cond, 0) });
   const sampler = g.add("KSamplerSelect", { sampler_name: p.sampler });
-  const sigmas = g.add("BasicScheduler", { model, scheduler: p.scheduler, steps, denoise: 1 });
-  const out = g.add("SamplerCustomAdvanced", { noise: o(noise), guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
+  let out: string;
+  if (ray && rayN > 1) {
+    // Raylight (github.com/komikndr/raylight): the model loads on every card and each step's frames are split across them
+    // (Ulysses sequence parallel) — the same model, LoRAs and sampler, just N cards working on one video
+    const init = g.add("RayInitializer", { ray_cluster_address: "local", ray_cluster_namespace: "default", GPU: rayN, ulysses_degree: rayN, ring_degree: 1,
+      cfg_degree: 1, dp_degree: 1, sync_ulysses: false, clear_vram_after_sampling: true, FSDP: false, FSDP_CPU_OFFLOAD: false, XFuser_attention: "TORCH_FLASH",
+      skip_comm_test: false, use_mmap: false });
+    let lora: Link | undefined;
+    for (const l of rayLoras) lora = o(g.add("RayLoraLoader", { lora_name: l.name, strength_model: l.strength, ...(lora ? { prev_ray_lora: lora } : {}) }));
+    const actors = g.add("RayUNETLoader", { unet_name: ref ? M.h3Ref : M.h3FL, weight_dtype: "default", ray_actors_init: o(init), ...(lora ? { lora } : {}) });
+    const guider = g.add("RayBasicGuider", { ray_actors: o(actors), conditioning: o(cond, 0) });
+    const sigmas = g.add("RayBasicScheduler", { ray_actors: o(actors), scheduler: p.scheduler, steps, denoise: 1 });
+    out = g.add("XFuserSamplerCustomAdvanced", { add_noise: true, noise_seed: p.seed, guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
+  } else {
+    const noise = g.add("RandomNoise", { noise_seed: p.seed });
+    const guider = g.add("BasicGuider", { model, conditioning: o(cond, 0) });
+    const sigmas = g.add("BasicScheduler", { model, scheduler: p.scheduler, steps, denoise: 1 });
+    out = g.add("SamplerCustomAdvanced", { noise: o(noise), guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
+  }
   const frames = p.lowMemDecode
     ? g.add("VAEDecodeTiled", { samples: o(out), vae: o(vae), tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 })
     : g.add("VAEDecode", { samples: o(out), vae: o(vae) });

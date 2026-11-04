@@ -29,7 +29,7 @@ old_start="$(sha256sum "$H3/start.sh" | cut -c1-64)"
 rm -rf "$H3/studio.new" && mv "$TMP/b/studio" "$H3/studio.new" && rm -rf "$H3/studio.old" \
   && { [[ -d "$H3/studio" ]] && mv "$H3/studio" "$H3/studio.old"; mv "$H3/studio.new" "$H3/studio"; } && rm -rf "$H3/studio.old"
 [[ -d "$TMP/b/prompts" ]] && rm -rf "$H3/prompts" && mv "$TMP/b/prompts" "$H3/prompts"
-for f in studio_server.py downloader.py watchdog.py Caddyfile h3-grok.user.js start.sh models.txt CLAUDE.md; do
+for f in studio_server.py downloader.py watchdog.py comfy_router.py Caddyfile h3-grok.user.js start.sh models.txt CLAUDE.md; do
   [[ -f "$TMP/b/$f" ]] && cp -f "$TMP/b/$f" "$H3/$f"
 done
 chmod +x "$H3/start.sh"

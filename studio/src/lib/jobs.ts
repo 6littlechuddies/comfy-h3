@@ -134,7 +134,7 @@ export const useJobs = create<JobState>((set, get) => ({
   cancel: (id) => {
     const job = get().jobs.find((j) => j.id === id);
     if (!job) return;
-    if (job.status === "running") interrupt();
+    if (job.status === "running") interrupt(id);
     else deleteQueued([id]);
     patch(id, { status: "cancelled", endedAt: Date.now() });
   },

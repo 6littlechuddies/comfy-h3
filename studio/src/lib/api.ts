@@ -73,7 +73,8 @@ export async function history(id: string): Promise<HistoryEntry | null> {
   const b = await j<Record<string, HistoryEntry>>(await fetch(`/history/${id}`));
   return b[id] ?? null;
 }
-export const interrupt = () => fetch("/interrupt", { method: "POST" });
+/** stop the running job — with its id, only that one (several cards: the others keep going) */
+export const interrupt = (promptId?: string) => fetch("/interrupt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(promptId ? { prompt_id: promptId } : {}) });
 export const deleteQueued = (ids: string[]) =>
   fetch("/queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delete: ids }) });
 

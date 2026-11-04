@@ -39,3 +39,7 @@ https://github.com/cubiq/ComfyUI_IPAdapter_plus@a0f451a5113cf9becb0847b92884cb10
 # --- H3 Relay 2.0 (akatz-ai; Apache-2.0): Animate → "Swap the person" — finds and tracks the person with SAM 3.1, redraws only
 #     them from your pictures with the Character Swap LoRA, long clips in overlapping windows, the source's sound kept ---
 https://github.com/akatz-ai/h3-relay@e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220
+
+# --- Raylight (komikndr; Apache-2.0): several cards — an H3 video's frames split across every card (Ulysses sequence parallel),
+#     used by the all-cards ComfyUI that start.sh runs when the rental has 2+ cards. Brings ray + xfuser (they leave torch alone) ---
+https://github.com/komikndr/raylight@74f5defa8a4d0e6e62cf0ea5e717ea6b4305bb13

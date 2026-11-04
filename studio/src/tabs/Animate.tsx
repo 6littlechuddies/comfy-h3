@@ -22,6 +22,7 @@ import { waitForJob } from "../lib/jobs";
 import { DEFAULTS } from "../lib/settings";
 import { parseTimeline, toPrompt } from "../lib/timeline";
 import { tagsFor } from "../lib/work";
+import { rayCards, useCards } from "../lib/cards";
 import { stopMessage } from "../lib/adult";
 import { useCharacters } from "../lib/characters";
 import { CharacterPicker, charactersIn, withCharacter, WriterSetup } from "./Prompt";
@@ -118,6 +119,8 @@ export default function AnimateTab() {
   const nFrames = h3Frames(a.seconds);
   const ref = a.mode === "ref";
   const swap = a.mode === "swap";
+  useCards((c) => c.cards); // re-render when the card count arrives
+  const split = rayCards();
   // the first "Character swap" button left its LoRA (and prompt) in References mode, with no off switch: take it out once —
   // swapping is its own video type now and doesn't use this list
   useEffect(() => {
@@ -150,7 +153,7 @@ export default function AnimateTab() {
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
     ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
-    refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3",
+    refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayCards(),
     images: ref ? refs.filter((r) => r.media.kind === "image").map((r) => r.media.name) : (frames.filter(Boolean) as Media[]).map((m) => m.name),
     videos: ref ? refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
     audios: ref ? refs.filter((r) => r.media.kind === "audio").map((r) => r.media.name) : [],
@@ -280,7 +283,7 @@ export default function AnimateTab() {
         ...([0.4, 0.6, 0.98, 1.2, 1.5, 2].includes(a.mp) ? [] : [{ value: a.mp, label: `${a.mp} MP` }])]} />
       {!isPlan(a.prompt) && <Chip title="Plain words" value={a.plan === false ? 0 : 1} onChange={(v) => set({ plan: v === 1 })} options={[{ value: 1, label: "Writer plans it (recommended)" }, { value: 0, label: "Send my words as typed" }]} />}
       <Chip title="Takes & speed" value={speedVal} onChange={(v) => set({ takes: v.startsWith("2") ? 2 : 1, turbo: v.endsWith("t") })} options={speedOpts} />
-      <span className="ml-1 font-mono text-[11px] text-dim">{width}×{height} · {nFrames} frames</span></>}
+      <span className="ml-1 font-mono text-[11px] text-dim">{width}×{height} · {nFrames} frames{split > 1 ? ` · split across ${split} cards` : ""}</span></>}
     </>
   );
   // @ in the box: References mode → characters and pictures join the references; otherwise a picture is the first frame

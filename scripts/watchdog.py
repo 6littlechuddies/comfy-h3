@@ -100,25 +100,45 @@ def backup():
     return ok
 
 
-COMFY_CMD_TAG = "main.py --listen 127.0.0.1 --port 18188"
+# one ComfyUI (port 18188), or with several cards one per card (18200, 18201, …), maybe one more for Raylight (18299), and the
+# router in front of them on 18188 (start.sh)
+def comfy_procs():
+    """(port, CUDA_VISIBLE_DEVICES or None, log file) of every ComfyUI this rental runs"""
+    backends = [b for b in os.environ.get("COMFY_BACKENDS", "").split(",") if b.strip()]
+    if int(os.environ.get("H3_CARDS", "1") or 1) <= 1 or not backends:
+        return [(18188, None, "/var/log/comfyui.log")]
+    out = [(int(b.rsplit(":", 1)[1]), str(i), "/var/log/comfyui.log" if i == 0 else f"/var/log/comfyui-{i}.log") for i, b in enumerate(backends)]
+    ray = os.environ.get("RAY_BACKEND", "").strip()
+    if ray: out.append((int(ray.rsplit(":", 1)[1]), None, "/var/log/comfyui-raylight.log"))
+    return out
 
 
-def comfy_running():
-    r = subprocess.run(["pgrep", "-f", COMFY_CMD_TAG], capture_output=True)
-    return r.returncode == 0
+def comfy_running(port=18188):
+    return subprocess.run(["pgrep", "-f", f"main.py --listen 127.0.0.1 --port {port}"], capture_output=True).returncode == 0
 
 
-def restart_comfy():
+def restart_comfy(port=18188, cuda=None, logfile="/var/log/comfyui.log"):
     """ComfyUI died (usually out of RAM loading a big model) -> start it again, same flags"""
     comfy_dir = os.environ.get("COMFY_DIR", "/opt/ComfyUI")
     args = os.environ.get("COMFY_ARGS", "--disable-pinned-memory").split()
     if os.environ.get("H3_SAGE", "0") != "1":  # sage attention makes Qwen-Image-Edit pictures black
         args = [a for a in args if a != "--use-sage-attention"]
-    print("!! ComfyUI is not running -> restarting it (see /var/log/comfyui.log for why)", flush=True)
-    log = open("/var/log/comfyui.log", "a")
+    print(f"!! ComfyUI on port {port} is not running -> restarting it (see {logfile} for why)", flush=True)
+    log = open(logfile, "a")
     log.write("\n===== watchdog: ComfyUI exited, restarting =====\n"); log.flush()
-    subprocess.Popen(["python", "main.py", "--listen", "127.0.0.1", "--port", "18188"] + args,
-                     cwd=comfy_dir, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    env = dict(os.environ)
+    if cuda is not None: env["CUDA_VISIBLE_DEVICES"] = cuda
+    subprocess.Popen(["python", "main.py", "--listen", "127.0.0.1", "--port", str(port)] + args,
+                     cwd=comfy_dir, stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=env)
+
+
+def router_upkeep():
+    """several cards: the router in front of the ComfyUIs must be running"""
+    if int(os.environ.get("H3_CARDS", "1") or 1) <= 1: return
+    if subprocess.run(["pgrep", "-f", "comfy_router.py"], capture_output=True).returncode != 0:
+        print("!! ComfyUI router not running -> restarting it", flush=True)
+        subprocess.Popen(["python", "/opt/h3/comfy_router.py"], stdout=open("/var/log/comfy-router.log", "a"), stderr=subprocess.STDOUT,
+                         start_new_session=True)
 
 
 def studio_upkeep(state_sig):
@@ -205,7 +225,7 @@ def proton_final(timeout=1800):
 def main():
     last_active = time.time()
     prev_conns = set()
-    restarts = 0
+    restarts: dict = {}
     state_sig = None
     print(f"watchdog: idle limit {IDLE_MINUTES} min, backup -> {REMOTE or 'off'}", flush=True)
     while True:
@@ -215,11 +235,15 @@ def main():
         # a connection present in two samples 30s apart is a long-lived websocket = open browser tab
         tab_open = bool(conns & prev_conns)
         prev_conns = conns
-        alive = comfy_running()
-        if not alive and restarts < 5:
-            restarts += 1
-            restart_comfy()
-            alive = True
+        alive = True
+        for port, cuda, logfile in comfy_procs():
+            if comfy_running(port): continue
+            if restarts.get(port, 0) < 5:
+                restarts[port] = restarts.get(port, 0) + 1
+                restart_comfy(port, cuda, logfile)
+            elif port in (18188, 18200):
+                alive = False
+        router_upkeep()
         # dead and out of restarts -> don't treat "unreachable" as busy, so idle shutdown still happens
         busy = queue_busy() if alive else False
         claude = claude_working()

@@ -38,11 +38,11 @@ jobs:
           b=out/b; mkdir -p $b/boot
           cp -a studio/dist $b/studio
           cp -a prompts $b/prompts
-          cp models.txt scripts/studio_server.py scripts/downloader.py scripts/watchdog.py scripts/Caddyfile scripts/h3-grok.user.js scripts/start.sh scripts/claude/CLAUDE.md $b/
+          cp models.txt scripts/studio_server.py scripts/downloader.py scripts/watchdog.py scripts/comfy_router.py scripts/Caddyfile scripts/h3-grok.user.js scripts/start.sh scripts/claude/CLAUDE.md $b/
           cp scripts/boot.html $b/boot/boot.html
           bash scripts/image_rev.sh > $b/IMAGE_REV
           echo "$GITHUB_SHA" > $b/CODE_REV
-          python3 -m py_compile $b/studio_server.py $b/downloader.py $b/watchdog.py && rm -rf $b/__pycache__
+          python3 -m py_compile $b/studio_server.py $b/downloader.py $b/watchdog.py $b/comfy_router.py && rm -rf $b/__pycache__
           tar -czf h3-code.tar.gz -C $b .
           ls -la h3-code.tar.gz; cat $b/IMAGE_REV
 

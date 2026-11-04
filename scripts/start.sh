@@ -165,9 +165,39 @@ DL_PID=$!
 [[ -n "${CIVITAI_TOKEN:-}" && -z "${CIVITAI_API_KEY:-}" ]] && export CIVITAI_API_KEY="$CIVITAI_TOKEN"
 if [[ -n "$EXTRA_PID" ]]; then status loading "finishing extra custom nodes"; wait "$EXTRA_PID"; cat /var/log/extra-nodes.log; fi
 cd "$COMFY_DIR"
-# shellcheck disable=SC2086
-python main.py --listen 127.0.0.1 --port 18188 $COMFY_ARGS >/var/log/comfyui.log 2>&1 &
-COMFY_PID=$!
+# Several cards: one ComfyUI per card (18200, 18201, …), each seeing only its own card, behind a router on 18188 that hands
+# each job to a free card — plus, when Raylight is installed, one more ComfyUI (18299) that sees every card, for H3 videos
+# split across all of them. MULTI_GPU=0 in the template = one ComfyUI on the first card, as before. Each ComfyUI keeps its
+# own models in memory, so a card is only used when there's ~28 GB of RAM for it.
+GPUS=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU' || true); [[ "$GPUS" =~ ^[0-9]+$ && $GPUS -ge 1 ]] || GPUS=1
+RAM_GB=$(awk '/MemTotal/{print int($2/1048576)}' /proc/meminfo)
+CARDS=$GPUS
+[[ "${MULTI_GPU:-1}" == "0" ]] && CARDS=1
+(( CARDS > RAM_GB / 28 )) && CARDS=$(( RAM_GB / 28 ))
+(( CARDS < 1 )) && CARDS=1
+export H3_CARDS=$CARDS
+if (( CARDS > 1 )); then
+  BACKENDS=""
+  for i in $(seq 0 $((CARDS - 1))); do
+    # shellcheck disable=SC2086
+    CUDA_VISIBLE_DEVICES=$i python main.py --listen 127.0.0.1 --port $((18200 + i)) $COMFY_ARGS >"/var/log/comfyui$([[ $i -gt 0 ]] && echo "-$i").log" 2>&1 &
+    [[ $i -eq 0 ]] && COMFY_PID=$!
+    BACKENDS+="http://127.0.0.1:$((18200 + i)),"
+    sleep 3   # a moment apart: each one tidies ComfyUI's shared temp folder when it starts
+  done
+  export COMFY_BACKENDS="${BACKENDS%,}" RAY_BACKEND=""
+  if [[ -d "$COMFY_DIR/custom_nodes/raylight" && "${RAYLIGHT:-1}" != "0" ]]; then
+    # shellcheck disable=SC2086
+    python main.py --listen 127.0.0.1 --port 18299 $COMFY_ARGS >/var/log/comfyui-raylight.log 2>&1 &
+    export RAY_BACKEND="http://127.0.0.1:18299"
+  fi
+  nohup python /opt/h3/comfy_router.py >/var/log/comfy-router.log 2>&1 &
+  echo "Multi-GPU: $CARDS cards ($GPUS found, ${RAM_GB} GB RAM)${RAY_BACKEND:+ + Raylight for videos}"
+else
+  # shellcheck disable=SC2086
+  python main.py --listen 127.0.0.1 --port 18188 $COMFY_ARGS >/var/log/comfyui.log 2>&1 &
+  COMFY_PID=$!
+fi
 COMFY_UP=0
 for _ in $(seq 1 3600); do
   [[ $COMFY_UP -eq 0 ]] && curl -sf http://127.0.0.1:18188/system_stats >/dev/null && COMFY_UP=1
@@ -193,5 +223,5 @@ done
 status ready "ComfyUI is up (boot took $(( $(date +%s) - START_TS ))s; other models keep downloading in the background)"
 
 # ---- 4. idle watchdog (auto-destroy + optional output backup) ---------------------------------
-export COMFY_ARGS COMFY_DIR   # watchdog relaunches ComfyUI with the same flags if it crashes
+export COMFY_ARGS COMFY_DIR H3_CARDS COMFY_BACKENDS RAY_BACKEND   # watchdog relaunches ComfyUI (each card's) with the same flags if it crashes
 exec python /opt/h3/watchdog.py
