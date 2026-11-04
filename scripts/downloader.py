@@ -397,8 +397,41 @@ def on_disk(fl: dict) -> int:
     return 0
 
 
+_WHOLE: dict = {}
+
+
+def whole(path: str, want: int = 0, safetensors: bool | None = None) -> bool:
+    """the file is all there: as big as the server said (when it said), and a .safetensors file as long as its own header
+    says. A download cut off (the disk filled up, the rental restarted) used to be taken as finished, and the model then
+    failed with 'Tensor ... extends past the end of the file'."""
+    try: st = os.stat(path)
+    except OSError: return False
+    key = (path, st.st_size, st.st_mtime, want)
+    if key in _WHOLE: return _WHOLE[key]
+    ok = not (want and st.st_size < want)
+    if ok and (safetensors if safetensors is not None else path.endswith(".safetensors")):
+        try:
+            with open(path, "rb") as f:
+                n = int.from_bytes(f.read(8), "little")
+                if not 0 < n < 100 * 2**20: ok = False
+                else:
+                    head = json.loads(f.read(n))
+                    end = max((v["data_offsets"][1] for k, v in head.items() if k != "__metadata__" and isinstance(v, dict)), default=0)
+                    ok = st.st_size >= 8 + n + end
+        except (OSError, ValueError, KeyError, TypeError):
+            ok = False
+    _WHOLE[key] = ok
+    return ok
+
+
 def complete(fl: dict) -> bool:
-    return os.path.isfile(fl["path"]) and not os.path.exists(fl["path"] + ".aria2")
+    if not os.path.isfile(fl["path"]) or os.path.exists(fl["path"] + ".aria2"): return False
+    if whole(fl["path"], fl.get("size") or 0): return True
+    # cut short: back to a partial download, so it's fetched again (resumed where possible) instead of breaking a model
+    log(f"{fl['name']}: the file on disk is incomplete ({os.path.getsize(fl['path']) // 2**20} MB) — downloading it again")
+    try: os.remove(fl["path"])
+    except OSError: pass
+    return False
 
 
 # ------------------------------------------------------------------ progress file
@@ -633,7 +666,8 @@ def main() -> int:
     def finish_parts():  # finished files the hook missed (e.g. resumed ones) get their real name too
         for f in [f for g in groups for f in g["files"]]:
             part = f["path"] + SUFFIX
-            if os.path.exists(part) and not os.path.exists(part + ".aria2"):
+            # only when it's really all there (with no space left, aria2 can't write its .aria2 progress file either)
+            if os.path.exists(part) and not os.path.exists(part + ".aria2") and whole(part, f.get("size") or 0, f["path"].endswith(".safetensors")):
                 shutil.move(part, f["path"])
     with open(os.path.join(RUN, "downloader.pid"), "w") as fh:
         fh.write(str(os.getpid()))
