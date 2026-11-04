@@ -13,6 +13,7 @@ import { useJobs } from "../lib/jobs";
 import { CREATE_MODELS, modelArgs, modelOf, newSeed, pickModel, qualityTags, seedFor, useSection } from "../lib/settings";
 import { usePrimaryAction } from "../App";
 import { Advanced, Btn, EtaText, Icon, Label, LoraList, PresetBar, Seg, Slider, Slot, TextArea, TextIn, cx, tipsLine } from "../components/ui";
+import { rayCards, useCards } from "../lib/cards";
 import { mapSampler } from "../lib/civitUse";
 import type { LoraTips } from "../lib/api";
 import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
@@ -86,6 +87,7 @@ const MODEL_HINT: Record<string, string> = {
 };
 
 export default function CreateTab() {
+  const cardsN = useCards((st) => st.raylight ? st.cards : 1);
   const [c, set] = useSection("create");
   const run = useJobs((s) => s.run);
   const toast = useJobs((s) => s.toast);
@@ -198,8 +200,10 @@ export default function CreateTab() {
       : null;
     const bgLine = c.make === "character" && c.cutout ? " Plain white studio background." : "";
     const positiveSent = polished ? `${polished}${bgLine}` : positiveFor(extra);
+    // several cards: a single Krea 2 picture split across them (×2/×4 takes go one per card instead — faster for a batch)
+    const ray = !anime && count === 1 && !over.take && !over.sweep && c.splitCards !== false ? rayCards() : 1;
     const graph = buildCreate({
-      ...adv, seed, ...modelArgs(c, m), positive: positiveSent, negative: c.negative, loras: allLs, width: w, height: h, count, hires,
+      ...adv, seed, ...modelArgs(c, m), positive: positiveSent, negative: c.negative, loras: allLs, width: w, height: h, count, hires, ray,
       cutout: !c.raw && person && c.make === "character" && c.cutout, prefix: `studio/create/${c.style}`,
     });
     const label = over.label ?? `${count} ${anime ? "anime" : "realistic"} ${c.make === "background" ? "background" : c.make === "scene" ? "scene" : "character"}${count > 1 ? "s" : ""}`;
@@ -342,6 +346,11 @@ export default function CreateTab() {
         </label>
         <FaceFix on={!!c.faceFix} strength={c.faceStrength ?? 0.45} onChange={(p) => set({ ...(p.on != null ? { faceFix: p.on } : {}), ...(p.strength != null ? { faceStrength: p.strength } : {}) })} />
         <TextArea label="Negative prompt · never show" help="negative" rows={2} value={c.negative} onChange={(v) => set({ negative: v })} />
+        {cardsN > 1 && !anime && (
+          <Seg label={`Several cards (${cardsN})`} value={c.splitCards !== false ? "split" : "one"} onChange={(v) => set({ splitCards: v === "split" })}
+            options={[{ value: "split", label: `Split one picture across ${rayCards()}` }, { value: "one", label: "One card per picture" }]} />
+        )}
+        {cardsN > 1 && !anime && c.splitCards !== false && <p className="-mt-1 text-[11.5px] leading-relaxed text-dim">One picture is shared between the cards; ×2/×4 takes still go one card each. “Follow the prompt harder” isn't applied to split pictures (it can't reach Raylight's workers). A quick 8-step picture can come out no faster — the cards have to load the model first; the 2.5K finish and Krea 2 RAW gain the most.</p>}
         <Advanced a={adv} set={setAdv}>
           <details className="text-xs text-muted"><summary className="cursor-pointer">What gets sent</summary><p className="mt-1.5 font-mono leading-relaxed text-ink/80">{withTriggers(positive, loras)}</p></details>
         </Advanced>

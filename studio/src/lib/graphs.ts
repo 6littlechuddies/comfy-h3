@@ -74,6 +74,8 @@ export interface CreateOpts extends SamplerOpts {
   prefix: string;
   /** finish bigger: enlarge the picture this much and redraw it lightly (a "hires fix") — ×1.5 turns 1024×1536 into 1536×2304 */
   hires?: { scale: number; denoise: number; steps?: number };
+  /** Krea 2: split this one picture across this many cards with Raylight (1 or unset = one card) */
+  ray?: number;
 }
 
 export function buildCreate(p: CreateOpts): ApiGraph {
@@ -136,6 +138,7 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     // Krea 2 Turbo — same graph as ComfyUI's "Text to Image (Krea-2 Turbo)" template (8 steps, CFG 1, euler/simple);
     // Krea 2 RAW — the undistilled base (28 steps, CFG 4.5), optionally with Krea's turbo LoRA for fewer steps
     const raw = p.realModel === "krea2raw";
+    if ((p.ray ?? 1) > 1) return buildCreateKreaRay(p, raw, negative);
     const unet = g.add("UNETLoader", { unet_name: p.unet || (raw ? M.kreaRaw : M.kreaUnet), weight_dtype: "default" });
     let model: Link = o(unet);
     if (raw && p.kreaTurboLora && p.kreaTurboLora > 0) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.kreaTurboLora, strength_model: p.kreaTurboLora }));
@@ -163,6 +166,47 @@ export function buildCreate(p: CreateOpts): ApiGraph {
   } else {
     g.add("SaveImage", { images: image, filename_prefix: p.prefix }, "result");
   }
+  return g.graph;
+}
+
+/** shared by H3 videos and Krea 2 pictures on several cards: Raylight's workers, one per card, each step's work split
+ *  between them (Ulysses sequence parallel). The model and its LoRAs load into the workers. */
+function rayActors(g: G, n: number, unet: string, loras: { name: string; strength: number }[]): string {
+  const init = g.add("RayInitializer", { ray_cluster_address: "local", ray_cluster_namespace: "default", GPU: n, ulysses_degree: n, ring_degree: 1,
+    cfg_degree: 1, dp_degree: 1, sync_ulysses: false, clear_vram_after_sampling: true, FSDP: false, FSDP_CPU_OFFLOAD: false, XFuser_attention: "TORCH_FLASH",
+    skip_comm_test: false, use_mmap: false });
+  let lora: Link | undefined;
+  for (const l of loras) lora = o(g.add("RayLoraLoader", { lora_name: l.name, strength_model: l.strength, ...(lora ? { prev_ray_lora: lora } : {}) }));
+  return g.add("RayUNETLoader", { unet_name: unet, weight_dtype: "default", ray_actors_init: o(init), ...(lora ? { lora } : {}) });
+}
+
+/** Krea 2, one picture across every card (Raylight): same model, LoRAs, prompt and sampler as the one-card graph, and the
+ *  2.5K finish redrawn across the cards too. "Follow the prompt harder" (Krea2T Enhancer) patches the model inside this
+ *  ComfyUI, which Raylight's workers don't see, so it's left out here. */
+function buildCreateKreaRay(p: CreateOpts, raw: boolean, negative: string): ApiGraph {
+  const g = new G();
+  const loras = [...(raw && p.kreaTurboLora && p.kreaTurboLora > 0 ? [{ name: M.kreaTurboLora, strength: p.kreaTurboLora }] : []), ...activeLoras(p.loras)];
+  const actors = rayActors(g, p.ray!, p.unet || (raw ? M.kreaRaw : M.kreaUnet), loras);
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const pos = g.add("CLIPTextEncode", { text: withTriggers(p.positive, p.loras), clip: o(clip) });
+  const neg = p.cfg > 1 ? g.add("CLIPTextEncode", { text: negative, clip: o(clip) }) : g.add("ConditioningZeroOut", { conditioning: o(pos) });
+  const lat = g.add("EmptyLatentImage", { width: p.width, height: p.height, batch_size: p.count });
+  const sample = (latent: Link, steps: number, denoise: number, act: Link) => g.add("XFuserKSamplerAdvanced", {
+    add_noise: "enable", noise_seed: p.seed, steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler, ray_actors: act,
+    positive: o(pos), negative: o(neg), latent_image: latent, start_at_step: 0, end_at_step: 10000, return_with_leftover_noise: "disable", denoise });
+  const ks = sample(o(lat), p.steps, 1, o(actors));
+  let img: Link = o(g.add("VAEDecode", { samples: o(ks), vae: o(vae) }));
+  if (p.hires && p.hires.scale > 1.01) {
+    const big = g.add("ImageScaleBy", { image: img, upscale_method: "lanczos", scale_by: p.hires.scale });
+    const ks2 = sample(o(g.add("VAEEncode", { pixels: o(big), vae: o(vae) })), p.hires.steps ?? p.steps, p.hires.denoise, o(ks, 1));
+    img = o(g.add("VAEDecode", { samples: o(ks2), vae: o(vae) }));
+  }
+  if (p.cutout) {
+    const cut = g.add("RMBG", { image: img, model: M.rmbg, sensitivity: 1, process_res: 1024, mask_blur: 0, mask_offset: 0,
+      invert_output: false, refine_foreground: true, unload_model: false, background: "Alpha", background_color: "#222222" });
+    g.add("SaveImage", { images: o(cut), filename_prefix: p.prefix + "_cutout" }, "cutout");
+  } else g.add("SaveImage", { images: img, filename_prefix: p.prefix }, "result");
   return g.graph;
 }
 
@@ -655,12 +699,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   if (ray && rayN > 1) {
     // Raylight (github.com/komikndr/raylight): the model loads on every card and each step's frames are split across them
     // (Ulysses sequence parallel) — the same model, LoRAs and sampler, just N cards working on one video
-    const init = g.add("RayInitializer", { ray_cluster_address: "local", ray_cluster_namespace: "default", GPU: rayN, ulysses_degree: rayN, ring_degree: 1,
-      cfg_degree: 1, dp_degree: 1, sync_ulysses: false, clear_vram_after_sampling: true, FSDP: false, FSDP_CPU_OFFLOAD: false, XFuser_attention: "TORCH_FLASH",
-      skip_comm_test: false, use_mmap: false });
-    let lora: Link | undefined;
-    for (const l of rayLoras) lora = o(g.add("RayLoraLoader", { lora_name: l.name, strength_model: l.strength, ...(lora ? { prev_ray_lora: lora } : {}) }));
-    const actors = g.add("RayUNETLoader", { unet_name: ref ? M.h3Ref : M.h3FL, weight_dtype: "default", ray_actors_init: o(init), ...(lora ? { lora } : {}) });
+    const actors = rayActors(g, rayN, ref ? M.h3Ref : M.h3FL, rayLoras);
     const guider = g.add("RayBasicGuider", { ray_actors: o(actors), conditioning: o(cond, 0) });
     const sigmas = g.add("RayBasicScheduler", { ray_actors: o(actors), scheduler: p.scheduler, steps, denoise: 1 });
     out = g.add("XFuserSamplerCustomAdvanced", { add_noise: true, noise_seed: p.seed, guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });

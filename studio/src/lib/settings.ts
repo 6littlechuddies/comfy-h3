@@ -24,6 +24,8 @@ export interface CreateS {
   lorasAnime: LoraPick[]; lorasReal: LoraPick[];
   /** realistic model: Krea 2 Turbo / Krea 2 RAW — each keeps its own LoRAs and settings */
   realModel: RealModel; lorasKrea: LoraPick[]; advKrea: Adv; advKreaRaw: Adv;
+  /** several cards: one Krea 2 picture split across all of them (Raylight); off = it uses one card */
+  splitCards?: boolean;
   /** realistic: plain words go through the local writer first (default on) */
   /** Krea 2: the local writer rewrites plain words into a long prompt (default off — your words go in as typed) */
   polish?: boolean;
