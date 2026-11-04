@@ -340,48 +340,42 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   return g.graph;
 }
 
-/** "Extend to wallpaper": context-aware fill. A wider (or taller) canvas with the picture in the middle; the picture model
- *  (Krea 2, or Anima for anime) draws the new strips from scratch at about 2 MP while it keeps seeing the picture: Differential
- *  Diffusion + a soft noise mask put the untouched middle back in at every step, so the new parts continue the scene. The result
- *  is scaled up to the full canvas and the ORIGINAL is pasted back over the middle pixel for pixel — only a thin blended seam —
- *  so the person and every fine detail stay exactly as they were. (The edit model was tried first: it kept the placeholder
- *  strips as they were, which looked like the picture stretched and blurred.) */
-export function buildExtend(p: { image: string; w: number; h: number; left: number; right: number; top: number; bottom: number;
-  sceneW: number; sceneH: number; engine: "krea" | "anima"; prompt: string; negative?: string; seed: number; steps: number; cfg: number;
-  sampler: string; scheduler: string; prefix: string }): ApiGraph {
+/** "Extend to wallpaper": Qwen-Image-2.1 + ausboss's Outpaint LoRA v2 (civitai.com/models/2967375), its author's recipe: the
+ *  picture on a flat-gray (#808080) canvas, the canvas as image_1 of the Qwen 2.1 encoder at resolution 0, the trigger
+ *  sentence (+ "Scene: …"), 25 steps, CFG 1, euler/simple, denoise 1 — no noise mask (it makes a seam on Qwen 2.1).
+ *  Big extensions go in steps (each adds a strip next to real pixels, as the cloud tools do): every stage's result, with the
+ *  picture put back in, is the next stage's centre. At the end it's scaled to full size and the ORIGINAL is pasted back over
+ *  the middle pixel for pixel, with a thin feathered seam. */
+export interface ExtendStage { w: number; h: number }
+export function buildExtend(p: { image: string; full: { w: number; h: number }; work: { w: number; h: number }; stages: ExtendStage[];
+  prompt: string; seed: number; prefix: string }): ApiGraph {
   const g = new G();
-  const W = p.w + p.left + p.right, H = p.h + p.top + p.bottom;
-  const anima = p.engine === "anima";
-  const unet = g.add("UNETLoader", { unet_name: anima ? M.anima : M.kreaUnet, weight_dtype: "default" });
-  const model = g.add("DifferentialDiffusion", { model: o(unet) });
-  const clip = g.add("CLIPLoader", anima ? { clip_name: M.animaClip, type: "stable_diffusion", device: "default" } : { clip_name: M.kreaClip, type: "krea2", device: "default" });
-  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const model = g.add("LoraLoaderModelOnly", { model: o(g.add("UNETLoader", { unet_name: M.qwen21, weight_dtype: "default" })), lora_name: M.qwen21Outpaint, strength_model: 1 });
+  const clip = g.add("CLIPLoader", { clip_name: M.qwen21TE, type: "qwen_image", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.qwen21Vae });
   const orig = g.add("LoadImage", { image: p.image });
-  // the new space starts as the picture's own colours, smeared — it's fully redrawn; this only sets the overall tone
-  const tiny = g.add("ImageScale", { image: o(orig), upscale_method: "area", width: 16, height: 16, crop: "disabled" });
-  const smear = g.add("ImageScale", { image: o(tiny), upscale_method: "bilinear", width: W, height: H, crop: "disabled" });
-  const canvas = g.add("ImageCompositeMasked", { destination: o(smear), source: o(orig), x: p.left, y: p.top, resize_source: false });
-  // exactly the canvas's shape (chosen in extend.ts), so the new parts line up with the original to the pixel
-  const scene = g.add("ImageScale", { image: o(canvas), upscale_method: "lanczos", width: p.sceneW, height: p.sceneH, crop: "disabled" });
-  // what gets drawn: the new strips, fading into a little of the picture's edge (soft = Differential Diffusion blends it)
-  const m = Math.max(24, Math.round(Math.min(p.w, p.h) * 0.04));
-  const full = g.add("SolidMask", { value: 1, width: W, height: H });
-  const keepW = p.w - (p.left ? m : 0) - (p.right ? m : 0), keepH = p.h - (p.top ? m : 0) - (p.bottom ? m : 0);
-  const hole = g.add("SolidMask", { value: 0, width: Math.max(8, keepW), height: Math.max(8, keepH) });
-  const sides = g.add("MaskComposite", { destination: o(full), source: o(hole), x: p.left + (p.left ? m : 0), y: p.top + (p.top ? m : 0), operation: "multiply" });
-  const blur = g.add("ImageBlur", { image: o(g.add("MaskToImage", { mask: o(sides) })), blur_radius: 31, sigma: 10 });
-  const soft = g.add("ImageToMask", { image: o(blur), channel: "red" });
-  const latent = g.add("VAEEncode", { pixels: o(scene), vae: o(vae) });
-  const noised = g.add("SetLatentNoiseMask", { samples: o(latent), mask: o(soft) });
-  const pos = g.add("CLIPTextEncode", { text: p.prompt, clip: o(clip) });
-  const neg = !anima && p.cfg <= 1 ? g.add("ConditioningZeroOut", { conditioning: o(pos) }) : g.add("CLIPTextEncode", { text: [p.negative, ADULT_NEG].filter(Boolean).join(", "), clip: o(clip) });
-  const ks = g.add("KSampler", { model: o(model), seed: p.seed, steps: p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler, positive: o(pos), negative: o(neg), latent_image: o(noised), denoise: 1 });
-  const out = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
-  const big = g.add("ImageScale", { image: o(out), upscale_method: "lanczos", width: W, height: H, crop: "disabled" });
-  // the original on top, untouched; its edges facing the new parts fade in over the overlap
-  const f = Math.max(8, Math.round(m * 0.8));
-  const edge = g.add("FeatherMask", { mask: o(g.add("SolidMask", { value: 1, width: p.w, height: p.h })), left: p.left ? f : 0, top: p.top ? f : 0, right: p.right ? f : 0, bottom: p.bottom ? f : 0 });
-  const img = g.add("ImageCompositeMasked", { destination: o(big), source: o(orig), x: p.left, y: p.top, resize_source: false, mask: o(edge) });
+  // the picture at working size: the centre of the first canvas, and put back after every stage so it never drifts
+  const small = g.add("ImageScale", { image: o(orig), upscale_method: "lanczos", width: p.work.w, height: p.work.h, crop: "disabled" });
+  let prev: Link = o(small), pw = p.work.w, ph = p.work.h, ox = 0, oy = 0;
+  p.stages.forEach((st, i) => {
+    const x = Math.floor((st.w - pw) / 2), y = Math.floor((st.h - ph) / 2);
+    const gray = g.add("EmptyImage", { width: st.w, height: st.h, batch_size: 1, color: 0x808080 });
+    const canvas = g.add("ImageCompositeMasked", { destination: o(gray), source: prev, x, y, resize_source: false });
+    const enc = g.add("TextEncodeQwenImage21", { clip: o(clip), prompt: p.prompt, negative_prompt: "", vae: o(vae), resolution: 0, "images.image_1": o(canvas) });
+    const ks = g.add("KSampler", { model: o(model), seed: p.seed + i, steps: 25, cfg: 1, sampler_name: "euler", scheduler: "simple",
+      positive: o(enc, 0), negative: o(enc, 1), latent_image: o(enc, 2), denoise: 1 });
+    const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
+    ox += x; oy += y;
+    prev = o(g.add("ImageCompositeMasked", { destination: o(dec), source: o(small), x: ox, y: oy, resize_source: false }));
+    pw = st.w; ph = st.h;
+  });
+  // full size, then the original itself on top (only a 32-pixel blend where it meets the new parts)
+  const W = Math.round(pw * (p.full.h / p.work.h)), H = Math.round(ph * (p.full.h / p.work.h));
+  const big = g.add("ImageScale", { image: prev, upscale_method: "lanczos", width: W, height: H, crop: "disabled" });
+  const k = p.full.h / p.work.h, fx = Math.round(ox * k), fy = Math.round(oy * k), f = 32;
+  const edge = g.add("FeatherMask", { mask: o(g.add("SolidMask", { value: 1, width: p.full.w, height: p.full.h })),
+    left: fx > 0 ? f : 0, top: fy > 0 ? f : 0, right: fx + p.full.w < W ? f : 0, bottom: fy + p.full.h < H ? f : 0 });
+  const img = g.add("ImageCompositeMasked", { destination: o(big), source: o(orig), x: Math.max(0, fx), y: Math.max(0, fy), resize_source: false, mask: o(edge) });
   g.add("SaveImage", { images: o(img), filename_prefix: p.prefix }, "result");
   return g.graph;
 }

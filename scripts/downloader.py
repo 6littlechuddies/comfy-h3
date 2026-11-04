@@ -471,7 +471,7 @@ SMALL_GPU = os.environ.get("H3_IMAGES_ONLY") == "1" or (os.environ.get("H3_IMAGE
 SMALL_SKIP = {"video", "writer_xl", "autoprompter", "eros"}
 # Waiting until asked for (status menu → Now, or the tab that needs it): Eros Max (Animate → Video model), LoRA training
 # (Characters → Train) and the AutoPrompter extras (old node-editor workflow only) — they ate the disk the 27B writer needs
-DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer").split(",") if x.strip()}
+DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend").split(",") if x.strip()}
 
 
 def queue_order(groups, nxt=()) -> list:

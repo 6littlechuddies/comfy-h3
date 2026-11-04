@@ -72,6 +72,11 @@ export const M = {
   llmBigVision: "mmproj-Qwen3.8-27B-Uncensored-F16.gguf",
   llmVideo: "Qwen3VL-8B-Instruct-Q8_0.gguf",
   rmbg: "RMBG-2.0",
+  /** Extend (models.txt group "extend"): Qwen-Image-2.1 int8 + its Qwen3-VL-8B encoder + VAE, and the Outpaint LoRA v2 */
+  qwen21: "qwen_image_2.1_int8_convrot.safetensors",
+  qwen21TE: "qwen3vl_8b_int8_convrot.safetensors",
+  qwen21Vae: "qwen_image_2.1_vae_bf16.safetensors",
+  qwen21Outpaint: "qwen21/qwen-image-2.1-outpaint-v2.safetensors",
   /** SAM 3.1: finds things by words (models.txt group "sam") */
   sam3: "sam3.1_multiplex_fp16.safetensors",
   // Edit chat's "Qwen + Krea" route: Qwen-Image-Edit-2511 (models.txt groups "qwen" and "qwen_full")

@@ -111,6 +111,15 @@ diffusion_models  https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resol
 # "civitai-file:<version>:<word>" = the file in that version whose name contains the word. ---
 diffusion_models  civitai-file:3393047:int8  h3ErosMax_beta6_int8.safetensors
 
+# @group extend Extend pictures (Qwen Image 2.1 outpaint)
+# --- Picture menu → Extend to wallpaper / ultrawide (~17 GB; stays "later" until your first Extend starts it). Qwen-Image-2.1
+# (Comfy-Org, int8) with ausboss's Outpaint LoRA v2 (civitai.com/models/2967375; trained to fill flat-gray padding while the
+# picture stays in place; Qwen Research License — non-commercial). ---
+diffusion_models  https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors
+text_encoders     https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors
+vae               https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors
+loras/qwen21      https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/resolve/main/qwen-image-2.1-outpaint-v2.safetensors  qwen-image-2.1-outpaint-v2.safetensors  fallback=https://huggingface.co/Aitrepreneur/FLX/resolve/main/qwen-image-2.1-outpaint-v2.safetensors
+
 # @group trainer Character LoRA training (Krea 2)
 # --- Only for Characters → Training set → Train (stays "later" until you ask for it; ~33 GB). The trainer (musubi-tuner) trains on
 # Krea 2 RAW and the LoRA is used on Turbo. RAW comes from Comfy-Org's copy (full bf16, not gated — Krea's own repo
