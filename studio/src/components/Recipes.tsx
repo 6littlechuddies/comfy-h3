@@ -25,6 +25,10 @@ export const RECIPES: Recipe[] = [
     apply: () => { S().set("edit", { mode: "pose", instruction: TEMPLATES().pose }); return { tab: "edit", title: "Copy a pose", steps: ["Picture 1 = your character", "Picture 2 = the pose reference", "Press Make edit"] }; },
   },
   {
+    id: "look", title: "Copy appearance", blurb: "Keep a picture's pose and place, give the person someone else's face, hair, outfit and accessories.",
+    apply: () => { S().set("edit", { mode: "look", instruction: TEMPLATES().look }); return { tab: "edit", title: "Copy appearance", steps: ["Picture 1 = the picture to change (its pose and place stay)", "Picture 2 = the look to copy", "Press Make edit"] }; },
+  },
+  {
     id: "fix", title: "Fix one part of a picture", blurb: "Paint over a hand, the outfit or the background and say what it should be.",
     apply: () => { S().set("edit", { mode: "free", instruction: "" }); return { tab: "edit", title: "Fix one part", steps: ["Drop the picture in Picture 1", "Press Paint area to change and paint over it", "Say what it should become, then Make edit"] }; },
   },

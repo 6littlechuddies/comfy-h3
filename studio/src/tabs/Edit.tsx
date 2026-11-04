@@ -209,7 +209,8 @@ function ClassicEdit() {
   const goRef = useRef(go); goRef.current = go;
 
   const names = engine === "krea"
-    ? e.mode === "pose" ? ["1 · the pose", "2 · your character"] : e.mode === "scene" ? ["1 · the scene", "2 · your character"] : ["1 · your picture", "2 · reference"]
+    ? e.mode === "pose" ? ["1 · the pose", "2 · your character"] : e.mode === "scene" ? ["1 · the scene", "2 · your character"]
+      : e.mode === "look" ? ["1 · the picture to change", "2 · the look to copy"] : ["1 · your picture", "2 · reference"]
     : anime ? ["1 · the picture to redraw"]
     : ["1 · your picture"];
   const slots = pics.slice(0, info.maxImages);
@@ -220,7 +221,7 @@ function ClassicEdit() {
       <button onClick={() => set({ chat: true })} title="Change the picture one message at a time — name pictures with @, fix one part, swap the background, put your character in"
         className="press inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 px-3 text-[12.5px] font-medium text-ink hover:bg-accent/20"><Icon name="chat" size={13} />Edit chat</button>
       {!anime && <Chip title="What you're doing" value={e.mode} onChange={(v) => set({ mode: v, instruction: v === "free" ? e.instruction : TEMPLATES(engine)[v] })}
-        options={[{ value: "pose", label: "Copy the pose" }, { value: "scene", label: "Put in the scene" }, { value: "free", label: "Free edit" }]} />}
+        options={[{ value: "look", label: "Copy appearance" }, { value: "pose", label: "Copy the pose" }, { value: "scene", label: "Put in the scene" }, { value: "free", label: "Free edit" }]} />}
       <Chip title="How many" value={e.count} onChange={(v) => set({ count: v })} options={[1, 2, 3, 4].map((n) => ({ value: n, label: `×${n}` }))} />
       {pics[0] && <span className={cx("inline-flex h-8 items-stretch overflow-hidden rounded-sm border text-[12.5px] font-medium", mask ? "border-bad/70 bg-bad/10 text-ink" : "border-line bg-raised2/70 text-ink")}>
         <button onClick={() => setPainting(true)} className="press inline-flex items-center gap-1.5 px-3 hover:bg-hover" title={mask ? "Change the painted area" : "Paint the part to change — only that part is redrawn"}>

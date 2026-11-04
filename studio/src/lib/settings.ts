@@ -53,7 +53,7 @@ export interface CreateS {
   faceStrength?: number;
 }
 export interface EditS {
-  mode: "pose" | "scene" | "free";
+  mode: "pose" | "scene" | "look" | "free";
   /** which model edits (Krea 2, or Anima / Illustrious for anime); each keeps its own settings and LoRAs. adv/loras/enhance: unused (were Qwen's) */
   engine: EditEngine;
   instruction: string; negative: string; enhance: boolean; resolution: number; count: number; adv: Adv;
@@ -179,9 +179,11 @@ export function TEMPLATES(engine: EditEngine = "krea") {
   if (engine === "krea") return {
     pose: "Replace the person in this picture with the person from the second picture, in exactly the same pose. Keep the background, framing and lighting the same, and keep the second person's face, hair, body and outfit.",
     scene: "Place the person from the second picture into this scene, standing naturally. Keep their face, hair and outfit exactly the same, and match the scene's lighting and colours.",
+    // Copy appearance: this picture stays (pose, expression, framing, place, light); the person takes on picture 2's look
+    look: "Make the person in this picture look exactly like the person in the second picture: the same face, hair, skin tone, body, outfit and accessories. Keep this picture's pose, expression, camera angle, framing, background and lighting exactly as they are.",
     free: "",
   };
-  return { pose: "", scene: "", free: "" };
+  return { pose: "", scene: "", look: "", free: "" };
 }
 const ENGINE_KEYS: Record<EditEngine, { adv: "advKrea" | "advAnima" | "advNoob"; loras: "lorasKrea" | "lorasAnima" | "lorasNoob"; family: "krea2" | "anima" | "sdxl" }> = {
   krea: { adv: "advKrea", loras: "lorasKrea", family: "krea2" },
