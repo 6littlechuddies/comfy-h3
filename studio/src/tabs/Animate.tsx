@@ -23,6 +23,8 @@ import { DEFAULTS } from "../lib/settings";
 import { parseTimeline, toPrompt } from "../lib/timeline";
 import { tagsFor } from "../lib/work";
 import { rayCards, useCards } from "../lib/cards";
+import { useSpeed } from "../lib/speed";
+import { h3ErosOn } from "../lib/models";
 import { stopMessage } from "../lib/adult";
 import { useCharacters } from "../lib/characters";
 import { CharacterPicker, charactersIn, withCharacter, WriterSetup } from "./Prompt";
@@ -148,7 +150,9 @@ export default function AnimateTab() {
     : a.mode === "fl" && !frames[1] ? "Add the last picture"
     : ref && refs.some((r) => r.media.kind === "video" && (r.end - r.start < 2 || r.end - r.start > 15)) ? "Reference clips must be 2–15 s long"
     : busy ? "Sending…" : undefined);
-  const turboOk = ref;
+  // turbo: References (its own 4-step LoRA), and every other type too with Speed-ups → Faster video steps (8 steps)
+  const vt = useSpeed((st) => st.videoTurbo);
+  const turboOk = !swap && (ref || (vt && !h3ErosOn()));
   const etaKey = `animate:${a.mode}:${turboOk && (a.turbo || a.takes === 2) ? "turbo" : "full"}:${a.seconds}s:${a.mp}`;
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
@@ -332,7 +336,7 @@ export default function AnimateTab() {
           </div>
         )}
         {!refsMode && <div className="flex justify-end gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" onClick={doUndo}>↶ Undo</button>}<button className="text-xs text-accent hover:underline" onClick={planInPrompt}>Plan a video with these</button></div>}
-        {!turboOk && !swap && <p className="text-xs text-muted">Turbo is only available for References videos — this type always uses full steps.</p>}
+        {!turboOk && !swap && <p className="text-xs text-muted">{h3ErosOn() ? "Eros Max has its own speed built in — turbo stays off." : "Turbo for this type is off in ⋯ → Speed-ups (Faster video steps)."}</p>}
         {!swap && <LoraList family="h3" label="H3 LoRAs" value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />}
         <Advanced a={a.adv} set={(p) => set({ adv: { ...a.adv, ...p } })} hideCfg>
           <Slider label="Size (megapixels)" min={0.3} max={2.5} step={0.05} value={a.mp} show={`${a.mp.toFixed(2)} MP · ${width}×${height}`} onChange={(v) => set({ mp: Math.round(v * 100) / 100 })} />

@@ -132,7 +132,7 @@ export const DEFAULTS: Settings = {
   },
   prompt: { mode: "references", idea: "", seconds: 10, cuts: 0, camera: "auto", guide: DEFAULT_GUIDE, style: "" },
   animate: {
-    mode: "ref", prompt: "", seconds: 8, aspect: "auto", mp: 0.6, turbo: false, takes: 1, loras: [], refImageSize: "match",
+    mode: "ref", prompt: "", seconds: 8, aspect: "auto", mp: 0.6, turbo: true, takes: 1, loras: [], refImageSize: "match",
     lowMemDecode: false, adv: adv("er_sde", "beta", 10, 1),
   },
   finish: {

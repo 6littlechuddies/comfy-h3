@@ -119,6 +119,8 @@ diffusion_models  https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/d
 text_encoders     https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors
 vae               https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors
 loras/qwen21      https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/resolve/main/qwen-image-2.1-outpaint-v2.safetensors  qwen-image-2.1-outpaint-v2.safetensors  fallback=https://huggingface.co/Aitrepreneur/FLX/resolve/main/qwen-image-2.1-outpaint-v2.safetensors
+# Qwen Image 2.1's official turbo LoRA (Comfy-Org): 8 steps instead of 25 per stage (Speed-ups → Faster Extend)
+loras/qwen21      https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors
 
 # @group trainer Character LoRA training (Krea 2)
 # --- Only for Characters → Training set → Train (stays "later" until you ask for it; ~33 GB). The trainer (musubi-tuner) trains on

@@ -77,6 +77,8 @@ export const M = {
   qwen21TE: "qwen3vl_8b_int8_convrot.safetensors",
   qwen21Vae: "qwen_image_2.1_vae_bf16.safetensors",
   qwen21Outpaint: "qwen21/qwen-image-2.1-outpaint-v2.safetensors",
+  /** Qwen Image 2.1's official 8-step turbo LoRA (Speed-ups → Faster Extend) */
+  qwen21Turbo: "qwen21/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
   /** SAM 3.1: finds things by words (models.txt group "sam") */
   sam3: "sam3.1_multiplex_fp16.safetensors",
   // Edit chat's "Qwen + Krea" route: Qwen-Image-Edit-2511 (models.txt groups "qwen" and "qwen_full")

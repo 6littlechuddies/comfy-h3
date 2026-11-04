@@ -97,6 +97,9 @@ export const useJobs = create<JobState>((set, get) => ({
   run: async (tab, label, graph, etaKey, meta) => {
     // quick text jobs (the prompt writer) go to the front of the line, so a waiting video doesn't hold up your Generate
     if (!meta || !("project" in meta)) meta = { ...meta, project: projectOf() };
+    // which speed-ups this job runs with (their nodes are titled "… (Speed-ups)"): a failure names them, so you know what to switch off
+    const sp = [...new Set(Object.values(graph).map((n) => (n as { _meta?: { title?: string } })._meta?.title ?? "").filter((t) => t.endsWith("(Speed-ups)")).map((t) => t.replace(/ \(Speed-ups\)$/, "")))];
+    if (sp.length) meta = { ...meta, speedups: sp };
     intoProjectFolder(graph, typeof meta.project === "string" ? meta.project : null);
     await ensureInputs(graph);
     await dropMissingLoras(graph, tab);

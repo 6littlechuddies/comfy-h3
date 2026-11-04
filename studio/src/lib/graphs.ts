@@ -1,6 +1,10 @@
 // Builds ComfyUI API-format prompts for each Studio tab.
 // Every builder here is validated against a real ComfyUI's /prompt by scripts/test-graphs.ts.
 import { KREA_BOOST_NODE, M, h3ErosOn, h3Frames, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
+import { fastAttnOn, speedOn } from "./speed";
+
+/** Speed-ups → Faster attention: ComfyUI's INT8 attention (only when this ComfyUI has it); off = the model as it was */
+const fastAttn = (g: G, model: Link): Link => (fastAttnOn() ? o(g.add("ModelAttentionBackend", { model, attention: "comfy kitchen attention" }, "Faster attention (Speed-ups)")) : model);
 
 type Link = [string, number];
 type Inputs = Record<string, unknown>;
@@ -145,6 +149,7 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     for (const l of activeLoras(p.loras)) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
     // Krea2T Enhancer (when installed): pictures follow the prompt more closely; 1.5 = the community workflows' setting
     if (kreaBoostOn()) model = o(g.add(KREA_BOOST_NODE, { model, enabled: true, strength: 1.5, debug: false }));
+    model = fastAttn(g, model);
     const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
     const vae = g.add("VAELoader", { vae_name: M.kreaVae });
     const pos = g.add("CLIPTextEncode", { text: withTriggers(p.positive, p.loras), clip: o(clip) });
@@ -314,6 +319,7 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   const editLora = !v2 ? M.kreaEditLora : identity ? M.kreaIdentityV2 : M.kreaGeneralV2;
   let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: editLora, strength_model: 1 }));
   for (const l of activeLoras(p.loras ?? [])) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  model = fastAttn(g, model);
   const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
   const vae = g.add("VAELoader", { vae_name: M.kreaVae });
   const loads = p.images.slice(0, 2).map((f) => g.add("LoadImage", { image: f }));
@@ -394,7 +400,10 @@ export interface ExtendStage { w: number; h: number }
 export function buildExtend(p: { image: string; full: { w: number; h: number }; work: { w: number; h: number }; stages: ExtendStage[];
   prompt: string; seed: number; prefix: string }): ApiGraph {
   const g = new G();
-  const model = g.add("LoraLoaderModelOnly", { model: o(g.add("UNETLoader", { unet_name: M.qwen21, weight_dtype: "default" })), lora_name: M.qwen21Outpaint, strength_model: 1 });
+  let model = g.add("LoraLoaderModelOnly", { model: o(g.add("UNETLoader", { unet_name: M.qwen21, weight_dtype: "default" })), lora_name: M.qwen21Outpaint, strength_model: 1 });
+  // Speed-ups → Faster Extend: Qwen Image 2.1's official turbo LoRA on top — 8 steps instead of 25 (euler/simple, CFG 1)
+  const turbo = speedOn("extendTurbo");
+  if (turbo) model = g.add("LoraLoaderModelOnly", { model: o(model), lora_name: M.qwen21Turbo, strength_model: 1 }, "Faster Extend (Speed-ups)");
   const clip = g.add("CLIPLoader", { clip_name: M.qwen21TE, type: "qwen_image", device: "default" });
   const vae = g.add("VAELoader", { vae_name: M.qwen21Vae });
   const orig = g.add("LoadImage", { image: p.image });
@@ -406,7 +415,7 @@ export function buildExtend(p: { image: string; full: { w: number; h: number }; 
     const gray = g.add("EmptyImage", { width: st.w, height: st.h, batch_size: 1, color: 0x808080 });
     const canvas = g.add("ImageCompositeMasked", { destination: o(gray), source: prev, x, y, resize_source: false });
     const enc = g.add("TextEncodeQwenImage21", { clip: o(clip), prompt: p.prompt, negative_prompt: "", vae: o(vae), resolution: 0, "images.image_1": o(canvas) });
-    const ks = g.add("KSampler", { model: o(model), seed: p.seed + i, steps: 25, cfg: 1, sampler_name: "euler", scheduler: "simple",
+    const ks = g.add("KSampler", { model: o(model), seed: p.seed + i, steps: turbo ? 8 : 25, cfg: 1, sampler_name: "euler", scheduler: "simple",
       positive: o(enc, 0), negative: o(enc, 1), latent_image: o(enc, 2), denoise: 1 });
     const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
     ox += x; oy += y;
@@ -649,18 +658,24 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   const unet = g.add("UNETLoader", { unet_name: eros ? M.h3Eros : ref ? M.h3Ref : M.h3FL, weight_dtype: "default" });
   let model: Link = o(unet);
   let steps = p.steps;
-  // the official 4-step turbo LoRA exists for reference-to-video only
+  // turbo: the official 4-step LoRA for reference videos; the FL2V 8-step one (lightx2v) for image → video, first → last and
+  // loops (Speed-ups → Faster video steps)
+  const flTurbo = p.turbo && !ref && !eros && speedOn("videoTurbo");
   if (p.turbo && ref && !eros) {
     model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3TurboRef, strength_model: 1 }));
     steps = 4;
+  } else if (flTurbo) {
+    model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3TurboFl8, strength_model: 1 }, "Faster video steps (Speed-ups)"));
+    steps = 8;
   }
   for (const l of activeLoras(p.loras)) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
   // several cards (Raylight): the same LoRAs, loaded into its workers instead (Eros Max needs its own shift patch: one card)
   const ray = (p.ray ?? 1) > 1 && !eros;
   const rayN = p.ray ?? 1;
-  const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : []), ...activeLoras(p.loras)];
+  const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : flTurbo ? [{ name: M.h3TurboFl8, strength: 1 }] : []), ...activeLoras(p.loras)];
   // Eros Max beta6: its author's "10/3 shift" (video 10, audio 3; the official files keep their own 12/3) — ComfyUI's own node
   if (eros) model = o(g.add("MiniMaxH3SigmaShift", { model, shift_video: 10, shift_audio: 3 }));
+  model = fastAttn(g, model);
   const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
   const vae = g.add("VAELoader", { vae_name: M.h3Vae });
   const avae = g.add("VAELoader", { vae_name: M.h3AudioVae });

@@ -143,7 +143,10 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
       </div>
       {active.map((j) => <RunningCard key={j.id} j={j} />)}
       {failed && !active.length && failed === jobs.find((j) => j.status !== "cancelled" && !j.meta?.quietFail) && (
-        <div className="fade-up rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[13px]"><b>{failed.label} failed.</b> <span className="text-ink/80">{failed.error}</span></div>
+        <div className="fade-up rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[13px]"><b>{failed.label} failed.</b> <span className="text-ink/80">{failed.error}</span>
+          {Array.isArray(failed.meta?.speedups) && (failed.meta!.speedups as string[]).length > 0 && (
+            <div className="mt-1.5 text-[12.5px] text-ink/80">It ran with <b>{(failed.meta!.speedups as string[]).join(", ")}</b> — if this keeps failing, switch {(failed.meta!.speedups as string[]).length > 1 ? "those" : "that"} off in <button className="underline" onClick={() => import("./SpeedPanel").then((m) => m.openSpeed())}>⋯ → Speed-ups</button> and try again.</div>
+          )}</div>
       )}
       {!shown.length && !active.length ? (
         <div className="fade-in flex min-h-64 flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-line px-8 py-14 text-center text-[13px] text-muted">

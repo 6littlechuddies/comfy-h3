@@ -29,6 +29,7 @@ import { viewUrl } from "./lib/api";
 import { ImportCard } from "./components/ImportCard";
 import { CatalogHost, openCatalog } from "./components/Catalog";
 import { StorageHost, openStorage } from "./components/Storage";
+import { SpeedHost, openSpeed } from "./components/SpeedPanel";
 import { setHistoryProject } from "./lib/promptHistory";
 import { useImport } from "./lib/importer";
 import { LoraBrowser, openLoraBrowser } from "./components/LoraBrowser";
@@ -204,6 +205,7 @@ export default function App() {
       <ImportCard />
       <CatalogHost />
       <StorageHost />
+      <SpeedHost />
       <SelfCheck />
       {loaded && <Assistant />}
       <Viewer />
@@ -325,6 +327,7 @@ function MoreMenu() {
       {open && <>
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div className="zoom-in absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-panel p-1.5 shadow-[0_24px_60px_-16px_rgba(0,0,0,.8)]" onClick={() => setOpen(false)}>
+          <button className={item} onClick={() => openSpeed()}><Icon name="sparkle" size={15} className="text-muted" /><span className="flex flex-col"><span>Speed-ups</span><span className="text-[12px] text-dim">Turbo steps, faster attention, warm-up · all on</span></span></button>
           <button className={item} onClick={() => openStorage()}><Icon name="layers" size={15} className="text-muted" /><span className="flex flex-col"><span>Storage &amp; clean-up</span><span className="text-[12px] text-dim">What's using space · delete old results</span></span></button>
           <a className={item} href="/outputs/" target="_blank" rel="noreferrer"><Icon name="folder" size={15} className="text-muted" />All output files<Icon name="external" size={13} className="ml-auto text-dim" /></a>
           <a className={item} href="/" target="_blank" rel="noreferrer"><Icon name="layers" size={15} className="text-muted" />ComfyUI node editor<Icon name="external" size={13} className="ml-auto text-dim" /></a>

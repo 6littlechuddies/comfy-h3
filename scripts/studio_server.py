@@ -97,7 +97,7 @@ async def get_state(req):
 # when a machine happened to upload. A machine that restored an old copy uploads it with the old time, so it never wins.
 STAMP_FILE = os.path.join(STATE, "last_change.txt")
 WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models",
-              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr"}
+              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed"}
 
 
 def last_change() -> float:
@@ -683,6 +683,50 @@ async def _civitai_check() -> None:
         if out: print(f"CivitAI keys: {len(out) - len(bad)} of {len(out)} work" + (f" — key {', '.join(map(str, bad))} refused" if bad else ""), flush=True)
     finally:
         CIV_CHECK["running"] = False
+
+
+WARM: dict = {"state": "waiting"}
+
+
+async def _warmup() -> None:
+    """Speed-ups → Warm up at start: once Krea 2 is downloaded and ComfyUI is up, one tiny 1-step picture on each card loads
+    Krea 2 into it, so your first picture doesn't wait 30–60 s. Off with H3_WARMUP=0 in the template or the switch."""
+    if os.environ.get("H3_WARMUP", "1") == "0": WARM["state"] = "off (H3_WARMUP=0)"; return
+    run_dir = os.environ.get("H3_RUN", "/opt/h3/run")
+    for _ in range(720):  # up to an hour for the first models
+        await asyncio.sleep(5)
+        if (_state_json("speed", {}) or {}).get("warmup") is False: WARM["state"] = "off (switch)"; return
+        try: groups = {g.get("id"): g.get("state") for g in json.load(open(os.path.join(run_dir, "downloads.json"))).get("groups") or []}
+        except (OSError, ValueError): continue
+        if groups.get("image") != "done": continue
+        te = "qwen3VL4BAbliteratedComfyui_v10_full_fp8.safetensors" if groups.get("krea_te") == "done" else "qwen3vl_4b_fp8_scaled.safetensors"
+        graph = {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "krea2_turbo_fp8_scaled.safetensors", "weight_dtype": "default"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": te, "type": "krea2", "device": "default"}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "warm up", "clip": ["2", 0]}},
+            "4": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["3", 0]}},
+            "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 256, "height": 256, "batch_size": 1}},
+            "6": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": 1, "steps": 1, "cfg": 1, "sampler_name": "euler", "scheduler": "simple",
+                  "positive": ["3", 0], "negative": ["4", 0], "latent_image": ["5", 0], "denoise": 1}},
+            "7": {"class_type": "VAEDecode", "inputs": {"samples": ["6", 0], "vae": ["8", 0]}},
+            "8": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+            "9": {"class_type": "PreviewImage", "inputs": {"images": ["7", 0]}},
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+                async with s.get(f"{COMFY}/system_stats") as r:
+                    if r.status != 200: continue
+                n = max(1, int(os.environ.get("H3_CARDS", "1") or 1))
+                for _ in range(n):  # several cards: the router gives each card one
+                    async with s.post(f"{COMFY}/prompt", json={"prompt": graph, "client_id": "h3-warmup"}) as r:
+                        if r.status != 200: raise RuntimeError(f"ComfyUI answered {r.status}: {(await r.text())[:200]}")
+            WARM["state"] = f"sent to {n} card(s)"
+            print(f"Warm-up: Krea 2 loading on {n} card(s)", flush=True)
+            return
+        except Exception as e:  # noqa: BLE001
+            WARM["state"] = f"failed: {_redact(str(e))[:160]}"
+            print("!! warm-up:", WARM["state"], flush=True)
+            return
 
 
 async def _civitai_check_later() -> None:
@@ -2786,6 +2830,7 @@ async def on_start(app):
     app["proton_restore"] = asyncio.create_task(_proton_boot())
     app["proton"] = asyncio.create_task(_proton_loop())
     app["civitai_check"] = asyncio.create_task(_civitai_check_later())
+    app["warmup"] = asyncio.create_task(_warmup())
     try:
         materialize_packs()
     except Exception as e:  # noqa: BLE001
@@ -3238,6 +3283,19 @@ async def debug_report_text(lines_per_log=80):
     add(f"Image built: {built} · uptime {_run(['uptime', '-p'])}")
     add("\n== GPU ==")
     add(_run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader"]) or "(no nvidia-smi)")
+    # Speed-ups (⋯ menu): what's on, and what this rental can do — the first thing to check when a job fails
+    add("\n== Speed-ups ==")
+    sp = {"videoTurbo": True, "extendTurbo": True, "fastAttn": True, "warmup": True, **(_state_json("speed", {}) or {})}
+    add("  " + "  ".join(f"{k}={'on' if v else 'off'}" for k, v in sp.items()) + f"  warmup_env={os.environ.get('H3_WARMUP', '1')}  warmup_done={WARM.get('state')}")
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+            async with s.get(f"{COMFY}/object_info/ModelAttentionBackend") as r:
+                kitchen = "comfy kitchen attention" in json.dumps(await r.json())
+            add(f"  INT8 attention available: {kitchen}")
+            if int(os.environ.get("H3_CARDS", "1") or 1) > 1:
+                async with s.get(f"{COMFY}/h3-router") as r: add(f"  cards: {await r.text()}")
+            else: add("  cards: 1")
+    except Exception as e: add(f"  (couldn't ask ComfyUI: {e.__class__.__name__})")  # noqa: BLE001
     add("\n== Disk ==")
     add(_run(["df", "-h", "/", COMFY_DIR]))
     for name in ("status.json", "downloads.json"):
@@ -3355,7 +3413,7 @@ def _build_export(want: set, results: bool = True) -> tuple[str, str]:
             if d is not None: z.writestr(f"{name}.json", json.dumps(d))
         if not want:  # everything: your preferences come along
             # a full checkpoint: preferences, timings, your LoRA library and own checkpoints (re-downloaded on import), results
-            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "input_sources", "site_addr"):
+            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "input_sources", "site_addr", "speed"):
                 d = _state_json(name)
                 if d is not None: z.writestr(f"{name}.json", json.dumps(d))
             _export_results(z, files=results)
