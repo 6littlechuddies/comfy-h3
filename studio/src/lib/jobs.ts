@@ -65,9 +65,16 @@ const cleanFolder = (n: string) => n.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").rep
 /** studio/create/realistic → studio/Maki/create/realistic: every save node writes into its project's folder */
 function intoProjectFolder(graph: ApiGraph, project: string | null) {
   const folder = cleanFolder(folderOf(project));
+  // each job's files get their own tag (…/finish_mk3x9a_00001_.png). ComfyUI numbers a new file one past the highest
+  // number left in the folder, so after deleting the newest pictures a new one used to get a deleted one's name — and
+  // the browser showed its saved copy of the old picture instead of the new file.
+  const tag = (Date.now().toString(36) + Math.random().toString(36).slice(2, 4)).slice(-8);
   for (const n of Object.values(graph)) {
-    const p = (n.inputs as Record<string, unknown> | undefined)?.filename_prefix;
-    if (typeof p === "string" && p.startsWith("studio/") && !p.startsWith(`studio/${folder}/`)) (n.inputs as Record<string, unknown>).filename_prefix = `studio/${folder}/${p.slice(7)}`;
+    const inp = n.inputs as Record<string, unknown> | undefined;
+    let p = inp?.filename_prefix;
+    if (typeof p !== "string" || !p.startsWith("studio/")) continue;
+    if (!p.startsWith(`studio/${folder}/`)) p = `studio/${folder}/${p.slice(7)}`;
+    inp!.filename_prefix = `${p}_${tag}`;
   }
 }
 
