@@ -4508,6 +4508,8 @@ async def _site_push(job: dict, d: dict):
         files = []  # (role, path)
         for role, v in (("avatar", site.get("avatar") or "face"), ("cover", site.get("cover") or "front")):
             own = site.get(f"{role}File")  # any picture you picked (tray or their results) wins over a sheet view
+            # the cover follows their cover photo (Characters → Cover photo) unless a sheet view was picked for the site
+            if role == "cover" and not own and not site.get("cover") and isinstance(c.get("cover"), dict): own = c["cover"]
             p = None
             if isinstance(own, dict) and own.get("filename"):
                 try: p = _file_of(own)

@@ -10,7 +10,7 @@ import { Chip, Workspace } from "../components/Workspace";
 import { openViewer } from "../components/Viewer";
 import { Btn, Icon, LoraList, Seg, Select, Slider, Slot, TextArea, cx, DropSelect } from "../components/ui";
 import { inputUrl, toInput, viewUrl, type FileRef } from "../lib/api";
-import { isAdult, useCharacters, type Character } from "../lib/characters";
+import { coverOf, isAdult, useCharacters, type Character } from "../lib/characters";
 import { useDownloads } from "../lib/downloads";
 import { useJobs } from "../lib/jobs";
 import { activatePack, deletePack, dropPacks, packText, savePackCopy, STAGE_INFO, STAGE_ORDER, updatePack, usePacks, type Pack, type Stage } from "../lib/packs";
@@ -161,7 +161,7 @@ function Cast({ scene }: { scene: Scene }) {
       <div className="flex gap-2 overflow-x-auto pb-1">
         {chars.map((c) => {
           const on = scene.cast.includes(c.id);
-          const pic = c.views.face || c.views.front;
+          const pic = coverOf(c);
           return (
             <button key={c.id} onClick={() => toggle(c)} aria-pressed={on} title={on ? `Remove ${c.name} from this scene` : `Add ${c.name} to this scene`}
               className={cx("press relative flex w-[66px] shrink-0 flex-col gap-1 border p-1 text-left", on ? "border-accent bg-accent/10" : "border-line hover:border-muted")}>

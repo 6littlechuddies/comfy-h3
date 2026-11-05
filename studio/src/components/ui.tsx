@@ -525,7 +525,10 @@ export function Slot({ value, onChange, accept = ["image"], label, className, hi
         {busy && value && <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs">Adding…</div>}
       </div>
       {value && (
-        <button aria-label="Remove" onClick={() => onChange(null)} className="absolute right-1.5 top-1.5 rounded-md bg-black/70 p-1 text-ink hover:bg-black"><Icon name="x" size={14} /></button>
+        <span className="absolute right-1.5 top-1.5 flex gap-1">
+          <button aria-label="Replace" title="Replace — pick a file from your computer (or drop a picture on it)" onClick={() => file.current?.click()} className="flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-1 text-[11.5px] text-ink hover:bg-black"><Icon name="up" size={13} />Replace</button>
+          <button aria-label="Remove" onClick={() => onChange(null)} className="rounded-md bg-black/70 p-1 text-ink hover:bg-black"><Icon name="x" size={14} /></button>
+        </span>
       )}
       <input ref={file} type="file" accept={acceptAttr} hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) take(useTray.getState().addUpload(f)); e.target.value = ""; }} />
     </div>

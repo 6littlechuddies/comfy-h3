@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl } from "../lib/api";
 import { openCatalog } from "./Catalog";
-import { exportCharacters, importCharacters, newCharacter, useCharacters, type Character } from "../lib/characters";
+import { coverOf, exportCharacters, importCharacters, newCharacter, useCharacters, type Character } from "../lib/characters";
 import type { Tab } from "../lib/jobs";
 import { newScene, useScenes } from "../lib/scenes";
 import { useSettings } from "../lib/settings";
@@ -54,7 +54,7 @@ export const useCharDrag = create<{ id: string | null }>(() => ({ id: null }));
 /** the drag picture: their face in an accent ring + name + "Character · whole sheet", so it never looks like a loose photo */
 function charGhost(c: Character): HTMLElement {
   const el = document.createElement("div");
-  const f = c.views.face || c.views.front;
+  const f = coverOf(c);
   const n = Object.keys(c.views).filter((k) => !["sheet", "cutout"].includes(k)).length;
   el.style.cssText = "position:fixed;top:-200px;left:-400px;display:flex;align-items:center;gap:10px;padding:6px 14px 6px 6px;border-radius:999px;background:var(--color-panel,#15151a);border:2px solid var(--color-accent,#d4ff3a);box-shadow:0 8px 30px rgba(0,0,0,.5);font:600 13px system-ui,sans-serif;color:#fff;z-index:9999";
   el.innerHTML = `${f ? `<img src="${viewUrl(f)}" style="width:38px;height:38px;border-radius:999px;object-fit:cover;border:2px solid var(--color-accent,#d4ff3a)">` : ""}<span style="display:flex;flex-direction:column;line-height:1.2"><span></span><span style="font-weight:500;font-size:11px;opacity:.75">Character · ${n} sheet picture${n === 1 ? "" : "s"}</span></span>`;
@@ -233,7 +233,7 @@ function DropAvatar({ c, on, onClick }: { c: Character; on: boolean; onClick: ()
 }
 
 function Avatar({ c, on, onClick, size = 36 }: { c: Character; on?: boolean; onClick?: () => void; size?: number }) {
-  const f = c.views.face || c.views.front;
+  const f = coverOf(c);
   return (
     <button onClick={onClick} title={c.name} style={{ width: size, height: size }}
       className={cx("shrink-0 overflow-hidden border bg-raised2", on ? "border-accent" : "border-line hover:border-muted")}>

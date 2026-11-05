@@ -6,7 +6,7 @@ import { StartingFrame } from "../components/StartingFrame";
 import { askConfirm } from "../components/Dialogs";
 import { CharVideoDialog } from "../components/CharVideo";
 import { useShallow } from "zustand/react/shallow";
-import { viewUrl } from "../lib/api";
+import { viewUrl, type FileRef } from "../lib/api";
 import { buildCreate, buildCutout, buildDescribeCharacter, buildEdit, buildExtractCharacter } from "../lib/graphs";
 import { editGroup, useDownloads, useGroup } from "../lib/downloads";
 import { useJobs } from "../lib/jobs";
@@ -18,7 +18,7 @@ import { ModelsNotice } from "../components/Workspace";
 import { TrainSetMaker } from "../components/Builder";
 import { IdentityCard } from "../components/IdentityCard";
 import { CheckpointPicker } from "../components/Checkpoint";
-import { openSiteLink } from "../components/SiteLink";
+import { openSiteLink, PicPick, resendIfSent } from "../components/SiteLink";
 import { openViewer } from "../components/Viewer";
 import { pickFromCivitai } from "../components/ImageImport";
 import { ensureLoras, GEN_OF, lorasFor } from "../lib/civitUse";
@@ -119,6 +119,7 @@ function Detail({ c, onSheet, onTrain, onDelete, side, onSide }: { c: Character;
           {c.views.front && <div className="mt-1 flex gap-3 text-[12px]"><button className="text-accent hover:underline" onClick={() => viewAll(c, "front")}>View big</button>
             {c.prev?.front && <button className="text-muted hover:text-ink" title="Swap back to the picture it had before" onClick={() => useCharacters.getState().undoView(c.id, "front")}>↶ Back to the previous one</button>}</div>}
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-dim">This picture is the source of truth: the sheet maker copies its face, outfit and art style. The description below only fills in what the picture can't show.</p>
+          <CoverPhoto c={c} />
         </div>
       <div className="min-w-0 flex-1">
         <Label right={<span className="flex gap-2"><Btn small onClick={onTrain} disabled={!adult || !c.views.front} why={!adult ? "Set an age of 18 or older first" : "Add their front picture first"} title="Many new pictures of them, each face checked, captioned for training a character LoRA">Training set{c.trainset?.items.length ? ` (${c.trainset.items.filter((x) => x.keep).length})` : ""} ›</Btn><Btn small onClick={onSheet} disabled={!adult} why="Set an age of 18 or older first">Open sheet maker ›</Btn></span>}>Reference sheet</Label>
@@ -528,5 +529,31 @@ function Importer({ onClose }: { onClose?: () => void }) {
       )}
       <p className="mt-auto text-xs leading-relaxed text-muted">Profiles under 18, or with no clear adult age, are refused.</p>
     </aside>
+  );
+}
+
+
+/** their cover photo: what shows for them everywhere (project list, pickers, your site's cover) — only for show, the
+ *  pictures they're made from still copy their front picture above */
+function CoverPhoto({ c }: { c: Character }) {
+  const [picking, setPicking] = useState(false);
+  const cover = c.cover;
+  const change = async (f: FileRef | null) => {
+    try { const { changeCover } = await import("../lib/cover"); await changeCover(c.id, f); }
+    catch (e) { useJobs.getState().toast((e as Error).message, "bad"); }
+  };
+  return (
+    <div className="mt-4">
+      <Label help={undefined}>Cover photo · shown everywhere, and on your site</Label>
+      <Slot className="h-44" value={cover ? { name: cover.filename, kind: "image", url: viewUrl(cover), label: "cover" } : null}
+        onChange={(m) => change(m ? { filename: m.name, subfolder: "", type: "input" } : null)}
+        label="Drop or upload a cover photo" hint="any picture of them · empty = their face or front picture" />
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+        <button className="text-accent hover:underline" onClick={() => setPicking(true)}>Pick from their results</button>
+        {c.prevCover && <button className="text-muted hover:text-ink" title="Swap back to the cover it had before" onClick={async () => { await useCharacters.getState().undoCover(c.id); const msg = await resendIfSent(c.id); if (msg) useJobs.getState().toast(msg, /Couldn't/.test(msg) ? "bad" : "good"); }}>↶ Back to the previous one</button>}
+      </div>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-dim">Or right-click any picture of them → Make this their cover photo.</p>
+      {picking && <PicPick c={c} title={`Pick ${c.name}'s cover photo`} onClose={() => setPicking(false)} onPick={(f) => { setPicking(false); change({ filename: f.filename, subfolder: f.subfolder, type: f.type }); }} />}
+    </div>
   );
 }

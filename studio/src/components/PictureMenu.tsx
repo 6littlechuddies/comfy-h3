@@ -121,6 +121,14 @@ export function PictureMenuHost() {
   };
   const myRecipes = useRecipes.getState().list;
   const selName = (() => { const st = useCharacters.getState(); return st.list.find((x) => x.id === st.sel)?.name; })();
+  // whose cover: the character you're on, else the one whose project folder the picture is in
+  const coverChar = (() => {
+    const st = useCharacters.getState();
+    const on = st.list.find((x) => x.id === st.sel);
+    if (on) return on;
+    const folder = t.output?.subfolder.match(/^studio\/([^/]+)\//)?.[1];
+    return folder ? st.list.find((x) => x.name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").trim().slice(0, 60) === folder) : undefined;
+  })();
   const items: { key: string; icon: string; label: string; run: () => Promise<string | void>; hide?: boolean }[] = [
     {
       // the workflow that works, in one click: this picture + your character, likeness carried into its prompt, 2 takes
@@ -170,6 +178,13 @@ export function PictureMenuHost() {
         useSettings.getState().setTab("characters");
         await closeWindows();
         return "On the right: name them and press Read the picture — they get their own project";
+      },
+    },
+    {
+      key: "cover", icon: "user", label: `Make this ${coverChar?.name ?? "their"}'s cover photo`, hide: isVideo || !coverChar, run: async () => {
+        const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
+        const { changeCover } = await import("../lib/cover");
+        await changeCover(coverChar!.id, ref);
       },
     },
     {

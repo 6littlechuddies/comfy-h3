@@ -24,7 +24,7 @@ import { RecipeEditorHost, editRecipe } from "./components/MyRecipes";
 import { useRecipes } from "./lib/recipes";
 import { OutsideHost } from "./components/OutsideHost";
 import { AskHost, SweepHost, Palette, ShortcutSheet, usePalette, useShortcuts, type Command } from "./components/Dialogs";
-import { importCharacters, useCharacters } from "./lib/characters";
+import { coverOf, importCharacters, useCharacters } from "./lib/characters";
 import { viewUrl } from "./lib/api";
 import { ImportCard } from "./components/ImportCard";
 import { CatalogHost, openCatalog } from "./components/Catalog";
@@ -779,7 +779,7 @@ function DropAnywhere({ tab }: { tab: Tab }) {
   if (!over) return null;
   const label = TABS.find((t) => t.id === tab)?.label;
   if (dragChar) {
-    const f = dragChar.views.face || dragChar.views.front;
+    const f = coverOf(dragChar);
     const where = tab === "edit" ? `joins the Edit chat as @${dragChar.name.split(/\s+/)[0].toLowerCase()}` : tab === "create" ? "becomes Create's character" : PASTE_TARGET[tab] ? `goes into ${label}` : "is picked";
     return (
       <div className="fade-in pointer-events-none fixed inset-3 z-40 flex items-end justify-center rounded-3xl border-2 border-accent bg-accent/[.07] pb-32 shadow-[inset_0_0_80px_rgba(0,0,0,.35)]">

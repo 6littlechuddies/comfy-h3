@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useHandoffInto, usePrimaryAction } from "../App";
 import { viewUrl } from "../lib/api";
-import { isAdult, useCharacters } from "../lib/characters";
+import { coverOf, isAdult, useCharacters } from "../lib/characters";
 import { setLater, useDownloads, useGroup } from "../lib/downloads";
 import { pickFromCivitai } from "./ImageImport";
 import { useEditChars, useEditPick, useEditWords } from "../lib/editPick";
@@ -309,7 +309,7 @@ function ChatSide({ chat, chars, onPick, onFiles }: { chat: Chat | null; chars: 
           <div className="flex flex-wrap gap-2">
             {chars.map((c) => (
               <button key={c.id} onClick={() => addCharacter(ensure().id, c).then((p) => onPick(`@${p.key}`)).catch((e) => toast((e as Error).message, "bad"))} title={`Add ${c.name} to this chat`} className="press flex w-[64px] flex-col items-center gap-1">
-                <span className="h-12 w-12 overflow-hidden rounded-full border border-line"><img src={viewUrl((c.views.face || c.views.front)!)} alt="" className="h-full w-full object-cover" /></span>
+                <span className="h-12 w-12 overflow-hidden rounded-full border border-line"><img src={viewUrl(coverOf(c)!)} alt="" className="h-full w-full object-cover" /></span>
                 <span className="w-full truncate text-center text-[11.5px] text-muted">{c.name.split(" ")[0]}</span>
               </button>
             ))}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl } from "../lib/api";
-import { isAdult, useCharacters, type Character } from "../lib/characters";
+import { coverOf, isAdult, useCharacters, type Character } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { trayUrl, useTray, type TrayItem } from "../lib/tray";
 import { Icon, cx } from "./ui";
@@ -38,7 +38,7 @@ export function useMention(value: string, onChange: (v: string) => void, ta: Ref
     if (!trig || !target) return [];
     const q = trig.q.toLowerCase();
     const cs = chars.filter((c) => !q || c.name.toLowerCase().includes(q)).slice(0, 6).map((c): Row => ({
-      key: `c:${c.id}`, group: "Characters", title: c.name, sub: target.hint.character.replace("{name}", c.name), thumb: viewUrl(c.views.face || c.views.front!), pick: { kind: "character", c },
+      key: `c:${c.id}`, group: "Characters", title: c.name, sub: target.hint.character.replace("{name}", c.name), thumb: viewUrl(coverOf(c)!), pick: { kind: "character", c },
     }));
     const ps = target.noPictures ? [] : pics.filter((p) => !q || p.label.toLowerCase().includes(q)).slice(0, q ? 8 : 6).map((p): Row => ({
       key: `p:${p.id}`, group: "Pictures", title: p.label || "Picture", sub: target.hint.picture, thumb: trayUrl(p), pick: { kind: "picture", item: p },

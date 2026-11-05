@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { planWriter, useBigPlanner } from "../lib/packs";
 import { buildDescribeVideo, buildPromptHelper, MINOR_FLAG, type PromptOpts } from "../lib/graphs";
-import { isAdult, useCharacters, VIEWS, type Character, type View } from "../lib/characters";
+import { coverOf, isAdult, useCharacters, VIEWS, type Character, type View } from "../lib/characters";
 import { look } from "../lib/charVideo";
 import { viewUrl } from "../lib/api";
 import { useShallow } from "zustand/react/shallow";
@@ -304,7 +304,7 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
       <div className="flex gap-2 overflow-x-auto pb-1">
         {list.map((c) => {
           const on = has(c.id);
-          const pic = c.views.face || c.views.front!;
+          const pic = coverOf(c)!;
           return (
             <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every ? "every angle of the sheet" : "full body + face"}`}
               className={cx("press group relative flex w-[72px] shrink-0 flex-col items-stretch gap-1 rounded-sm border p-1 text-left transition-colors", on ? "border-accent bg-accent/10" : "border-line hover:border-muted")}>

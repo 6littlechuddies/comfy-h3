@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl, type FileRef } from "../lib/api";
-import { describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo, type SiteSet, type View } from "../lib/characters";
+import { coverOf, describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo, type SiteSet, type View } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { runWriter } from "../lib/writer";
 import { hasAge, stripAges } from "../lib/siteAuto";
@@ -21,7 +21,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile]);
+const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -42,6 +42,19 @@ async function doItAll(c: Character, connected: boolean, step: (t: string) => vo
   const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, step);
   if (!r.ok) throw new Error(r.note);
   return `${sorted ? `${sorted.sets} sets · ` : ""}sent as a draft (${r.note})`;
+}
+
+/** after their cover photo changes: when they're already on your site (sent before), send the update as a draft again, in
+ *  the background — so the site's cover follows the Studio. Returns what happened, or null when there was nothing to do. */
+export async function resendIfSent(id: string): Promise<string | null> {
+  const c = useCharacters.getState().list.find((x) => x.id === id);
+  if (!c?.site?.sent?.ok) return null;
+  try {
+    const cfg: Cfg = await (await fetch("/studio-api/site/config")).json();
+    if (!cfg?.set) return null;
+    const r = await sendOne(c);
+    return r.ok ? `Your site has ${c.name}'s new cover (as a draft — publish it there)` : `Couldn't update your site: ${r.note}`;
+  } catch (e) { return `Couldn't update your site: ${(e as Error).message}`; }
 }
 
 /** send one character as a draft; returns the job's end state */
@@ -202,7 +215,7 @@ function Characters({ connected }: { connected: boolean }) {
           return (
             <div key={c.id} className={cx("group relative flex flex-col overflow-hidden border transition-colors", on ? "border-accent" : "border-line hover:border-muted")}>
               <button onClick={() => go(c.id)} className="relative aspect-[3/4] overflow-hidden bg-raised" aria-label={`Open ${c.name}`}>
-                <img src={viewUrl(c.views.front!)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
                 {busy[c.id] && <span className="absolute inset-x-0 bottom-0 bg-black/80 px-2 py-1.5 text-[11.5px] text-ink"><span className="pulse">●</span> {busy[c.id]}</span>}
               </button>
               <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center border border-line bg-black/70" title="Select">
@@ -271,7 +284,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-6">
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
-          <img src={viewUrl(c.views.face || c.views.front!)} alt="" className="h-14 w-14 border border-line object-cover" />
+          <img src={viewUrl(coverOf(c)!)} alt="" className="h-14 w-14 border border-line object-cover" />
           <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
           <Btn className="ml-auto" onClick={() => write(false)} disabled={writing} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing ? "Writing…" : "Fill the blanks"}</Btn>
           {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing} title="Rewrite every field">Rewrite all</Btn>}
@@ -290,7 +303,8 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
             const fileKey = role === "avatar" ? "avatarFile" : "coverFile";
             const own = site[fileKey];
             const viewId = site[role] ?? (role === "avatar" ? (c.views.face ? "face" : "front") : "front");
-            const cur = own ?? c.views[viewId as View] ?? c.views.front;
+            // the cover follows their cover photo unless you picked a different one just for the site
+            const cur = own ?? (role === "cover" && !site.cover && c.cover ? c.cover : c.views[viewId as View]) ?? c.views.front;
             return (
               <div key={role} className="flex flex-col gap-1.5">
                 <span className="flex items-center text-[12px] text-muted">{role === "avatar" ? "Avatar" : "Cover"}
@@ -301,7 +315,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
                   onChange={(m) => up(m ? { [fileKey]: { filename: m.name, subfolder: "", type: "input" } } as Partial<SiteInfo> : { [fileKey]: undefined } as Partial<SiteInfo>)} />
                 <div className="flex flex-wrap gap-1">
                   {views.map((v) => {
-                    const on = !own && viewId === v.id;
+                    const on = !own && viewId === v.id && !(role === "cover" && !site.cover && c.cover);
                     return <button key={v.id} onClick={() => up({ [role]: v.id as View, [fileKey]: undefined } as Partial<SiteInfo>)} title={`Sheet: ${v.label}`} className={cx("press h-12 w-9 overflow-hidden border", on ? "border-accent" : "border-line opacity-50 hover:opacity-90")}><img src={viewUrl(c.views[v.id]!)} alt={v.label} className="h-full w-full object-cover" /></button>;
                   })}
                 </div>
@@ -343,7 +357,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
 }
 
 /** pick one of the character's pictures (everything of theirs on the rental) */
-function PicPick({ c, title, onPick, onClose }: { c: Character; title: string; onPick: (f: FileRef) => void; onClose: () => void }) {
+export function PicPick({ c, title, onPick, onClose }: { c: Character; title: string; onPick: (f: FileRef) => void; onClose: () => void }) {
   const [list, setList] = useState<FileRef[] | null>(null);
   useEffect(() => { import("../lib/siteAuto").then(({ charPictures }) => charPictures(c)).then((l) => setList(l.map((x) => x.file).filter((f) => !/\.(mp4|webm|mov)$/i.test(f.filename)))).catch(() => setList([])); }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return createPortal(

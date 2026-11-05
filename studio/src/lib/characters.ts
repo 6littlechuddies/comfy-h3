@@ -63,6 +63,11 @@ export interface Character {
   /** anime characters: which anime model makes their pictures everywhere (Create, frames, Scenes) */
   animeModel?: "anima" | "noob";
   views: Partial<Record<View, FileRef>>;
+  /** their cover photo: the picture shown for them everywhere (project list, pickers, your site's cover). Doesn't change
+   *  what's copied when making pictures — that's their front picture. Empty = their face close-up or front picture. */
+  cover?: FileRef;
+  /** the cover photo before the last change ("↶ Back") */
+  prevCover?: FileRef;
   /** the picture each view had before it was last replaced — "↶ Back" swaps it back */
   prev?: Partial<Record<View, FileRef>>;
   /** the front picture is one you gave (not made here): Redo asks before replacing it */
@@ -90,6 +95,9 @@ const DEFAULT_NAME = /^(new character|character|untitled)( \d+)?$/i;
 const isDefaultName = (n: string) => !n.trim() || DEFAULT_NAME.test(n.trim());
 const cap = (s: string) => s.replace(/\b\w/g, (m) => m.toUpperCase());
 /** a name you can tell apart, made from how they look ("Teal-Streak Bob · Paramedic Jacket") until you give them one */
+/** the picture shown for a character everywhere: their cover photo, else their face close-up, else their front picture */
+export const coverOf = (c: Pick<Character, "cover" | "views">): FileRef | undefined => c.cover ?? c.views.face ?? c.views.front;
+
 export function autoName(c: Pick<Character, "hair" | "outfit" | "ethnicity" | "gender" | "details">): string {
   const words = (s: string, n: number) => s.replace(/[(),.;]/g, " ").split(/\s+/).filter((w) => w && !/^(a|an|the|with|and|of|in|her|his|long|short|very)$/i.test(w)).slice(0, n).join(" ");
   const hair = c.hair ? words(c.hair.replace(/\bhair\b/i, ""), 3) : "";
@@ -118,6 +126,9 @@ interface CharState {
   remove: (id: string) => void;
   select: (id: string | null) => void;
   setView: (id: string, view: View, from: FileRef, opts?: { yours?: boolean }) => Promise<void>;
+  /** a new cover photo (null = back to their face / front picture); your site's cover follows it */
+  setCover: (id: string, from: FileRef | null) => Promise<void>;
+  undoCover: (id: string) => Promise<void>;
   /** swap a view back to the picture it had before */
   undoView: (id: string, view: View) => Promise<void>;
   /** a view's picture, copied into ComfyUI's input folder for use in a job */
@@ -157,6 +168,28 @@ export const useCharacters = create<CharState>((set, get) => ({
     const bust = { ...kept, v: Date.now() }; // same file name every time -> version it so the picture refreshes
     set((s) => ({ list: s.list.map((x) => (x.id === id ? { ...x, views: { ...x.views, [view]: bust }, ...(prev ? { prev: { ...x.prev, [view]: prev } } : {}),
       ...(view === "front" ? { frontYours: !!opts?.yours } : {}), updatedAt: Date.now() } : x)) }));
+    persist();
+  },
+  setCover: async (id, from) => {
+    const c = get().list.find((x) => x.id === id);
+    if (!c) return;
+    let prev: FileRef | undefined;
+    if (c.cover) { try { prev = { ...(await keepFile(c.cover, `characters/${id}/prev_cover.png`)), v: Date.now() } as FileRef; } catch { /* nothing to keep */ } }
+    // kept with their pictures (backed up with them), so deleting the result later doesn't take the cover with it
+    const kept = from ? { ...(await keepFile(from, `characters/${id}/cover.png`)), v: Date.now() } as FileRef : undefined;
+    // the site's cover follows the cover photo: a cover picked only for the site (or a sheet view) gives way to it
+    const site = c.site ? { ...c.site, coverFile: undefined, cover: undefined } : c.site;
+    set((s) => ({ list: s.list.map((x) => (x.id === id ? { ...x, cover: kept, ...(prev ? { prevCover: prev } : {}), site, updatedAt: Date.now() } : x)) }));
+    persist();
+  },
+  undoCover: async (id) => {
+    const c = get().list.find((x) => x.id === id);
+    if (!c?.prevCover) return;
+    const spare = c.cover ? await keepFile(c.cover, `characters/${id}/swap_cover.png`) : null;
+    const back = await keepFile(c.prevCover, `characters/${id}/cover.png`);
+    const newPrev = spare ? await keepFile(spare, `characters/${id}/prev_cover.png`) : null;
+    const now = Date.now();
+    set((s) => ({ list: s.list.map((x) => (x.id === id ? { ...x, cover: { ...back, v: now }, prevCover: newPrev ? { ...newPrev, v: now } : undefined, updatedAt: now } : x)) }));
     persist();
   },
   undoView: async (id, view) => {
