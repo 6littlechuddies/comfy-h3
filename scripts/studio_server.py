@@ -688,6 +688,21 @@ async def _civitai_check() -> None:
 WARM: dict = {"state": "waiting"}
 
 
+async def _cards(s=None) -> int:
+    """how many cards ComfyUI runs on: the multi-card router says (the Studio starts before the cards are counted, so
+    H3_CARDS isn't set for it); no router = 1"""
+    try:
+        own = s is None
+        if own: s = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
+        try:
+            async with s.get(f"{COMFY}/h3-router") as r:
+                if r.status == 200 and "json" in r.headers.get("Content-Type", ""): return max(1, int((await r.json()).get("cards") or 1))
+        finally:
+            if own: await s.close()
+    except Exception: pass  # noqa: BLE001
+    return max(1, int(os.environ.get("H3_CARDS", "1") or 1))
+
+
 async def _warmup() -> None:
     """Speed-ups → Warm up at start: once Krea 2 is downloaded and ComfyUI is up, one tiny 1-step picture on each card loads
     Krea 2 into it, so your first picture doesn't wait 30–60 s. Off with H3_WARMUP=0 in the template or the switch."""
@@ -716,7 +731,7 @@ async def _warmup() -> None:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
                 async with s.get(f"{COMFY}/system_stats") as r:
                     if r.status != 200: continue
-                n = max(1, int(os.environ.get("H3_CARDS", "1") or 1))
+                n = await _cards(s)
                 for _ in range(n):  # several cards: the router gives each card one
                     async with s.post(f"{COMFY}/prompt", json={"prompt": graph, "client_id": "h3-warmup"}) as r:
                         if r.status != 200: raise RuntimeError(f"ComfyUI answered {r.status}: {(await r.text())[:200]}")
@@ -3286,7 +3301,7 @@ async def health(req):
 
 # ------------------------------------------------------------------ debug report (Studio ⋯ menu, h3-report, Claude on the rental)
 LOG_DIR = os.environ.get("H3_LOG_DIR", "/var/log")
-LOGS = ["studio.log", "comfyui.log", "downloader.log", "aria2.log", "h3-start.log", "watchdog.log", "caddy.log", "extra-nodes.log", "cloudflared.log"]
+LOGS = ["studio.log", "comfy-router.log", "comfyui-raylight.log", "comfyui-1.log", "comfyui.log", "downloader.log", "aria2.log", "h3-start.log", "watchdog.log", "caddy.log", "extra-nodes.log", "cloudflared.log"]
 _SECRET_NAME = re.compile(r"(TOKEN|KEY|PASSWORD|PASS|SECRET|HASH|OTP)", re.I)
 
 
@@ -3469,8 +3484,13 @@ async def debug_report_text(lines_per_log=80):
             async with s.get(f"{COMFY}/object_info/ModelAttentionBackend") as r:
                 kitchen = "comfy kitchen attention" in json.dumps(await r.json())
             add(f"  INT8 attention available: {kitchen}")
-            if int(os.environ.get("H3_CARDS", "1") or 1) > 1:
-                async with s.get(f"{COMFY}/h3-router") as r: add(f"  cards: {await r.text()}")
+            n = await _cards(s)
+            if n > 1:
+                async with s.get(f"{COMFY}/h3-router") as r: rt = await r.json()
+                add(f"  cards: {n} · loads {rt.get('loads')} · answering {rt.get('up')} · Raylight {'on' if rt.get('raylight') else 'OFF (' + str(rt.get('raylight_off_why')) + ')'}"
+                    f"{' · answering' if rt.get('raylight_up') else ' · NOT answering' if rt.get('raylight_up') is False else ''}")
+                add(f"  router holding {rt.get('held')} job(s) {rt.get('held_jobs')} · split video running: {rt.get('raylight_running') or 'none'}"
+                    f"{' for ' + str(rt.get('raylight_running_s')) + ' s' if rt.get('raylight_running') else ''} · cards idle for {rt.get('cards_idle_s')} s")
             else: add("  cards: 1")
     except Exception as e: add(f"  (couldn't ask ComfyUI: {e.__class__.__name__})")  # noqa: BLE001
     add("\n== What you use (all rentals) ==")

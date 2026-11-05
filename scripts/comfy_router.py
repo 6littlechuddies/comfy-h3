@@ -28,6 +28,49 @@ ray_pid: dict = {"id": None}           # the Raylight job that has every card ri
 clients: dict[str, set] = {}           # client_id → open browser websockets
 number = {"n": 0}
 SESSION: dict = {}
+up_at: dict[int, float] = {}           # backend index (-1 = Raylight) → last time it answered
+GPU = {"busy_at": time.time()}         # last time any card did real work (nvidia-smi)
+RAY_STATE = {"broken": "", "since": 0.0}  # Raylight switched off for this rental after it hung (why, when)
+# a Raylight job that has every card but no card has done any work for this long is stuck (Ray workers that never
+# start): it's stopped, its cards go back, and videos stop being split for the rest of the rental
+RAY_STUCK_S = int(os.environ.get("RAY_STUCK_S", "480"))
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+async def gpu_loop():
+    """is any card working? (a stuck Raylight job sits at 0 % on every card)"""
+    while True:
+        try:
+            p = await asyncio.create_subprocess_exec("nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits",
+                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(p.communicate(), 10)
+            if any(int(x.strip() or 0) > 5 for x in out.decode().split()): GPU["busy_at"] = time.time()
+        except Exception:  # noqa: BLE001  (no nvidia-smi: never call a job stuck)
+            GPU["busy_at"] = time.time()
+        await asyncio.sleep(5)
+
+
+def up(i: int) -> bool:
+    """a ComfyUI that answered in the last 30 s (one that crashed isn't handed new jobs while the watchdog restarts it)"""
+    return time.time() - up_at.get(i, time.time()) < 30
+
+
+async def give_up_ray(why: str):
+    """the Raylight job is stuck or its ComfyUI is gone: stop it, give the cards back, tell the Studio, split no more"""
+    pid, client = ray_pid["id"], ray_pid.get("client")
+    ray_pid["id"] = None
+    RAY_STATE.update(broken=why, since=time.time())
+    log(f"!! Raylight job {pid}: {why} — stopped; videos run on one card for the rest of this rental")
+    s = SESSION["s"]
+    for path, body in (("/interrupt", {}), ("/queue", {"clear": True}), ("/free", {"unload_models": True, "free_memory": True})):
+        try: await s.post(f"{RAY}{path}", json=body, timeout=aiohttp.ClientTimeout(total=10))
+        except Exception: pass  # noqa: BLE001
+    await tell(client, {"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Raylight",
+        "exception_message": f"Splitting the video across cards got stuck ({why}). Stopped it — press Make video again: it runs on one card now.",
+        "exception_type": "RaylightStuck", "traceback": []}})
 
 
 def is_ray(graph: dict) -> bool:
@@ -40,28 +83,43 @@ def load(i: int) -> int:
 
 async def poll_loop():
     """what each ComfyUI is doing: its /queue every half second"""
-    s = SESSION["s"]
     while True:
+        try: await poll_once()
+        except Exception as e:  # noqa: BLE001  (never let one bad turn stop the router handing out jobs)
+            log(f"!! router poll: {type(e).__name__}: {e}")
+        await asyncio.sleep(0.5)
+
+
+async def poll_once():
+    s = SESSION["s"]
+    if True:
         for i, b in enumerate(BACKENDS):
             try:
                 async with s.get(f"{b}/queue", timeout=aiohttp.ClientTimeout(total=3)) as r:
                     q = await r.json()
                 busy[i] = {str(x[1]) for x in (q.get("queue_running") or []) + (q.get("queue_pending") or [])}
-            except Exception:  # noqa: BLE001  (starting up / restarting: keep the last known state)
-                pass
+                up_at[i] = time.time()
+            except Exception:  # noqa: BLE001  (starting up / restarting: keep the last known state for a while)
+                up_at.setdefault(i, time.time())
+                if not up(i) and busy[i]:
+                    log(f"!! card {i}'s ComfyUI hasn't answered for 30 s — its jobs are forgotten, new ones go to the other cards")
+                    busy[i] = set()
         if ray_pid["id"] and RAY:
             try:
                 async with s.get(f"{RAY}/queue", timeout=aiohttp.ClientTimeout(total=3)) as r:
                     q = await r.json()
                 left = {str(x[1]) for x in (q.get("queue_running") or []) + (q.get("queue_pending") or [])}
+                up_at[-1] = time.time()
                 if ray_pid["id"] not in left and time.time() - ray_pid.get("at", 0) > 3:
                     ray_pid["id"] = None  # done: its cards go back to the per-card ComfyUIs
                     try: await s.post(f"{RAY}/free", json={"unload_models": True, "free_memory": True})
                     except Exception: pass  # noqa: BLE001
+                elif time.time() - ray_pid.get("at", 0) > RAY_STUCK_S and time.time() - max(GPU["busy_at"], ray_pid.get("at", 0)) > RAY_STUCK_S:
+                    await give_up_ray(f"no card did any work for {RAY_STUCK_S // 60} minutes")
             except Exception:  # noqa: BLE001
-                pass
+                up_at.setdefault(-1, time.time())
+                if ray_pid["id"] and not up(-1): await give_up_ray("the Raylight ComfyUI stopped answering")
         await dispatch_held()
-        await asyncio.sleep(0.5)
 
 
 def url_of(i: int) -> str:
@@ -81,10 +139,26 @@ async def tell(client_id: str | None, msg: dict):
         except Exception: pass  # noqa: BLE001
 
 
+DISPATCH = asyncio.Lock()
+
+
 async def dispatch_held():
-    """jobs the router is holding: a Raylight job once every card is free; the others once the Raylight job is done"""
+    """jobs the router is holding: a Raylight job once every card is free; the others once the Raylight job is done.
+    One at a time: the poll loop and a new job both call this, and a Raylight job waits 2 s mid-way — two at once popped
+    the same job twice, the second pop crashed the poll loop, and from then on every job waited forever."""
+    async with DISPATCH:
+        await _dispatch_held()
+
+
+async def _dispatch_held():
     while held and not ray_pid["id"]:
         j = held[0]
+        if j["ray"] and RAY_STATE["broken"]:
+            held.pop(0)
+            await tell(j["client_id"], {"type": "execution_error", "data": {"prompt_id": j["pid"], "node_type": "Raylight",
+                "exception_message": f"Splitting videos across cards is off for this rental ({RAY_STATE['broken']}). Press Make video again: it runs on one card.",
+                "exception_type": "RaylightOff", "traceback": []}})
+            continue
         if j["ray"]:
             if any(load(i) for i in range(len(BACKENDS))): return
             # every per-card ComfyUI gives its card's memory back, so Raylight's workers fit
@@ -94,13 +168,14 @@ async def dispatch_held():
             await asyncio.sleep(2)
             target = -1 if RAY else 0
         else:
-            target = min(range(len(BACKENDS)), key=lambda i: (load(i), i))
-        held.pop(0)
+            target = min(range(len(BACKENDS)), key=lambda i: (not up(i), load(i), i))
+        if j not in held: continue  # taken out of the line while the cards were being freed
+        held.remove(j)
         st, d = await send(target, j["body"])
         if st == 200:
             owner[j["pid"]] = target
             if target >= 0: busy[target].add(j["pid"])
-            if j["ray"]: ray_pid.update(id=j["pid"], at=time.time())
+            if j["ray"]: ray_pid.update(id=j["pid"], at=time.time(), client=j["client_id"])
         else:
             # the Studio already has its id: say it failed the way ComfyUI says it, over the live connection
             err = d.get("error") or {}
@@ -117,12 +192,14 @@ async def prompt(req):
     pid = str(body.get("prompt_id") or uuid.uuid4()); body["prompt_id"] = pid
     number["n"] += 1
     ray = is_ray(body["prompt"]) and bool(RAY)
+    if ray and RAY_STATE["broken"]:
+        return web.json_response({"error": {"type": "RaylightOff", "message": f"Splitting videos across cards is off for this rental ({RAY_STATE['broken']}) — make it again, it runs on one card"}, "node_errors": {}}, status=400)
     if ray or ray_pid["id"] or held:
         # waits in the router (for every card, or behind the Raylight job that has them)
         held.append({"pid": pid, "body": body, "client_id": body.get("client_id"), "ray": ray, "number": number["n"]})
         await dispatch_held()
         return web.json_response({"prompt_id": pid, "number": number["n"], "node_errors": {}})
-    target = min(range(len(BACKENDS)), key=lambda i: (load(i), i))
+    target = min(range(len(BACKENDS)), key=lambda i: (not up(i), load(i), i))
     st, d = await send(target, body)
     if st == 200: owner[pid] = target; busy[target].add(pid)
     return web.json_response(d, status=st)
@@ -209,7 +286,12 @@ async def system_stats(req):
 
 
 async def router_info(req):
-    return web.json_response({"cards": len(BACKENDS), "raylight": bool(RAY), "loads": [load(i) for i in range(len(BACKENDS))], "held": len(held), "raylight_running": ray_pid["id"]})
+    now = time.time()
+    return web.json_response({"cards": len(BACKENDS), "raylight": bool(RAY) and not RAY_STATE["broken"], "raylight_off_why": RAY_STATE["broken"] or None,
+        "loads": [load(i) for i in range(len(BACKENDS))], "up": [up(i) for i in range(len(BACKENDS))], "raylight_up": up(-1) if RAY else None,
+        "held": len(held), "held_jobs": [{"pid": h["pid"], "ray": h["ray"]} for h in held],
+        "raylight_running": ray_pid["id"], "raylight_running_s": int(now - ray_pid.get("at", now)) if ray_pid["id"] else None,
+        "cards_idle_s": int(now - GPU["busy_at"])})
 
 
 async def ws(req):
@@ -272,6 +354,7 @@ async def proxy(req, body_override=None):
 async def start(app):
     SESSION["s"] = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_connect=10))
     app["poll"] = asyncio.create_task(poll_loop())
+    app["gpu"] = asyncio.create_task(gpu_loop())
 
 
 def main():
