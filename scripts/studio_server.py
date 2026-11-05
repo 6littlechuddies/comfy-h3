@@ -2062,6 +2062,53 @@ def meta_base(m: dict) -> str:
     return ""
 
 
+async def _backup_lora(path: str) -> bool:
+    """your own LoRA (uploaded or trained here) → your drive's "H3 Studio/loras" (and B2 when the template has it), so a
+    new rental gets it back. True when at least one copy landed."""
+    ok = False
+    if _proton_on():
+        await _proton_setup()
+        folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        rc, out = await _rclone("copy", path, f"proton:{folder}/loras", "--retries", "3", timeout=1800)
+        if rc == 0: ok = True
+        else: print("!! LoRA backup to your drive failed:", _redact(out)[-300:], flush=True)
+    if os.environ.get("RCLONE_REMOTE"):
+        p = await asyncio.create_subprocess_exec("rclone", "copy", path, f"{os.environ['RCLONE_REMOTE'].rstrip('/')}/_loras",
+                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await p.communicate()
+        if p.returncode == 0: ok = True
+        else: print("!! LoRA backup to B2 failed:", err.decode(errors="ignore")[-300:], flush=True)
+    return ok
+
+
+async def _restore_lora(rel: str):
+    """an uploaded/trained LoRA that isn't on this rental: bring it back from your drive (H3 Studio/loras)"""
+    try:
+        if not _proton_on(): return
+        await _proton_setup()
+        folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        dest_dir = os.path.join(LORAS, os.path.dirname(rel)); os.makedirs(dest_dir, exist_ok=True)
+        rc, out = await _rclone("copy", f"proton:{folder}/loras/{os.path.basename(rel)}", dest_dir, "--retries", "3", timeout=3600)
+        print(f"LoRA {rel} from your drive: {'back' if rc == 0 and os.path.isfile(os.path.join(LORAS, rel)) else 'not found — ' + _redact(out)[-200:]}", flush=True)
+    finally:
+        _FETCHING.discard(rel)
+
+
+async def _backfill_lora_backups():
+    """LoRAs trained or uploaded before they were saved to your drive: send the ones still on this rental now"""
+    await asyncio.sleep(90)
+    try:
+        reg = load_reg(); changed = False
+        for rel, info in reg.items():
+            if not info.get("uploaded") or info.get("on_drive"): continue
+            path = os.path.join(LORAS, rel)
+            if os.path.isfile(path) and _proton_on() and await _backup_lora(path):
+                reg = load_reg(); reg.setdefault(rel, {}).update(backed_up=True, on_drive=True); save_reg(reg); changed = True
+        if changed: print("your own LoRAs are on your drive now (H3 Studio/loras)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print("!! LoRA backfill:", _redact(str(e))[:200], flush=True)
+
+
 async def upload_lora(req):
     """your own LoRA file (not on CivitAI): kept in models/loras/uploaded and in your cloud backup, so it comes back on every rental"""
     reader = await req.multipart()
@@ -2084,15 +2131,9 @@ async def upload_lora(req):
     title = (m.get("modelspec.title") or m.get("ss_output_name") or os.path.splitext(fn)[0]).strip()
     rel = f"uploaded/{fn}"
     reg = load_reg(); reg[rel] = {"uploaded": True, "title": title, "base": base, "trigger": trigger}; save_reg(reg)
-    backed = False
-    if os.environ.get("RCLONE_REMOTE"):
-        p = await asyncio.create_subprocess_exec("rclone", "copy", dest, f"{os.environ['RCLONE_REMOTE'].rstrip('/')}/_loras",
-                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        _, err = await p.communicate()
-        backed = p.returncode == 0
-        if not backed: print("!! LoRA backup failed:", err.decode(errors="ignore")[-300:], flush=True)
+    backed = await _backup_lora(dest)
     if backed:
-        reg = load_reg(); reg.setdefault(rel, {})["backed_up"] = True; save_reg(reg)
+        reg = load_reg(); reg.setdefault(rel, {}).update(backed_up=True, on_drive=_proton_on()); save_reg(reg)
     return web.json_response({"name": rel, "title": title, "base": base, "family": family(base) if base else "unknown",
                               "trigger": trigger, "backed_up": backed, "size_mb": round(size / 1e6)})
 
@@ -2829,6 +2870,7 @@ async def on_start(app):
     app["tips"] = asyncio.create_task(_backfill_tips())
     app["proton_restore"] = asyncio.create_task(_proton_boot())
     app["usage"] = asyncio.create_task(_usage_loop())
+    app["lora_backfill"] = asyncio.create_task(_backfill_lora_backups())
     app["proton"] = asyncio.create_task(_proton_loop())
     app["civitai_check"] = asyncio.create_task(_civitai_check_later())
     app["warmup"] = asyncio.create_task(_warmup())
@@ -3697,7 +3739,9 @@ async def _train(job: dict, d: dict):
                "--dit", _train_model("dit"), "--vae", _train_model("vae"), "--dataset_config", toml, "--sdpa", "--mixed_precision", "bf16",
                "--fp8_base", "--fp8_scaled", "--gradient_checkpointing", *(["--blocks_to_swap", "10"] if small else []),
                "--timestep_sampling", "krea2_shift", "--weighting_scheme", "none",
-               "--optimizer_type", "AdamW",  # plain AdamW: a LoRA's few weights need little memory, and bitsandbytes may not match CUDA 13 "--learning_rate", str(d.get("lr") or 1e-4),
+               # plain AdamW: a LoRA's few weights need little memory, and bitsandbytes may not match CUDA 13. The learning rate
+               # used to sit inside this comment, so training ran at musubi's default 2e-6 — 50× too low to learn a face.
+               "--optimizer_type", "AdamW", "--learning_rate", str(d.get("lr") or 1e-4),
                "--max_data_loader_n_workers", "2", "--persistent_data_loader_workers",
                "--network_module", "networks.lora_krea2", "--network_dim", str(rank), "--network_alpha", str(rank),
                "--max_train_steps", str(steps), "--save_every_n_steps", str(max(100, steps // 3)), "--seed", "42",
@@ -3712,10 +3756,8 @@ async def _train(job: dict, d: dict):
         reg = load_reg(); reg[rel] = {"uploaded": True, "title": f"{d.get('name') or name} (trained here)", "base": "Krea 2", "trigger": str(d.get("trigger") or ""), "role": "character",
                                       "tips": {"weight": 1.0}, "trained": {"steps": steps, "pictures": n, "rank": rank, "at": int(time.time())}}; save_reg(reg)
         job.update(lora=rel, step="backing up")
-        if os.environ.get("RCLONE_REMOTE"):
-            p = await asyncio.create_subprocess_exec("rclone", "copy", os.path.join(dest_dir, fn), f"{os.environ['RCLONE_REMOTE'].rstrip('/')}/_loras", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            if await p.wait() == 0:
-                reg = load_reg(); reg.setdefault(rel, {})["backed_up"] = True; save_reg(reg); job["backed_up"] = True
+        if await _backup_lora(os.path.join(dest_dir, fn)):
+            reg = load_reg(); reg.setdefault(rel, {}).update(backed_up=True, on_drive=_proton_on()); save_reg(reg); job["backed_up"] = True
         job.update(status="done", step="done")
         shutil.rmtree(cache, ignore_errors=True)
     except Exception as e:  # noqa: BLE001
@@ -3908,7 +3950,10 @@ def _fetch_missing_loras(reg: dict):
         _FETCHING.add(rel)
         vid = info.get("version_id")
         url = info.get("url") or (f"https://civitai.com/api/download/models/{vid}" if vid else "")
-        if not url: continue
+        if not url:
+            if info.get("uploaded"): _spawn(_restore_lora(rel))  # yours (uploaded or trained here): from your drive
+            else: _FETCHING.discard(rel)
+            continue
         jid = uuid.uuid4().hex[:10]
         LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True}
         _spawn(lora_job(job, url))
