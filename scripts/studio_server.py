@@ -2828,6 +2828,7 @@ async def on_start(app):
     app["whisper_idle"] = asyncio.create_task(_whisper_idle())
     app["tips"] = asyncio.create_task(_backfill_tips())
     app["proton_restore"] = asyncio.create_task(_proton_boot())
+    app["usage"] = asyncio.create_task(_usage_loop())
     app["proton"] = asyncio.create_task(_proton_loop())
     app["civitai_check"] = asyncio.create_task(_civitai_check_later())
     app["warmup"] = asyncio.create_task(_warmup())
@@ -3273,6 +3274,140 @@ def _run(cmd, timeout=8):
     except Exception as e: return f"({e.__class__.__name__})"  # noqa: BLE001
 
 
+
+# ------------------------------------------------------------------ usage log (what you use, so unused downloads can go)
+# The Studio sends what you do: which jobs ran (tab + mode, no prompts), which buttons/menus you press (their labels),
+# keyboard shortcuts (only keys held with Ctrl/Cmd/Alt — never what you type) and which model files each job loaded.
+# Each rental keeps its own entry; they're merged into "H3 Studio/usage.json" on your drive, so the report covers every
+# rental. Shown in the debug report ("== What you use ==") and on the Storage page. H3_USAGE=0 turns it off.
+USAGE_FILE = os.path.join(STATE, "usage.json")
+USAGE_ON = os.environ.get("H3_USAGE", "1") != "0"
+USAGE = {"dirty": False, "synced": 0.0}
+
+
+def _rental_id() -> str:
+    if LOCAL: return "pc"
+    cid = os.environ.get("CONTAINER_ID")
+    if cid: return f"vast-{cid}"
+    f = os.path.join(WORK, "rental_id")
+    try: return open(f).read().strip()
+    except OSError:
+        rid = "r-" + uuid.uuid4().hex[:8]
+        os.makedirs(WORK, exist_ok=True); open(f, "w").write(rid); return rid
+
+
+RENTAL_ID = _rental_id()
+
+
+def _usage_load() -> dict:
+    d = _state_json("usage", {}) or {}
+    if not isinstance(d.get("rentals"), dict): d = {"rentals": {}}
+    return d
+
+
+def _usage_merge(mine: dict, other: dict) -> dict:
+    """every rental's own entry, newest copy of each (this rental's always from here) — never adds counts twice"""
+    out = {"rentals": dict((other or {}).get("rentals") or {})}
+    for rid, e in (mine.get("rentals") or {}).items():
+        o = out["rentals"].get(rid)
+        if rid == RENTAL_ID or not o or (e.get("last") or 0) >= (o.get("last") or 0): out["rentals"][rid] = e
+    # keep 90 days, at most 60 rentals
+    keep = sorted(out["rentals"].items(), key=lambda kv: kv[1].get("last") or 0, reverse=True)[:60]
+    out["rentals"] = {k: v for k, v in keep if time.time() - (v.get("last") or 0) < 90 * 86400 or k == RENTAL_ID}
+    return out
+
+
+async def usage_post(req):
+    if not USAGE_ON: return web.json_response({"ok": False, "off": True})
+    try: d = await req.json()
+    except ValueError: return web.json_response({"error": "bad json"}, status=400)
+    ev = d.get("events") if isinstance(d, dict) else None
+    if not isinstance(ev, list): return web.json_response({"error": "events?"}, status=400)
+    u = _usage_load(); now = time.time()
+    me = u["rentals"].setdefault(RENTAL_ID, {"start": now, "f": {}, "m": {}})
+    me["last"] = now
+    for e in ev[:300]:
+        if not isinstance(e, dict): continue
+        k = e.get("k"); n = re.sub(r"[\x00-\x1f]+", " ", str(e.get("n") or "")).strip()[:90]
+        if k not in ("f", "m") or not n: continue
+        c = me[k].setdefault(n, [0, now]); c[0] += max(1, min(50, int(e.get("c") or 1))); c[1] = now
+    _state_write("usage", u); USAGE["dirty"] = True
+    return web.json_response({"ok": True})
+
+
+def _usage_report() -> dict:
+    u = _usage_load(); rentals = u["rentals"]
+    feats: dict[str, list] = {}; files: dict[str, list] = {}
+    for rid, e in rentals.items():
+        for k, dst in (("f", feats), ("m", files)):
+            for n, (c, last) in (e.get(k) or {}).items():
+                t = dst.setdefault(n, [0, 0.0, 0]); t[0] += c; t[1] = max(t[1], last); t[2] += 1
+    groups = []
+    try: dl = json.load(open(os.path.join(H3_RUN, "downloads.json")))
+    except (OSError, ValueError): dl = {}
+    gfiles: dict[str, list] = {}
+    for f in dl.get("files") or []: gfiles.setdefault(f.get("group"), []).append(os.path.basename(str(f.get("n") or "")))
+    for g in dl.get("groups") or []:
+        names = gfiles.get(g.get("id"), [])
+        hits = [files[n] for n in names if n in files]
+        groups.append({"id": g.get("id"), "label": g.get("label"), "gb": round((g.get("total_mb") or 0) / 1024, 1), "state": g.get("state"),
+                       "uses": sum(h[0] for h in hits), "last": max((h[1] for h in hits), default=0) or None,
+                       "rentals": max((h[2] for h in hits), default=0), "files": len(names)})
+    since = min((e.get("start") or time.time() for e in rentals.values()), default=time.time())
+    return {"on": USAGE_ON, "rentals": len(rentals), "since": since, "this_rental": RENTAL_ID, "groups": groups,
+            "features": sorted(({"name": n, "uses": v[0], "last": v[1], "rentals": v[2]} for n, v in feats.items()), key=lambda x: -x["uses"]),
+            "files": sorted(({"name": n, "uses": v[0], "last": v[1]} for n, v in files.items()), key=lambda x: -x["uses"])}
+
+
+async def usage_get(req):
+    return web.json_response(_usage_report())
+
+
+def _usage_text() -> list[str]:
+    r = _usage_report(); out = []
+    day = lambda t: time.strftime("%m-%d", time.localtime(t)) if t else "never"
+    out.append(f"  {r['rentals']} rental(s) since {day(r['since'])} · logging {'on' if r['on'] else 'OFF'}")
+    out.append("  Downloads (uses = jobs that loaded one of its files):")
+    for g in sorted(r["groups"], key=lambda g: g["uses"]):
+        out.append(f"    {str(g['id']):<13} {g['gb']:>6} GB  {g['uses']:>5} uses  last {day(g['last'])}  on {g['rentals']} rental(s)  [{g['state']}]")
+    out.append("  Features (jobs, buttons, shortcuts — most used first):")
+    for f in r["features"][:120]:
+        out.append(f"    {f['uses']:>5}  {f['name']}  (last {day(f['last'])}, {f['rentals']} rental(s))")
+    return out
+
+
+async def _usage_loop():
+    """bring in the other rentals' entries from your drive at start, then send this rental's every 10 minutes when changed"""
+    if not USAGE_ON or not _proton_on(): return
+    folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+    first = True
+    while True:
+        try:
+            await RESTORED.wait()
+            if first or USAGE["dirty"]:
+                await _proton_setup()
+                rc, out = await _rclone("cat", f"proton:{folder}/usage.json", timeout=120)
+                cloud = {}
+                if rc == 0 and "{" in out:
+                    try: cloud = json.loads(out[out.index("{"): out.rindex("}") + 1])
+                    except ValueError: cloud = {}
+                merged = _usage_merge(_usage_load(), cloud)
+                _state_write("usage", merged)
+                if USAGE["dirty"] or not first:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, dir=WORK) as f: json.dump(merged, f); tmp = f.name
+                    try:
+                        rc, out = await _rclone("copyto", tmp, f"proton:{folder}/usage.json", timeout=120)
+                        if rc == 0: USAGE["dirty"] = False; USAGE["synced"] = time.time()
+                    finally:
+                        try: os.remove(tmp)
+                        except OSError: pass
+                first = False
+        except Exception as e:  # noqa: BLE001
+            print("!! usage sync:", _redact(str(e))[:200], flush=True)
+        await asyncio.sleep(600)
+
+
 async def debug_report_text(lines_per_log=80):
     out = []
     add = out.append
@@ -3296,6 +3431,9 @@ async def debug_report_text(lines_per_log=80):
                 async with s.get(f"{COMFY}/h3-router") as r: add(f"  cards: {await r.text()}")
             else: add("  cards: 1")
     except Exception as e: add(f"  (couldn't ask ComfyUI: {e.__class__.__name__})")  # noqa: BLE001
+    add("\n== What you use (all rentals) ==")
+    try: out.extend(_usage_text())
+    except Exception as e: add(f"  ({e.__class__.__name__}: {e})")  # noqa: BLE001
     add("\n== Disk ==")
     add(_run(["df", "-h", "/", COMFY_DIR]))
     for name in ("status.json", "downloads.json"):
@@ -4749,7 +4887,7 @@ def main():
         web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora),
         web.post("/studio-api/loras/upload", upload_lora),
         web.post("/studio-api/client-error", client_error),
-        web.get("/studio-api/storage", storage), web.post("/studio-api/storage", storage_act),
+        web.get("/studio-api/storage", storage), web.post("/studio-api/usage", usage_post), web.get("/studio-api/usage", usage_get), web.post("/studio-api/storage", storage_act),
         web.post("/studio-api/results/missing", results_missing),
         web.post("/studio-api/activity", activity), web.get("/studio-api/activity", activity),
         web.get("/studio-api/civitai/key", civitai_key), web.put("/studio-api/civitai/key", civitai_key), web.delete("/studio-api/civitai/key", civitai_key), web.post("/studio-api/sheet/split", sheet_split),

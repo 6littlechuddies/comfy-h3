@@ -7,6 +7,7 @@ import { viewUrl, type FileRef } from "../lib/api";
 import { useFavs, isFav } from "../lib/favs";
 import { useJobs } from "../lib/jobs";
 import { askConfirm } from "./Dialogs";
+import { usageReport, type UsageReport } from "../lib/usage";
 import { Icon, cx } from "./ui";
 
 export const useStorage = create<{ open: boolean }>(() => ({ open: false }));
@@ -146,6 +147,8 @@ function StoragePanel() {
             </section>
           )}
 
+          <WhatYouUse />
+
           {info && <Cleanup folders={info.projects.map((p) => p.name)} onDone={() => load()} />}
         </div>
       </div>
@@ -245,6 +248,60 @@ function Cleanup({ folders, onDone }: { folders: string[]; onDone: () => void })
             {found.length > 400 && <p className="mt-2 text-[12px] text-dim">Showing the first 400 of {found.length}; all {doomed.length} are deleted.</p>}
           </>)}
         </div>
+      )}
+    </section>
+  );
+}
+
+const ago = (t: number | null) => {
+  if (!t) return "never";
+  const d = Math.floor((Date.now() / 1000 - t) / 86400);
+  return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`;
+};
+
+/** which downloads you actually use, across every rental (the usage log) — the ones you never use are the ones to drop */
+function WhatYouUse() {
+  const [r, setR] = useState<UsageReport | null | undefined>(undefined);
+  const [busy, setBusy] = useState("");
+  const load = () => usageReport().then(setR);
+  useEffect(() => { load(); }, []);
+  const later = async (id: string) => {
+    setBusy(id);
+    try {
+      const res = await fetch("/studio-api/downloads/later", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group: id, later: true }) });
+      if (!res.ok) throw new Error(`The rental answered ${res.status}`);
+      useJobs.getState().toast("Left out of this rental's downloads", "good");
+      await load();
+    } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } finally { setBusy(""); }
+  };
+  if (r === undefined) return null;
+  if (!r) return null;
+  const groups = [...r.groups].sort((a, b) => a.uses - b.uses || b.gb - a.gb);
+  return (
+    <section className="card rounded-xl border border-line p-5 lg:col-span-2">
+      <h3 className="text-[15px] font-semibold">What you use</h3>
+      <p className="mt-0.5 text-[12.5px] text-muted">
+        {r.on ? `How often each download was used, over ${r.rentals} rental${r.rentals === 1 ? "" : "s"}. Least used first — those are the ones worth leaving out.` : "The usage log is switched off (H3_USAGE=0 in the template)."}
+      </p>
+      <div className="mt-3 grid gap-1">
+        {groups.map((g) => (
+          <div key={g.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 border-b border-line2 py-1.5 text-[12.5px] last:border-0">
+            <span className="truncate text-ink">{g.label}</span>
+            <span className="tabular-nums text-muted">{g.gb} GB</span>
+            <span className={cx("w-36 text-right tabular-nums", g.uses ? "text-muted" : "text-hot")}>{g.uses ? `${g.uses} use${g.uses === 1 ? "" : "s"} · ${ago(g.last)}` : "never used"}</span>
+            {g.state !== "done" && g.state !== "later" && g.state !== "skipped"
+              ? <button disabled={!!busy} onClick={() => later(g.id)} className="press h-7 rounded-md border border-line px-2 text-[12px] text-muted hover:text-ink disabled:opacity-40">{busy === g.id ? "…" : "Later"}</button>
+              : <span className="w-[52px] text-right text-[11.5px] text-dim">{g.state === "done" ? "on disk" : "waiting"}</span>}
+          </div>
+        ))}
+      </div>
+      {!!r.features.length && (
+        <details className="mt-3 text-[12.5px]">
+          <summary className="cursor-pointer text-muted hover:text-ink">Features you use ({r.features.length})</summary>
+          <ul className="mt-2 max-h-64 space-y-0.5 overflow-y-auto pr-2">
+            {r.features.slice(0, 200).map((f) => <li key={f.name} className="flex gap-3"><span className="min-w-0 flex-1 truncate">{f.name}</span><span className="tabular-nums text-dim">{f.uses} · {ago(f.last)}</span></li>)}
+          </ul>
+        </details>
       )}
     </section>
   );

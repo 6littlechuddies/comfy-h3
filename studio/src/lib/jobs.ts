@@ -104,6 +104,7 @@ export const useJobs = create<JobState>((set, get) => ({
     await ensureInputs(graph);
     await dropMissingLoras(graph, tab);
     const id = await queuePrompt(graph, !!meta?.front);
+    import("./usage").then(({ logJob }) => logJob(tab, etaKey, graph)).catch(() => {});
     GRAPHS.set(id, graph);
     const titles: Record<string, string> = {};
     const classes: Record<string, string> = {};

@@ -17,5 +17,6 @@ startPrefs().finally(async () => {
   // handy for debugging from the browser console: open /studio/?debug
   if (location.search.includes("debug")) Promise.all([import("./lib/batch"), import("./lib/work"), import("./lib/characters"), import("./lib/scenes"), import("./lib/packs")]).then(([{ useBatch }, { useWork }, { useCharacters }, { useScenes }, { usePacks }]) =>
     Object.assign(window, { studio: { jobs: useJobs, tray: useTray, batch: useBatch, work: useWork, characters: useCharacters, scenes: useScenes, packs: usePacks } }));
+  import("./lib/usage").then(({ startUsageLog }) => startUsageLog()).catch(() => {});
   createRoot(document.getElementById("root")!).render(<StrictMode><Crash where="studio" full><App /></Crash></StrictMode>);
 });

@@ -509,9 +509,12 @@ def room_for(groups, later: set[str]) -> set[str]:
     for i, g in enumerate(queue_order(groups, next_ids(groups))):
         if g["id"] in later: continue
         need = sum(max(0, f.get("size", 0) - on_disk(f)) for f in g["files"] if not complete(f))
-        if i and need > left: out.add(g["id"]); continue
+        if i and need > left: out.add(g["id"]); ROOM[g["id"]] = (need, max(0, left)); continue
         left -= need
     return out
+
+
+ROOM: dict[str, tuple[int, int]] = {}  # group -> (bytes it still needs, bytes left for it after the reserve)
 
 
 def next_ids(groups) -> list[str]:
@@ -635,7 +638,9 @@ def main() -> int:
         vram = GPU.get("vram_mb", 0)
         for g in groups:
             g["later"] = (g["id"] in later or g["id"] in full) and not all(complete(f) for f in g["files"])
-            g["why"] = ("not enough disk — rent with a bigger disk, or press Later on another group" if g["id"] in full
+            nd, lf = ROOM.get(g["id"], (0, 0))
+            g["why"] = (f"not enough disk — needs {nd / 2**30:.0f} GB, only {lf / 2**30:.0f} GB free after the {DISK_RESERVE / 2**30:.0f} GB kept for your results. "
+                        "Rent with a bigger disk, or press Later on a group you don't use (Storage page shows which)" if g["id"] in full
                         else f"needs a {BIG_ONLY[g['id']] // 1000 + 4} GB+ card" if g["id"] in BIG_ONLY and 0 < vram < BIG_ONLY[g["id"]] else None) if g["later"] else None
             if g["id"] in full and g["id"] not in NOSPACE_LOGGED: NOSPACE_LOGGED.add(g["id"]); log(f"{g['label']}: waiting — not enough disk")
     def check_groups(final=False):
