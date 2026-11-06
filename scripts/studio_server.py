@@ -4495,6 +4495,68 @@ def _site_problems(c: dict, site: dict) -> list[str]:
     return out
 
 
+# ------------------------------------------------------------------ hover loop: the short video her card plays on hover
+# The site doesn't re-encode it, so it's made to its spec here: mp4 / H.264 / no audio, 540 px wide, the card's shape
+# (height = 540 × card height / card width, rounded down to an even number), 24 fps, index at the front, ~1 MB.
+LOOP_W = 540
+
+
+def _card_size(path: str) -> tuple[int, int]:
+    """the card picture's size as it's sent (big pictures go at most SITE_MAX_SIDE on their long side, same shape)"""
+    from PIL import Image
+    with Image.open(path) as im: w, h = im.size
+    if max(w, h) > SITE_MAX_SIDE:
+        k = SITE_MAX_SIDE / max(w, h); w, h = round(w * k), round(h * k)
+    return w, h
+
+
+def _loop_height(card_w: int, card_h: int) -> int:
+    h = (LOOP_W * card_h) // card_w
+    return h - (h % 2)
+
+
+def _probe(path: str) -> dict:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,codec_name",
+                        "-of", "json", path], capture_output=True, text=True, timeout=60)
+    try: return (json.loads(r.stdout).get("streams") or [{}])[0]
+    except ValueError: return {}
+
+
+def _make_loop(src: str, height: int) -> str:
+    """her loop at 540×height, ready for the site (made once per source and size, then reused)"""
+    import hashlib
+    st = os.stat(src)
+    key = hashlib.sha1(f"{src}:{st.st_size}:{int(st.st_mtime)}:{height}".encode()).hexdigest()[:16]
+    out_dir = os.path.join(WORK, "site_loops"); os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"loop_{key}_{LOOP_W}x{height}.mp4")
+    if os.path.isfile(out) and os.path.getsize(out) > 0: return out
+    vin = _probe(src)
+    sw, sh = int(vin.get("width") or 0), int(vin.get("height") or 0)
+    # the site's command, as given — when the video isn't the card's shape, it's filled and cropped to it instead of stretched
+    same = sw and sh and abs(sw / sh - LOOP_W / height) < 0.015
+    vf = (f"fps=24,scale={LOOP_W}:{height}:flags=lanczos,setsar=1" if same else
+          f"fps=24,scale={LOOP_W}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={LOOP_W}:{height},setsar=1")
+    tmp = out + ".part.mp4"
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow",
+                        "-b:v", "1M", "-maxrate", "1.2M", "-bufsize", "2M", "-pix_fmt", "yuv420p", "-movflags", "+faststart", tmp],
+                       capture_output=True, text=True, timeout=900)
+    if r.returncode != 0: raise RuntimeError(f"couldn't make the hover loop: {r.stderr.strip()[-400:]}")
+    # checked before it goes anywhere: the size and codec the site wants
+    p = _probe(tmp)
+    if (int(p.get("width") or 0), int(p.get("height") or 0), p.get("codec_name")) != (LOOP_W, height, "h264"):
+        raise RuntimeError(f"the hover loop came out {p.get('width')}x{p.get('height')} {p.get('codec_name')} — expected {LOOP_W}x{height} h264")
+    os.replace(tmp, out)
+    return out
+
+
+def _loop_wanted(res) -> int | None:
+    """a 422 on "loop" says the exact size it wanted (and the command): its height"""
+    txt = json.dumps(res) if not isinstance(res, str) else res
+    if "loop" not in txt.lower(): return None
+    m = re.search(r"scale=\s*540\s*:\s*(\d{2,4})", txt) or re.search(r"540\s*[x×]\s*(\d{2,4})", txt)
+    return int(m.group(1)) if m else None
+
+
 async def _site_upload(s, path: str, job: dict) -> str:
     """one file through an upload slot; returns its media_id (cached, so it's sent once)"""
     import hashlib
@@ -4538,6 +4600,20 @@ async def _site_push(job: dict, d: dict):
                 except web.HTTPException: p = None
             p = p if p and os.path.isfile(p) else (vpath(v) or vpath("front"))
             if p and os.path.isfile(p): files.append((role, p))
+        # her hover loop (Your site → Hover loop): made to the card's shape before it's uploaded
+        loop_src = None
+        lf = site.get("loopFile")
+        if isinstance(lf, dict) and lf.get("filename"):
+            try: loop_src = _file_of(lf)
+            except web.HTTPException: loop_src = None
+            if loop_src and not os.path.isfile(loop_src): loop_src = None
+            if not loop_src: job["note"] = "her hover loop file is gone from this rental — pick it again (Your site → Hover loop)"
+        card = next((p for r, p in files if r == "cover"), None)
+        if loop_src and card:
+            job["step"] = "making the hover loop"
+            cw, ch = _card_size(card)
+            job["loop_size"] = f"{LOOP_W}x{_loop_height(cw, ch)}"
+            files.append(("loop", await asyncio.to_thread(_make_loop, loop_src, _loop_height(cw, ch))))
         if site.get("send_reference", True):
             for v in ("front", "left", "right", "back", "threeq", "face", "smile", "angry", "surprised"):
                 p = vpath(v)
@@ -4577,9 +4653,17 @@ async def _site_push(job: dict, d: dict):
             job["character"] = res
             media = {"avatar": next((mids[p] for r, p in files if r == "avatar"), None), "cover": next((mids[p] for r, p in files if r == "cover"), None),
                      "reference": [mids[p] for r, p in files if r == "reference"]}
+            loop_p = next((p for r, p in files if r == "loop"), None)
+            if loop_p: media["loop"] = mids[loop_p]
             job["step"] = "media"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
-            if code not in (200, 201, 204): raise RuntimeError(f"the site refused the pictures ({code}): {_site_err(res)}")
+            want = _loop_wanted(res) if code == 422 and loop_p else None
+            if want:
+                # the site said the exact size it wanted: made again at that size and sent again, once
+                job["step"] = f"remaking the hover loop at {LOOP_W}x{want}"; job["loop_size"] = f"{LOOP_W}x{want}"
+                media["loop"] = await _site_upload(s, await asyncio.to_thread(_make_loop, loop_src, want), job)
+                code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
+            if code not in (200, 201, 204): raise RuntimeError(f"the site refused the pictures{' or the hover loop' if loop_p else ''} ({code}): {_site_err(res)}")
             job["sets_done"] = []
             all_sets = [x for x in (site.get("sets") or []) if isinstance(x, dict)]
             for st_ in sets:

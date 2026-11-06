@@ -21,7 +21,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename]);
+const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -53,7 +53,7 @@ export async function resendIfSent(id: string): Promise<string | null> {
     const cfg: Cfg = await (await fetch("/studio-api/site/config")).json();
     if (!cfg?.set) return null;
     const r = await sendOne(c);
-    return r.ok ? `Your site has ${c.name}'s new cover (as a draft — publish it there)` : `Couldn't update your site: ${r.note}`;
+    return r.ok ? `Sent ${c.name}'s update to your site (as a draft — publish it there)` : `Couldn't update your site: ${r.note}`;
   } catch (e) { return `Couldn't update your site: ${(e as Error).message}`; }
 }
 
@@ -252,6 +252,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [picking, setPicking] = useState<"avatar" | "cover" | null>(null);
+  const [pickLoop, setPickLoop] = useState(false);
   const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && c.views[v.id]);
   const sets = site.sets ?? [];
   const write = async (all: boolean) => {
@@ -323,6 +324,15 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
             );
           })}
         </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="flex items-center text-[12px] text-muted">Hover loop <span className="ml-1.5 text-dim">· plays on her card when someone hovers it</span>
+            <button className="ml-auto text-[11.5px] text-accent hover:underline" onClick={() => setPickLoop(true)}>Pick from their videos</button></span>
+          <Slot className="h-44" accept={["video"]} value={site.loopFile ? { name: site.loopFile.filename, kind: "video", url: viewUrl(site.loopFile), label: "hover loop" } : null}
+            hint="a short video of her — sent 540 px wide, the card's shape, no sound, ~1 MB"
+            onChange={(m) => up({ loopFile: m ? { filename: m.name, subfolder: "", type: "input" } : undefined } as Partial<SiteInfo>)} />
+          <span className="text-[11.5px] leading-relaxed text-dim">Made from this when sent: cropped to her cover's shape (not stretched), 24 fps, sound off. Animate → Loop of her cover picture fits best.</span>
+        </div>
+        {pickLoop && <PicPick c={c} videos title="Pick her hover loop" onClose={() => setPickLoop(false)} onPick={(f) => { up({ loopFile: { filename: f.filename, subfolder: f.subfolder, type: f.type } } as Partial<SiteInfo>); setPickLoop(false); }} />}
         {picking && <PicPick c={c} title={picking === "avatar" ? "Pick the avatar" : "Pick the cover"} onClose={() => setPicking(null)}
           onPick={(f) => { up({ [picking === "avatar" ? "avatarFile" : "coverFile"]: { filename: f.filename, subfolder: f.subfolder, type: f.type } } as Partial<SiteInfo>); setPicking(null); }} />}
         <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={site.send_reference !== false} onChange={(e) => up({ send_reference: e.target.checked })} /> Also send their reference sheet ({views.length} pictures)</label>
@@ -357,21 +367,22 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
 }
 
 /** pick one of the character's pictures (everything of theirs on the rental) */
-export function PicPick({ c, title, onPick, onClose }: { c: Character; title: string; onPick: (f: FileRef) => void; onClose: () => void }) {
+export function PicPick({ c, title, onPick, onClose, videos }: { c: Character; title: string; onPick: (f: FileRef) => void; onClose: () => void; videos?: boolean }) {
   const [list, setList] = useState<FileRef[] | null>(null);
-  useEffect(() => { import("../lib/siteAuto").then(({ charPictures }) => charPictures(c)).then((l) => setList(l.map((x) => x.file).filter((f) => !/\.(mp4|webm|mov)$/i.test(f.filename)))).catch(() => setList([])); }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { import("../lib/siteAuto").then(({ charPictures }) => charPictures(c)).then((l) => setList(l.map((x) => x.file).filter((f) => /\.(mp4|webm|mov)$/i.test(f.filename) === !!videos))).catch(() => setList([])); }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return createPortal(
     <div className="fade-in fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6" onMouseDown={onClose}>
       <div className="flex max-h-full w-full max-w-[1000px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-center border-b border-line px-4 py-3"><b className="text-[14px]">{title}</b><span className="ml-2 text-[12px] text-muted">{list ? `${list.length} pictures of ${c.name}` : "Finding their pictures…"}</span>
+        <div className="flex items-center border-b border-line px-4 py-3"><b className="text-[14px]">{title}</b><span className="ml-2 text-[12px] text-muted">{list ? `${list.length} ${videos ? "videos" : "pictures"} of ${c.name}` : `Finding their ${videos ? "videos" : "pictures"}…`}</span>
           <button aria-label="Close" className="ml-auto text-muted hover:text-ink" onClick={onClose}><Icon name="x" size={16} /></button></div>
         <div className="grid min-h-0 grid-cols-3 gap-2 overflow-y-auto p-3 md:grid-cols-5">
           {(list ?? []).map((f) => (
             <button key={`${f.subfolder}/${f.filename}`} onClick={() => onPick(f)} className="press group aspect-[3/4] overflow-hidden border border-line bg-black hover:border-accent">
-              <img src={viewUrl(f)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" /></button>
+              {videos ? <video src={viewUrl(f)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-contain" />
+                : <img src={viewUrl(f)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />}</button>
           ))}
         </div>
-        {list && !list.length && <p className="p-4 text-[13px] text-muted">No pictures of {c.name} found yet — drop one from the tray into the box instead.</p>}
+        {list && !list.length && <p className="p-4 text-[13px] text-muted">No {videos ? "videos" : "pictures"} of {c.name} found yet — drop one from the tray into the box instead.</p>}
       </div>
     </div>, document.body);
 }

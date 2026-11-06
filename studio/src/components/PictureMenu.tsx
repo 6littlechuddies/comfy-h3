@@ -188,6 +188,17 @@ export function PictureMenuHost() {
       },
     },
     {
+      key: "loop", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s hover loop (your site)`, hide: !isVideo || !coverChar, run: async () => {
+        const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
+        const st = useCharacters.getState();
+        const c = st.list.find((x) => x.id === coverChar!.id)!;
+        st.save({ ...c, site: { ...c.site, loopFile: ref } });
+        const { resendIfSent } = await import("./SiteLink");
+        const msg = await resendIfSent(c.id);
+        return msg ?? `${c.name}'s hover loop is set — it goes with her next send to your site`;
+      },
+    },
+    {
       // a picture you love: straight into the picked character's private (premium) folder for your site
       key: "priv", icon: "lock", label: `Add to ${selName ?? "the character"}'s private set`, hide: !selName, run: async () => {
         const st = useCharacters.getState();

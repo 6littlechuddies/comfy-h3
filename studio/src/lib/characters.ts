@@ -29,6 +29,8 @@ export interface SiteInfo {
   avatar?: View; cover?: View; send_reference?: boolean; sets?: SiteSet[];
   /** any picture as their avatar / cover (from the tray or their results) — wins over the sheet view above */
   avatarFile?: FileRef; coverFile?: FileRef;
+  /** her hover loop: the short video her card plays when someone hovers it (made 540 px wide, the card's shape, when sent) */
+  loopFile?: FileRef;
   /** your few words on who they are ("shy art student who games all night") — the profile writer builds on them */
   direction?: string;
   /** when it was last sent, and what the site said */
