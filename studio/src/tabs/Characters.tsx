@@ -17,6 +17,7 @@ import { queueFullSheet, SHEET_MODELS, sheetStyle, viewEngine, viewGraph, viewMe
 import { ModelsNotice } from "../components/Workspace";
 import { TrainSetMaker } from "../components/Builder";
 import { IdentityCard } from "../components/IdentityCard";
+import { PlanHistory } from "../components/PlanHistory";
 import { CheckpointPicker } from "../components/Checkpoint";
 import { openSiteLink, PicPick, resendIfSent } from "../components/SiteLink";
 import { openViewer } from "../components/Viewer";
@@ -136,6 +137,10 @@ function Detail({ c, onSheet, onTrain, onDelete, side, onSide }: { c: Character;
         </div>
         <p className="mt-1.5 text-xs text-muted">Click a picture to see it big (scroll to zoom, ←/→ to flip through). Drag any view into a slot. In Animate and Plan a video, “Every angle” sends all of them.</p>
         <div className="mt-3"><IdentityCard c={c} /></div>
+        <details className="mt-3 rounded-[10px] border border-line px-4 py-3" open={false}>
+          <summary className="cursor-pointer text-[13.5px] font-medium text-ink">Planned prompts <span className="font-normal text-dim">· every video plan made with {c.name}</span></summary>
+          <div className="mt-2"><PlanHistory charIds={[c.id]} limit={10} /></div>
+        </details>
       </div>
       </div>
       <div className="grid grid-cols-2 gap-5">

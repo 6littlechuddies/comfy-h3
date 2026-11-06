@@ -21,6 +21,9 @@ import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
 import { RefList } from "../components/RefList";
 import { Moments, TimelineBar } from "../components/TimelineView";
 import { copyText } from "../lib/copy";
+import { addPlan, planOfText, updatePlan, usePlans, type Plan } from "../lib/plans";
+import { PlanHistory } from "../components/PlanHistory";
+import { Modal } from "../components/Dialogs";
 
 const MODE_LABEL = { references: "References", "first-last": "First → last frame", image: "Image → video", text: "Text only" } as const;
 
@@ -44,6 +47,12 @@ export default function PromptTab() {
   const active = jobs.find((j) => j.status === "running" || j.status === "queued");
   const [busy, setBusy] = useState(false);
   const [asText, setAsText] = useState(false);
+  const [past, setPast] = useState(false);
+  // whose plans "Past plans" shows: the characters in the references, else the project you're on
+  const selId = useCharacters((s) => s.sel);
+  const pastIds = [...new Set(refs.map((r) => r.charId).filter((x): x is string => !!x))];
+  if (!pastIds.length && selId) pastIds.push(selId);
+  const pastNames = useCharacters.getState().list.filter((c) => pastIds.includes(c.id)).map((c) => c.name).join(" & ");
   const consumed = useRef(new Set<string>());
 
   useHandoffInto("prompt", (items) => setWork({ promptRefs: [...useWork.getState().promptRefs, ...items.map((i) => makeRef(i.media))] }));
@@ -74,6 +83,9 @@ export default function PromptTab() {
       parsed.cuts = [{ id: uid(), start: 0, end: p.seconds, shot: "", text: raw.trim() }];
     }
     setWork({ timeline: { ...parsed, style: p.style }, textOverride: null, seen: seenTexts });
+    // into the planned-prompts history of each character in it
+    const pm = done.meta?.plan as Omit<Plan, "id" | "at" | "text"> | undefined;
+    if (pm) addPlan({ ...pm, text: parsed.cuts.some((c) => c.text) ? toPrompt({ ...parsed, style: p.style }) : raw.trim() });
   }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const aLoras = useSettings((s) => s.s.animate.loras);
@@ -112,7 +124,9 @@ export default function PromptTab() {
         audios: refs.filter((r) => r.media.kind === "audio").map((r) => ({ tag: tags[r.id], label: r.label })),
         characters: inUse, idea: p.idea, seconds: p.seconds, cuts: p.cuts, camera: p.camera, mode: MODE_LABEL[p.mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
       });
-      await run("prompt", "Writing the timeline", graph, etaKey, { seconds: p.seconds });
+      const charIds = [...new Set(refs.map((r) => r.charId).filter((x): x is string => !!x))];
+      await run("prompt", "Writing the timeline", graph, etaKey, { seconds: p.seconds,
+        plan: { chars: charIds, project: useCharacters.getState().sel, idea: p.idea, seconds: p.seconds, mode: p.mode, cuts: p.cuts, camera: p.camera } });
     } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); } finally { setBusy(false); }
   };
   usePrimaryAction("prompt", write);
@@ -129,6 +143,7 @@ export default function PromptTab() {
     setWork({ animateRefs: refs.map((r) => ({ ...r })) });
     useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode });
     setWork({ sentPlan: finalText });
+    const pl = planOfText(finalText); if (pl) updatePlan(pl.id, { sent: Date.now() });
     useSettings.getState().setTab("animate");
     toast("Sent to Animate: references, timeline and length.", "good");
   };
@@ -140,6 +155,17 @@ export default function PromptTab() {
       <Chip title="Cuts" value={p.cuts} onChange={(v) => set({ cuts: v })} options={[{ value: 0, label: "Auto cuts" }, ...[1, 2, 3, 4].map((n) => ({ value: n, label: `${n} cut${n > 1 ? "s" : ""}` }))]} />
       <Chip title="Camera" value={p.camera} onChange={(v) => set({ camera: v })} options={[{ value: "auto", label: "Camera: auto" }, { value: "still", label: "Still camera" }, { value: "slow push in", label: "Push in" }, { value: "orbit", label: "Orbit" }, { value: "handheld", label: "Handheld" }]} />
       <span className="ml-1 text-[11px] text-dim">{refs.length ? `${refs.length} reference${refs.length > 1 ? "s" : ""}` : "no references yet — add them on the left"}</span>
+      <button onClick={() => setPast(true)} className="ml-auto text-[12px] text-accent hover:underline" title="Every plan made with the characters in your references">Past plans</button>
+      {past && (
+        <Modal onClose={() => setPast(false)} width={720} label="Past plans">
+          <div className="flex items-center border-b border-line px-4 py-3"><b className="text-[14px]">Past plans</b>
+            <span className="ml-2 text-[12px] text-muted">{pastIds.length ? `with ${pastNames}` : "everything planned"}</span>
+            <button aria-label="Close" className="ml-auto text-muted hover:text-ink" onClick={() => setPast(false)}><Icon name="x" size={16} /></button></div>
+          <div className="max-h-[62vh] overflow-y-auto px-4 py-3">
+            {pastIds.length ? <PlanHistory charIds={pastIds} limit={15} /> : <AllPlans />}
+          </div>
+        </Modal>
+      )}
     </>
   );
   // @ in the box: characters and pictures join the references (the writer names them as <Picture n>)
@@ -204,6 +230,7 @@ export default function PromptTab() {
               <Btn onClick={write} disabled={!!why} why={why}><Icon name="refresh" size={14} /> Rewrite</Btn>
               <Btn onClick={() => setAsText((v) => !v)}>{asText ? "Show as timeline" : "Show as plain text"}</Btn>
               <Btn onClick={() => { copyText(finalText, "Prompt copied"); }}>Copy</Btn>
+              <Btn onClick={() => setPast(true)} title="Every plan made with the characters in your references">Past plans</Btn>
               <Btn kind="primary" className="ml-auto px-6" onClick={sendToAnimate}>Send to Animate <Icon name="arrow" size={16} /></Btn>
             </div>
           </>
@@ -345,4 +372,10 @@ export function WriterSetup() {
       ) : <PromptFiles only="plan" />}
     </div>
   );
+}
+
+/** Past plans with nobody picked: the newest plans of every character */
+function AllPlans() {
+  const ids = usePlans((s) => [...new Set(s.list.flatMap((p) => (p.chars.length ? p.chars : p.project ? [p.project] : [])))].join(","));
+  return <PlanHistory charIds={ids ? ids.split(",") : []} limit={15} empty="No planned prompts yet — they show up here (and on each character's page) once the writer plans a video." />;
 }

@@ -78,10 +78,18 @@ def is_ray(graph: dict) -> bool:
     return any(str((n or {}).get("class_type", "")).startswith(("Ray", "XFuser")) for n in (graph or {}).values())
 
 
-# With 2+ cards the last one is the writer's: prompt writing / video planning always goes there and videos never do, so you
-# can plan the next video while one renders — and neither model has to be swapped out of a card for the other.
-# ROUTE_WRITER=0: every job just goes to the least busy card.
+# One line for every job, handed to a card the moment it's free (each card runs one job at a time, so nothing gets stuck
+# behind a long video on a card while another card sits idle). Who goes first: writing (planning, prompts) → pictures →
+# videos; "front" jobs first within their kind. With 2+ cards the last card is the writer's:
+#   * adaptive (default): it plans first, and helps render videos while you're not planning (nothing written for
+#     PLAN_RECENT_S) — a video started there finishes there, so a new plan then takes the next card that frees up
+#   * keep_writer (Speed-ups → "Always keep a card for planning"): videos never go there; plans start instantly, always
+# ROUTE_WRITER=0: no writer's card, every job just takes the first free card.
 ROUTE_WRITER = os.environ.get("ROUTE_WRITER", "1") != "0"
+PLAN_RECENT_S = int(os.environ.get("PLAN_RECENT_S", "180"))
+MODE = {"keep_writer": False}
+LAST_PLAN = {"at": 0.0}
+RANK = {"writer": 0, "other": 1, "video": 2}
 
 
 def kind_of(graph: dict) -> str:
@@ -91,20 +99,29 @@ def kind_of(graph: dict) -> str:
     return "other"
 
 
-def pick(graph: dict) -> int:
-    """which card a job goes to: the writer's card for writing, the other cards for videos, the least busy for the rest"""
-    every = list(range(len(BACKENDS)))
-    if ROUTE_WRITER and len(BACKENDS) > 1:
-        w = len(BACKENDS) - 1
-        k = kind_of(graph)
-        if k == "writer" and up(w): return w
-        if k == "video":
-            rest = [i for i in every if i != w and up(i)]
-            if rest: every = rest
-        elif k == "other":
-            # pictures: a card that isn't rendering a video (they take minutes), then the least busy, the writer's last
-            return min(every, key=lambda i: (not up(i), any(kinds.get(x) == "video" for x in busy[i]), load(i), i == w, i))
-    return min(every, key=lambda i: (not up(i), load(i), i))
+def writer_card():
+    return len(BACKENDS) - 1 if ROUTE_WRITER and len(BACKENDS) > 1 else None
+
+
+def planning_now() -> bool:
+    """you're planning: a plan was asked for in the last few minutes, or one is waiting / being written"""
+    return time.time() - LAST_PLAN["at"] < PLAN_RECENT_S or any(kinds.get(x) == "writer" for i in busy for x in busy[i]) \
+        or any(h["kind"] == "writer" for h in held)
+
+
+def free_card(kind: str):
+    """the card this job should start on right now, or None (it waits in the line)"""
+    w = writer_card()
+    idle = [i for i in range(len(BACKENDS)) if up(i) and load(i) == 0]
+    if not idle: return None
+    if w is None: return idle[0]
+    if kind == "writer": return w if w in idle else idle[0]
+    others = [i for i in idle if i != w]
+    if others: return others[0]
+    # only the writer's card is free
+    if kind == "video" and (MODE["keep_writer"] or planning_now()): return None
+    if kind == "other" and MODE["keep_writer"]: return None
+    return w
 
 
 def load(i: int) -> int:
@@ -180,41 +197,57 @@ async def dispatch_held():
         await _dispatch_held()
 
 
+async def _fail(j: dict, st_msg: str, etype: str):
+    await tell(j["client_id"], {"type": "execution_error", "data": {"prompt_id": j["pid"], "node_type": "Raylight" if j["ray"] else "",
+        "exception_message": st_msg, "exception_type": etype, "traceback": []}})
+
+
+async def _send_held(j: dict, target: int):
+    held.remove(j)
+    st, d = await send(target, j["body"])
+    if st == 200:
+        owner[j["pid"]] = target
+        if target >= 0: busy[target].add(j["pid"])
+        if j["ray"]: ray_pid.update(id=j["pid"], at=time.time(), client=j["client_id"])
+    else:
+        # the Studio already has its id: say it failed the way ComfyUI says it, over the live connection
+        err = d.get("error") or {}
+        ne = d.get("node_errors") or {}
+        first = next(iter(ne.values()), {}) if isinstance(ne, dict) else {}
+        await _fail(j, (err.get("message") or "") + (" — " + "; ".join(f"{e.get('message')} {e.get('details', '')}" for e in first.get("errors", [])) if first else ""),
+                    err.get("type", "prompt_error"))
+
+
+def _order() -> list:
+    return sorted(held, key=lambda h: (RANK.get(h["kind"], 1), not h["front"], h["number"]))
+
+
 async def _dispatch_held():
     while held and not ray_pid["id"]:
-        j = held[0]
-        if j["ray"] and RAY_STATE["broken"]:
-            held.pop(0)
-            await tell(j["client_id"], {"type": "execution_error", "data": {"prompt_id": j["pid"], "node_type": "Raylight",
-                "exception_message": f"Splitting videos across cards is off for this rental ({RAY_STATE['broken']}). Press Make video again: it runs on one card.",
-                "exception_type": "RaylightOff", "traceback": []}})
-            continue
-        if j["ray"]:
-            if any(load(i) for i in range(len(BACKENDS))): return
-            # every per-card ComfyUI gives its card's memory back, so Raylight's workers fit
-            for b in BACKENDS:
-                try: await SESSION["s"].post(f"{b}/free", json={"unload_models": True, "free_memory": True})
-                except Exception: pass  # noqa: BLE001
-            await asyncio.sleep(2)
-            target = -1 if RAY else 0
-        else:
-            target = pick(j["body"]["prompt"])
-        kinds[j["pid"]] = kind_of(j["body"]["prompt"])
-        if j not in held: continue  # taken out of the line while the cards were being freed
-        held.remove(j)
-        st, d = await send(target, j["body"])
-        if st == 200:
-            owner[j["pid"]] = target
-            if target >= 0: busy[target].add(j["pid"])
-            if j["ray"]: ray_pid.update(id=j["pid"], at=time.time(), client=j["client_id"])
-        else:
-            # the Studio already has its id: say it failed the way ComfyUI says it, over the live connection
-            err = d.get("error") or {}
-            ne = d.get("node_errors") or {}
-            first = next(iter(ne.values()), {}) if isinstance(ne, dict) else {}
-            await tell(j["client_id"], {"type": "execution_error", "data": {"prompt_id": j["pid"], "node_type": first.get("class_type", ""),
-                "exception_message": (err.get("message") or "") + (" — " + "; ".join(f"{e.get('message')} {e.get('details', '')}" for e in first.get("errors", [])) if first else ""),
-                "exception_type": err.get("type", "prompt_error"), "traceback": []}})
+        moved = False
+        ray_waiting = any(h["ray"] for h in held)
+        for j in _order():
+            if j["ray"]:
+                if RAY_STATE["broken"]:
+                    held.remove(j); moved = True
+                    await _fail(j, f"Splitting videos across cards is off for this rental ({RAY_STATE['broken']}). Press Make video again: it runs on one card.", "RaylightOff")
+                    break
+                if any(load(i) for i in range(len(BACKENDS))): continue  # waits for every card to be free
+                # every per-card ComfyUI gives its card's memory back, so Raylight's workers fit
+                for b in BACKENDS:
+                    try: await SESSION["s"].post(f"{b}/free", json={"unload_models": True, "free_memory": True})
+                    except Exception: pass  # noqa: BLE001
+                await asyncio.sleep(2)
+                if j not in held: moved = True; break  # taken out of the line while the cards were being freed
+                await _send_held(j, -1 if RAY else 0); moved = True
+                break
+            # a split video is waiting for every card: only writing still starts (it's quick), the rest waits behind it
+            if ray_waiting and j["kind"] != "writer": continue
+            t = free_card(j["kind"])
+            if t is None: continue
+            await _send_held(j, t); moved = True
+            break
+        if not moved: return
 
 
 async def prompt(req):
@@ -225,16 +258,29 @@ async def prompt(req):
     ray = is_ray(body["prompt"]) and bool(RAY)
     if ray and RAY_STATE["broken"]:
         return web.json_response({"error": {"type": "RaylightOff", "message": f"Splitting videos across cards is off for this rental ({RAY_STATE['broken']}) — make it again, it runs on one card"}, "node_errors": {}}, status=400)
-    if ray or ray_pid["id"] or held:
-        # waits in the router (for every card, or behind the Raylight job that has them)
-        held.append({"pid": pid, "body": body, "client_id": body.get("client_id"), "ray": ray, "number": number["n"]})
-        await dispatch_held()
-        return web.json_response({"prompt_id": pid, "number": number["n"], "node_errors": {}})
-    target = pick(body["prompt"])
-    kinds[pid] = kind_of(body["prompt"])
-    st, d = await send(target, body)
-    if st == 200: owner[pid] = target; busy[target].add(pid)
-    return web.json_response(d, status=st)
+    kind = kind_of(body["prompt"]); kinds[pid] = kind
+    if kind == "writer": LAST_PLAN["at"] = time.time()
+    front = bool(body.pop("front", False))
+    async with DISPATCH:
+        # a free card and nobody ahead of it: straight there (ComfyUI checks the job and answers, as it always did)
+        ahead = any(RANK.get(h["kind"], 1) <= RANK.get(kind, 1) or h["ray"] for h in held)
+        t = None if (ray or ray_pid["id"] or ahead) else free_card(kind)
+        if t is not None:
+            st, d = await send(t, body)
+            if st == 200: owner[pid] = t; busy[t].add(pid)
+            return web.json_response(d, status=st)
+        held.append({"pid": pid, "body": body, "client_id": body.get("client_id"), "ray": ray, "number": number["n"], "kind": kind, "front": front})
+    await dispatch_held()
+    return web.json_response({"prompt_id": pid, "number": number["n"], "node_errors": {}})
+
+
+async def mode(req):
+    """the Studio's Speed-ups: {keep_writer: bool}"""
+    try: d = await req.json()
+    except Exception: d = {}  # noqa: BLE001
+    if isinstance(d, dict) and "keep_writer" in d: MODE["keep_writer"] = bool(d["keep_writer"])
+    await dispatch_held()
+    return web.json_response({"ok": True, **MODE})
 
 
 async def queue(req):
@@ -320,7 +366,9 @@ async def system_stats(req):
 async def router_info(req):
     now = time.time()
     return web.json_response({"cards": len(BACKENDS), "raylight": bool(RAY) and not RAY_STATE["broken"], "raylight_off_why": RAY_STATE["broken"] or None,
-        "writer_card": len(BACKENDS) - 1 if ROUTE_WRITER and len(BACKENDS) > 1 else None,
+        "writer_card": writer_card(), "keep_writer": MODE["keep_writer"], "planning_now": planning_now(),
+        "card_jobs": [sorted(kinds.get(x, "?") for x in busy[i]) for i in range(len(BACKENDS))],
+        "line": [h["kind"] + (" (split)" if h["ray"] else "") for h in _order()],
         "loads": [load(i) for i in range(len(BACKENDS))], "up": [up(i) for i in range(len(BACKENDS))], "raylight_up": up(-1) if RAY else None,
         "held": len(held), "held_jobs": [{"pid": h["pid"], "ray": h["ray"]} for h in held],
         "raylight_running": ray_pid["id"], "raylight_running_s": int(now - ray_pid.get("at", now)) if ray_pid["id"] else None,
@@ -403,6 +451,7 @@ def main():
         app.router.add_get(f"{pre}/system_stats", system_stats)
         app.router.add_get(f"{pre}/ws", ws)
     app.router.add_get("/h3-router", router_info)
+    app.router.add_post("/h3-router", mode)
     app.router.add_route("*", "/{tail:.*}", proxy)
     print(f"comfy router: {len(BACKENDS)} ComfyUI(s) behind :{PORT} → {', '.join(BACKENDS)}", flush=True)
     web.run_app(app, host="127.0.0.1", port=PORT, print=None)

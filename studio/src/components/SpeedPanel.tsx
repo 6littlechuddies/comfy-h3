@@ -36,7 +36,7 @@ export function SpeedHost() {
             </label>
           ))}
         </div>
-        <p className="mt-3 text-[12px] text-dim">Cards: {cards.cards}{cards.cards > 1 ? ` — jobs go one per card${cards.raylight ? "; videos and single Krea 2 pictures can be split across them" : ""}` : ""}.</p>
+        <p className="mt-3 text-[12px] text-dim">Cards: {cards.cards}{cards.cards > 1 ? ` — one shared line: each card takes the next job when it's free, planning first, then pictures, then videos. The last card is the writer's.` : " — planning, pictures and videos take turns on it (planning goes first in the line)."}</p>
         {!allDefault && <button onClick={() => setSpeed(SPEED_DEFAULTS)} className="mt-3 text-[12.5px] text-muted underline hover:text-ink">Back to the defaults (all on)</button>}
       </div>
     </div>, document.body);

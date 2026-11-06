@@ -97,7 +97,7 @@ async def get_state(req):
 # when a machine happened to upload. A machine that restored an old copy uploads it with the old time, so it never wins.
 STAMP_FILE = os.path.join(STATE, "last_change.txt")
 WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models",
-              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed"}
+              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed", "plans"}
 
 
 def last_change() -> float:
@@ -3477,7 +3477,7 @@ async def debug_report_text(lines_per_log=80):
     add(_run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader"]) or "(no nvidia-smi)")
     # Speed-ups (⋯ menu): what's on, and what this rental can do — the first thing to check when a job fails
     add("\n== Speed-ups ==")
-    sp = {"videoTurbo": True, "extendTurbo": True, "fastAttn": True, "warmup": True, "splitVideos": False, **(_state_json("speed", {}) or {})}
+    sp = {"videoTurbo": True, "extendTurbo": True, "fastAttn": True, "warmup": True, "splitVideos": False, "keepWriter": False, **(_state_json("speed", {}) or {})}
     add("  " + "  ".join(f"{k}={'on' if v else 'off'}" for k, v in sp.items()) + f"  warmup_env={os.environ.get('H3_WARMUP', '1')}  warmup_done={WARM.get('state')}")
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
@@ -3489,6 +3489,8 @@ async def debug_report_text(lines_per_log=80):
                 async with s.get(f"{COMFY}/h3-router") as r: rt = await r.json()
                 add(f"  cards: {n} · loads {rt.get('loads')} · answering {rt.get('up')} · Raylight {'on' if rt.get('raylight') else 'OFF (' + str(rt.get('raylight_off_why')) + ')'}"
                     f"{' · answering' if rt.get('raylight_up') else ' · NOT answering' if rt.get('raylight_up') is False else ''}")
+                add(f"  on each card: {rt.get('card_jobs')} · waiting in line: {rt.get('line')} · writer's card {rt.get('writer_card')}"
+                    f" ({'kept for planning' if rt.get('keep_writer') else 'adaptive'}, planning now: {rt.get('planning_now')})")
                 add(f"  router holding {rt.get('held')} job(s) {rt.get('held_jobs')} · split video running: {rt.get('raylight_running') or 'none'}"
                     f"{' for ' + str(rt.get('raylight_running_s')) + ' s' if rt.get('raylight_running') else ''} · cards idle for {rt.get('cards_idle_s')} s")
             else: add("  cards: 1")
@@ -3608,7 +3610,7 @@ def _build_export(want: set, results: bool = True) -> tuple[str, str]:
     with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("characters.json", json.dumps({"h3_characters": 1, "characters": chars}, indent=1))
         z.writestr("scenes.json", json.dumps(scenes))
-        for name in ("presets", "scene_presets", "lora_sets", "my_recipes"):
+        for name in ("presets", "scene_presets", "lora_sets", "my_recipes", "plans"):
             d = _state_json(name)
             if d is not None: z.writestr(f"{name}.json", json.dumps(d))
         if not want:  # everything: your preferences come along
@@ -3868,7 +3870,7 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
     if isinstance(sc, list) and sc:
         have = _state_json("scenes", []) or []
         got["scenes"] = _merge_list(have, sc); _state_write("scenes", have)
-    for name in ("presets", "scene_presets", "lora_sets", "my_recipes", "favorites", "styles"):
+    for name in ("presets", "scene_presets", "lora_sets", "my_recipes", "favorites", "styles", "plans"):
         d = rd(f"{name}.json") if f"{name}.json" in names else None
         if d is None: continue
         cur = _state_json(name)

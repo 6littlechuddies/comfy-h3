@@ -202,6 +202,9 @@ export default function AnimateTab() {
     const parsed = parseTimeline(raw, a.seconds);
     const text = parsed.cuts.some((c) => c.text) ? toPrompt(parsed) : raw.trim();
     setPlan({ from: a.prompt, to: text });
+    // into the planned-prompts history of each character in it (Characters tab → Planned prompts)
+    import("../lib/plans").then(({ addPlan }) => addPlan({ chars: [...new Set(rs.map((r) => r.charId).filter((x): x is string => !!x))], project: useCharacters.getState().sel,
+      idea: a.prompt, seconds: a.seconds, mode: a.mode, cuts: 0, camera: "auto", text, sent: Date.now() })).catch(() => {});
     return text;
   };
   // Swap the person (H3 Relay's Character Swap): the video is the base, the person in it becomes the character in the pictures
@@ -228,6 +231,8 @@ export default function AnimateTab() {
     setTimeout(() => setBusy(false), 600); // keep the button free: you can line up more while it plans
     try {
       const prompt = await planFirst();
+      // a video made from a saved plan: counted on it
+      import("../lib/plans").then(({ planOfText, updatePlan }) => { const pl = planOfText(prompt); if (pl) updatePlan(pl.id, { made: (pl.made ?? 0) + (a.takes === 2 ? 2 : 1) }); }).catch(() => {});
       const optsP = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}) => opts(seed, turbo, { prompt, ...over });
       if (a.takes === 2) {
         for (let i = 0; i < 2; i++) {

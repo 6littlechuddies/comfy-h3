@@ -15,13 +15,17 @@ export interface Speed {
   /** 2+ cards: split each H3 video across every card (Raylight). Off = one card renders while the writer's card keeps
    *  planning — more videos per hour, and nothing waits behind a video */
   splitVideos: boolean;
+  /** 2+ cards: never render videos on the writer's card, so a plan always starts the instant you ask. Off (adaptive):
+   *  that card helps render while you're not planning, and plans still go first in the line */
+  keepWriter: boolean;
 }
-export const SPEED_DEFAULTS: Speed = { videoTurbo: true, extendTurbo: true, fastAttn: true, warmup: true, splitVideos: false };
+export const SPEED_DEFAULTS: Speed = { videoTurbo: true, extendTurbo: true, fastAttn: true, warmup: true, splitVideos: false, keepWriter: false };
 export const SPEED_INFO: Record<keyof Speed, { title: string; sub: string }> = {
   videoTurbo: { title: "Faster video steps", sub: "Image → video, First → last and Loop in 8 steps (the H3 turbo LoRA) — about 2–3× faster, a little less fine detail" },
   extendTurbo: { title: "Faster Extend", sub: "Qwen Image 2.1's turbo LoRA: 8 steps per stage instead of 25 — about 3× faster" },
   fastAttn: { title: "Faster attention", sub: "ComfyUI's INT8 attention for H3 and Krea 2 (RTX cards with it) — about 1.3–2× for videos, less for pictures" },
   warmup: { title: "Warm up at start", sub: "Loads Krea 2 into the card when it's downloaded, so the first picture doesn't wait 30–60 s" },
+  keepWriter: { title: "Always keep a card for planning", sub: "Rentals with 2+ cards: plans always start instantly, but that card never renders videos. Off: it helps render while you're not planning, and your next plan goes first in the line" },
   splitVideos: { title: "Split each video across all cards", sub: "Rentals with 2+ cards: one video renders faster, but nothing else (planning, pictures) can run until it's done. Off: one card renders, the other keeps writing your next prompts" },
 };
 
@@ -41,8 +45,9 @@ comboOptions("ModelAttentionBackend", "attention").then((o) => useSpeed.setState
 
 export function setSpeed(p: Partial<Speed>) {
   useSpeed.setState(p);
-  const { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos } = useSpeed.getState();
-  saveState("speed", { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos }).catch(() => {});
+  const { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos, keepWriter } = useSpeed.getState();
+  saveState("speed", { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos, keepWriter }).catch(() => {});
+  if ("keepWriter" in p) tellRouter();
 }
 export const speedOn = (k: keyof Speed) => useSpeed.getState()[k] !== false;
 /** INT8 attention goes into a graph only when it's on and this ComfyUI has it */
@@ -55,4 +60,9 @@ export function speedLine(kind: "video" | "picture" | "extend"): string {
   if (kind === "extend" && speedOn("extendTurbo")) on.push(SPEED_INFO.extendTurbo.title);
   if ((kind === "video" || kind === "picture") && fastAttnOn()) on.push(SPEED_INFO.fastAttn.title);
   return on.join(", ");
+}
+
+/** how the cards are shared (2+ cards): the router keeps it in memory, so it's told at start, on change and every minute */
+export function tellRouter() {
+  fetch("/h3-router", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_writer: useSpeed.getState().keepWriter }) }).catch(() => {});
 }

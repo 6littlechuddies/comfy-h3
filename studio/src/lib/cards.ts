@@ -1,7 +1,7 @@
 // How many graphics cards this rental works with (start.sh runs one ComfyUI per card behind a router when there are several)
 // and whether H3 videos can be split across them with Raylight. One card: { cards: 1 } and nothing changes.
 import { create } from "zustand";
-import { useSpeed } from "./speed";
+import { tellRouter, useSpeed } from "./speed";
 
 export const useCards = create<{ cards: number; raylight: boolean }>(() => ({ cards: 1, raylight: false }));
 async function check() {
@@ -10,6 +10,7 @@ async function check() {
     if (!r.ok) return;
     const d = await r.json();
     if (typeof d?.cards === "number") useCards.setState({ cards: d.cards, raylight: !!d.raylight });
+    if (d?.cards > 1 && useSpeed.getState().loaded && d.keep_writer !== useSpeed.getState().keepWriter) tellRouter();
   } catch { /* one card: there's no router */ }
 }
 check();
