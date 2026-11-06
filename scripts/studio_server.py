@@ -3477,7 +3477,7 @@ async def debug_report_text(lines_per_log=80):
     add(_run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader"]) or "(no nvidia-smi)")
     # Speed-ups (⋯ menu): what's on, and what this rental can do — the first thing to check when a job fails
     add("\n== Speed-ups ==")
-    sp = {"videoTurbo": True, "extendTurbo": True, "fastAttn": True, "warmup": True, **(_state_json("speed", {}) or {})}
+    sp = {"videoTurbo": True, "extendTurbo": True, "fastAttn": True, "warmup": True, "splitVideos": False, **(_state_json("speed", {}) or {})}
     add("  " + "  ".join(f"{k}={'on' if v else 'off'}" for k, v in sp.items()) + f"  warmup_env={os.environ.get('H3_WARMUP', '1')}  warmup_done={WARM.get('state')}")
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:

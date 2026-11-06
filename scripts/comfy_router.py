@@ -22,6 +22,7 @@ RAY = os.environ.get("RAY_BACKEND", "").strip().rstrip("/")
 HOP = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "upgrade", "proxy-connection", "te", "trailer"}
 
 owner: dict[str, int] = {}             # prompt_id → backend index
+kinds: dict[str, str] = {}             # prompt_id → "video" / "writer" / "other"
 busy: dict[int, set] = {i: set() for i in range(len(BACKENDS))}  # running + waiting prompt ids per backend (from /queue polls)
 held: list[dict] = []                  # jobs waiting in the router: {"pid", "body", "client_id", "ray", "number"}
 ray_pid: dict = {"id": None}           # the Raylight job that has every card right now
@@ -75,6 +76,35 @@ async def give_up_ray(why: str):
 
 def is_ray(graph: dict) -> bool:
     return any(str((n or {}).get("class_type", "")).startswith(("Ray", "XFuser")) for n in (graph or {}).values())
+
+
+# With 2+ cards the last one is the writer's: prompt writing / video planning always goes there and videos never do, so you
+# can plan the next video while one renders — and neither model has to be swapped out of a card for the other.
+# ROUTE_WRITER=0: every job just goes to the least busy card.
+ROUTE_WRITER = os.environ.get("ROUTE_WRITER", "1") != "0"
+
+
+def kind_of(graph: dict) -> str:
+    types = {str((n or {}).get("class_type", "")) for n in (graph or {}).values()}
+    if any(t.startswith(("MiniMaxH3", "H3Relay")) for t in types): return "video"
+    if "LLMTextProcessor" in types: return "writer"
+    return "other"
+
+
+def pick(graph: dict) -> int:
+    """which card a job goes to: the writer's card for writing, the other cards for videos, the least busy for the rest"""
+    every = list(range(len(BACKENDS)))
+    if ROUTE_WRITER and len(BACKENDS) > 1:
+        w = len(BACKENDS) - 1
+        k = kind_of(graph)
+        if k == "writer" and up(w): return w
+        if k == "video":
+            rest = [i for i in every if i != w and up(i)]
+            if rest: every = rest
+        elif k == "other":
+            # pictures: a card that isn't rendering a video (they take minutes), then the least busy, the writer's last
+            return min(every, key=lambda i: (not up(i), any(kinds.get(x) == "video" for x in busy[i]), load(i), i == w, i))
+    return min(every, key=lambda i: (not up(i), load(i), i))
 
 
 def load(i: int) -> int:
@@ -168,7 +198,8 @@ async def _dispatch_held():
             await asyncio.sleep(2)
             target = -1 if RAY else 0
         else:
-            target = min(range(len(BACKENDS)), key=lambda i: (not up(i), load(i), i))
+            target = pick(j["body"]["prompt"])
+        kinds[j["pid"]] = kind_of(j["body"]["prompt"])
         if j not in held: continue  # taken out of the line while the cards were being freed
         held.remove(j)
         st, d = await send(target, j["body"])
@@ -199,7 +230,8 @@ async def prompt(req):
         held.append({"pid": pid, "body": body, "client_id": body.get("client_id"), "ray": ray, "number": number["n"]})
         await dispatch_held()
         return web.json_response({"prompt_id": pid, "number": number["n"], "node_errors": {}})
-    target = min(range(len(BACKENDS)), key=lambda i: (not up(i), load(i), i))
+    target = pick(body["prompt"])
+    kinds[pid] = kind_of(body["prompt"])
     st, d = await send(target, body)
     if st == 200: owner[pid] = target; busy[target].add(pid)
     return web.json_response(d, status=st)
@@ -288,6 +320,7 @@ async def system_stats(req):
 async def router_info(req):
     now = time.time()
     return web.json_response({"cards": len(BACKENDS), "raylight": bool(RAY) and not RAY_STATE["broken"], "raylight_off_why": RAY_STATE["broken"] or None,
+        "writer_card": len(BACKENDS) - 1 if ROUTE_WRITER and len(BACKENDS) > 1 else None,
         "loads": [load(i) for i in range(len(BACKENDS))], "up": [up(i) for i in range(len(BACKENDS))], "raylight_up": up(-1) if RAY else None,
         "held": len(held), "held_jobs": [{"pid": h["pid"], "ray": h["ray"]} for h in held],
         "raylight_running": ray_pid["id"], "raylight_running_s": int(now - ray_pid.get("at", now)) if ray_pid["id"] else None,

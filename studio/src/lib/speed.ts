@@ -12,13 +12,17 @@ export interface Speed {
   fastAttn: boolean;
   /** load Krea 2 into the card as soon as it's downloaded, so the first picture doesn't wait for it */
   warmup: boolean;
+  /** 2+ cards: split each H3 video across every card (Raylight). Off = one card renders while the writer's card keeps
+   *  planning — more videos per hour, and nothing waits behind a video */
+  splitVideos: boolean;
 }
-export const SPEED_DEFAULTS: Speed = { videoTurbo: true, extendTurbo: true, fastAttn: true, warmup: true };
+export const SPEED_DEFAULTS: Speed = { videoTurbo: true, extendTurbo: true, fastAttn: true, warmup: true, splitVideos: false };
 export const SPEED_INFO: Record<keyof Speed, { title: string; sub: string }> = {
   videoTurbo: { title: "Faster video steps", sub: "Image → video, First → last and Loop in 8 steps (the H3 turbo LoRA) — about 2–3× faster, a little less fine detail" },
   extendTurbo: { title: "Faster Extend", sub: "Qwen Image 2.1's turbo LoRA: 8 steps per stage instead of 25 — about 3× faster" },
   fastAttn: { title: "Faster attention", sub: "ComfyUI's INT8 attention for H3 and Krea 2 (RTX cards with it) — about 1.3–2× for videos, less for pictures" },
   warmup: { title: "Warm up at start", sub: "Loads Krea 2 into the card when it's downloaded, so the first picture doesn't wait 30–60 s" },
+  splitVideos: { title: "Split each video across all cards", sub: "Rentals with 2+ cards: one video renders faster, but nothing else (planning, pictures) can run until it's done. Off: one card renders, the other keeps writing your next prompts" },
 };
 
 export const useSpeed = create<Speed & { loaded: boolean; kitchen: boolean | null }>(() => ({ ...SPEED_DEFAULTS, loaded: false, kitchen: null }));
@@ -37,8 +41,8 @@ comboOptions("ModelAttentionBackend", "attention").then((o) => useSpeed.setState
 
 export function setSpeed(p: Partial<Speed>) {
   useSpeed.setState(p);
-  const { videoTurbo, extendTurbo, fastAttn, warmup } = useSpeed.getState();
-  saveState("speed", { videoTurbo, extendTurbo, fastAttn, warmup }).catch(() => {});
+  const { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos } = useSpeed.getState();
+  saveState("speed", { videoTurbo, extendTurbo, fastAttn, warmup, splitVideos }).catch(() => {});
 }
 export const speedOn = (k: keyof Speed) => useSpeed.getState()[k] !== false;
 /** INT8 attention goes into a graph only when it's on and this ComfyUI has it */

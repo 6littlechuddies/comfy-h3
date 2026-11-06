@@ -194,11 +194,13 @@ async function collect(id: string) {
   const job = find(id);
   if (!job || job.status === "cancelled" || collected.has(id)) return;
   collected.add(id);
-  let h = null;
+  let h = null, answered = 0;
   for (let i = 0; i < 5 && !h; i++) {
-    h = await history(id).catch(() => null);
+    h = await history(id).then((x) => { answered++; return x; }).catch(() => null);
     if (!h) await new Promise((r) => setTimeout(r, 400));
   }
+  // ComfyUI didn't answer at all (the connection dropped): try again on the next check instead of guessing
+  if (!h && !answered) { collected.delete(id); return; }
   const outputs: Output[] = [];
   const texts: Record<string, string> = {};
   for (const [nid, out] of Object.entries(h?.outputs ?? {})) {
@@ -210,8 +212,12 @@ async function collect(id: string) {
     }
     if (out.text?.length) texts[title] = out.text.join("\n");
   }
-  const errMsg = h?.status?.messages?.find((m) => m[0] === "execution_error")?.[1]?.exception_message as string | undefined;
-  const failed = h?.status?.status_str === "error";
+  // not in the line and no record of it: the ComfyUI it was on restarted (a crash, or the rental was restarted) — say so,
+  // instead of calling it done with nothing in it
+  const lost = !h;
+  const errMsg = lost ? "Lost: the card's ComfyUI restarted before it finished (a crash or a restart). Run it again."
+    : h?.status?.messages?.find((m) => m[0] === "execution_error")?.[1]?.exception_message as string | undefined;
+  const failed = lost || h?.status?.status_str === "error";
   const endedAt = Date.now();
   patch(id, { status: failed ? "error" : "done", outputs, texts, endedAt, error: failed ? cleanError(errMsg) : undefined, preview: undefined });
   if (job.preview) URL.revokeObjectURL(job.preview);

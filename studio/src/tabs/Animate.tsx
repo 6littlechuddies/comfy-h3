@@ -22,7 +22,7 @@ import { waitForJob } from "../lib/jobs";
 import { DEFAULTS } from "../lib/settings";
 import { parseTimeline, toPrompt } from "../lib/timeline";
 import { tagsFor } from "../lib/work";
-import { rayCards, useCards } from "../lib/cards";
+import { rayVideoCards, useCards } from "../lib/cards";
 import { useSpeed } from "../lib/speed";
 import { h3ErosOn } from "../lib/models";
 import { stopMessage } from "../lib/adult";
@@ -122,7 +122,8 @@ export default function AnimateTab() {
   const ref = a.mode === "ref";
   const swap = a.mode === "swap";
   useCards((c) => c.cards); // re-render when the card count arrives
-  const split = rayCards();
+  useSpeed((st) => st.splitVideos);
+  const split = rayVideoCards();
   // the first "Character swap" button left its LoRA (and prompt) in References mode, with no off switch: take it out once —
   // swapping is its own video type now and doesn't use this list
   useEffect(() => {
@@ -157,7 +158,7 @@ export default function AnimateTab() {
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
     ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
-    refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayCards(),
+    refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
     images: ref ? refs.filter((r) => r.media.kind === "image").map((r) => r.media.name) : (frames.filter(Boolean) as Media[]).map((m) => m.name),
     videos: ref ? refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
     audios: ref ? refs.filter((r) => r.media.kind === "audio").map((r) => r.media.name) : [],
