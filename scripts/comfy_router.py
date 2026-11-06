@@ -426,9 +426,12 @@ async def proxy(req, body_override=None):
     async with SESSION["s"].request(req.method, url, headers=headers, data=data, allow_redirects=False) as r:
         resp = web.StreamResponse(status=r.status, headers={k: v for k, v in r.headers.items() if k.lower() not in HOP})
         await resp.prepare(req)
-        async for chunk in r.content.iter_chunked(1 << 16):
-            await resp.write(chunk)
-        await resp.write_eof()
+        try:
+            async for chunk in r.content.iter_chunked(1 << 16):
+                await resp.write(chunk)
+            await resp.write_eof()
+        except (ConnectionError, aiohttp.ClientError):
+            pass  # the browser stopped loading it (a video preview skipped or closed): nothing to report
         return resp
 
 
