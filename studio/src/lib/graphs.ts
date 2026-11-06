@@ -635,6 +635,8 @@ export interface VideoRef { file: string; start: number; end: number; useSound: 
 export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   mode: "ref" | "i2v" | "loop" | "fl";
   prompt: string;
+  /** keep out of the video: H3 (CFG-distilled) has no negative prompt — it gets a plain "Avoid: …" line its text model reads */
+  avoid?: string;
   images: string[]; // ref mode: <Picture n>; i2v/loop: [first]; fl: [first, last]
   videos: VideoRef[];
   audios: string[];
@@ -648,6 +650,12 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   prefix: string;
   /** split across this many cards with Raylight (sequence parallel); 1 or unset = one card, as always */
   ray?: number;
+}
+
+/** "Avoid: text, watermarks." after the prompt: H3's text model (Qwen3-VL) reads it as plain language */
+export function withAvoid(prompt: string, avoid?: string): string {
+  const a = (avoid ?? "").replace(/\s+/g, " ").replace(/^[\s,;.]+|[\s,;.]+$/g, "");
+  return a ? `${prompt.trimEnd()}\n\nAvoid: ${a}.` : prompt;
 }
 
 export function buildAnimate(p: AnimateOpts): ApiGraph {
@@ -684,7 +692,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   let cond: string;
   if (ref) {
     const inputs: Inputs = {
-      clip: o(clip), prompt: withTriggers(p.prompt, p.loras), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
+      clip: o(clip), prompt: withAvoid(withTriggers(p.prompt, p.loras), p.avoid), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
       vae: o(vae), audio_vae: o(avae),
     };
     p.images.slice(0, 9).forEach((f, i) => (inputs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
@@ -705,7 +713,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     const lastFile = p.mode === "loop" ? p.images[0] : p.mode === "fl" ? p.images[1] : undefined;
     const last = lastFile ? (lastFile === p.images[0] && first ? first : g.add("LoadImage", { image: lastFile })) : null;
     cond = g.add("MiniMaxH3ImageToVideo", {
-      clip: o(clip), vae: o(vae), prompt: withTriggers(p.prompt, p.loras), width: p.width, height: p.height, length,
+      clip: o(clip), vae: o(vae), prompt: withAvoid(withTriggers(p.prompt, p.loras), p.avoid), width: p.width, height: p.height, length,
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
   }

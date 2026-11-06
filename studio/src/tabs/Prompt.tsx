@@ -23,6 +23,7 @@ import { Moments, TimelineBar } from "../components/TimelineView";
 import { copyText } from "../lib/copy";
 import { addPlan, planOfText, updatePlan, usePlans, type Plan } from "../lib/plans";
 import { PlanHistory } from "../components/PlanHistory";
+import { AvoidLine, withAvoidNote } from "../components/AvoidLine";
 import { Modal } from "../components/Dialogs";
 
 const MODE_LABEL = { references: "References", "first-last": "First → last frame", image: "Image → video", text: "Text only" } as const;
@@ -122,7 +123,7 @@ export default function PromptTab() {
         pictures: refs.filter((r) => r.media.kind === "image").map((r) => ({ file: r.media.name, tag: tags[r.id], label: r.label })),
         videos: refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, tag: tags[r.id], label: r.label, start: r.start, end: r.end, useSound: r.useSound })),
         audios: refs.filter((r) => r.media.kind === "audio").map((r) => ({ tag: tags[r.id], label: r.label })),
-        characters: inUse, idea: p.idea, seconds: p.seconds, cuts: p.cuts, camera: p.camera, mode: MODE_LABEL[p.mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
+        characters: inUse, idea: withAvoidNote(p.idea, p.avoid), seconds: p.seconds, cuts: p.cuts, camera: p.camera, mode: MODE_LABEL[p.mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
       });
       const charIds = [...new Set(refs.map((r) => r.charId).filter((x): x is string => !!x))];
       await run("prompt", "Writing the timeline", graph, etaKey, { seconds: p.seconds,
@@ -141,7 +142,7 @@ export default function PromptTab() {
   const sendToAnimate = () => {
     const mode = p.mode === "references" ? "ref" : p.mode === "first-last" ? "fl" : p.mode === "image" ? "i2v" : "ref";
     setWork({ animateRefs: refs.map((r) => ({ ...r })) });
-    useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode });
+    useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode, avoid: p.avoid ?? "" });
     setWork({ sentPlan: finalText });
     const pl = planOfText(finalText); if (pl) updatePlan(pl.id, { sent: Date.now() });
     useSettings.getState().setTab("animate");
@@ -184,6 +185,7 @@ export default function PromptTab() {
       bar={
         <div className="relative">
           <PromptBar value={p.idea} onChange={(v) => set({ idea: v })} chips={chips} minRows={2} rewrite="prompt" mention={mention}
+            below={<AvoidLine value={p.avoid ?? ""} onChange={(v) => set({ avoid: v })} />}
             placeholder={videos.length ? "Optional with a clip — leave empty to recreate the clip, press “Read the clip” to have it written for you, or add changes (e.g. “on a rainy neon street, she winks at the end”)." : "What happens? e.g. “She dances like the clip on the rainy street. Around 6 seconds she stops, looks at the camera and says my voice line.”"}
             action={<>{videos.length > 0 && <Btn small onClick={readClip} disabled={!!readWhy} why={readWhy} title="The local model watches the clip and writes what happens into this box"><Icon name="film" size={14} /> Read the clip</Btn>}<Talk onText={(txt) => set({ idea: (useSettings.getState().s.prompt.idea + " " + txt).trim() })} />
               <GoButton onClick={write} disabled={!!why} why={why}>{t ? "Write again" : "Write timeline"} <EtaText k={etaKey} prefix="· " /></GoButton></>} />

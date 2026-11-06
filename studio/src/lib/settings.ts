@@ -86,6 +86,8 @@ export function editCheckpoint(e: EditS, create: CreateS, engine: EditEngine = e
 export interface PromptS {
   mode: "references" | "first-last" | "image" | "text";
   idea: string; seconds: number; cuts: number; camera: string; guide: string; style: string;
+  /** what to keep out of the video — the planner writes around it, and it goes along to Animate */
+  avoid?: string;
   /** which model plans videos (Animate + Plan a video): Fable 9B (fast) or Qwen3.8 27B (better, needs its download) */
   writer?: "small" | "big";
 }
@@ -97,6 +99,9 @@ export interface AnimateS {
   turbo: boolean; takes: 1 | 2; loras: LoraPick[]; refImageSize: "match" | "max"; lowMemDecode: boolean; adv: Adv;
   /** plain words: the video prompt writer (Plan a video) plans it second by second first, with your references (default on) */
   plan?: boolean;
+  /** what to keep out of the video ("text, watermark, extra fingers") — H3 has no negative prompt, so the planner writes
+   *  around it and H3 gets a plain "Avoid:" line */
+  avoid?: string;
 }
 export interface FinishS {
   transition: "cut" | "crossfade" | "black" | "white" | "slide" | "wipe"; transitionDur: number;
