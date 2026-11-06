@@ -11,7 +11,7 @@ import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
 import { LIMITS, makeRef, useAnimateUndo, useWork, type AnimateState } from "../lib/work";
 import { sendTo, usePrimaryAction, useHandoffInto } from "../App";
-import { AvoidLine, withAvoidNote } from "../components/AvoidLine";
+import { AvoidLine, MUSIC_OPTS, withAvoidNote } from "../components/AvoidLine";
 import { Advanced, Btn, Check, EtaText, H1, Icon, Label, LoraList, Panel, PresetBar, Seg, Slider, Slot, TextArea } from "../components/ui";
 import { openImageImport } from "../components/ImageImport";
 import { RefList } from "../components/RefList";
@@ -158,7 +158,7 @@ export default function AnimateTab() {
   const etaKey = `animate:${a.mode}:${turboOk && (a.turbo || a.takes === 2) ? "turbo" : "full"}:${a.seconds}s:${a.mp}`;
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
-    ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, avoid: a.avoid, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
+    ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, avoid: a.avoid, music: a.music, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
     refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
     images: ref ? refs.filter((r) => r.media.kind === "image").map((r) => r.media.name) : (frames.filter(Boolean) as Media[]).map((m) => m.name),
     videos: ref ? refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
@@ -181,7 +181,7 @@ export default function AnimateTab() {
   /** plain words → the Plan-a-video writer, with your references and characters → an H3 timeline (what goes to the video) */
   const planFirst = async (force = false): Promise<string> => {
     if (!planning) return a.prompt;
-    if (!force && plan && plan.from === a.prompt + "\u0000" + (a.avoid ?? "")) return plan.to;
+    if (!force && plan && plan.from === a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score")) return plan.to;
     const rs = ref ? refs : [];
     const tags = tagsFor(rs);
     const modeLabel = a.mode === "ref" ? "References" : a.mode === "fl" ? "First → last frame" : "Image → video";
@@ -191,7 +191,7 @@ export default function AnimateTab() {
         ...(!ref ? (frames.filter(Boolean) as Media[]).map((m, i) => ({ file: m.name, tag: `<Picture ${i + 1}>`, label: i === 0 ? "the first frame" : "the last frame" })) : [])],
       videos: rs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, tag: tags[r.id], label: r.label, start: r.start, end: r.end, useSound: r.useSound })),
       audios: rs.filter((r) => r.media.kind === "audio").map((r) => ({ tag: tags[r.id], label: r.label })),
-      characters: charactersIn(rs, tags, useCharacters.getState().list), idea: withAvoidNote(a.prompt, a.avoid), seconds: a.seconds, cuts: 0, camera: "auto", mode: modeLabel,
+      characters: charactersIn(rs, tags, useCharacters.getState().list), idea: withAvoidNote(a.prompt, a.avoid), music: a.music, seconds: a.seconds, cuts: 0, camera: "auto", mode: modeLabel,
       guide: pw.guide, writer: pw.writer, seed: newSeed(),
     });
     const job = await run("animate", "Planning the video from your words", graph, `prompt:${rs.filter((r) => r.media.kind === "video").length}v`, { quiet: true, front: true });
@@ -202,7 +202,7 @@ export default function AnimateTab() {
     if (raw.includes(MINOR_FLAG)) throw new Error(stopMessage([a.prompt]));
     const parsed = parseTimeline(raw, a.seconds);
     const text = parsed.cuts.some((c) => c.text) ? toPrompt(parsed) : raw.trim();
-    setPlan({ from: a.prompt + "\u0000" + (a.avoid ?? ""), to: text });
+    setPlan({ from: a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score"), to: text });
     // into the planned-prompts history of each character in it (Characters tab → Planned prompts)
     import("../lib/plans").then(({ addPlan }) => addPlan({ chars: [...new Set(rs.map((r) => r.charId).filter((x): x is string => !!x))], project: useCharacters.getState().sel,
       idea: a.prompt, seconds: a.seconds, mode: a.mode, cuts: 0, camera: "auto", text, sent: Date.now() })).catch(() => {});
@@ -290,6 +290,7 @@ export default function AnimateTab() {
       </>}
       {!swap && <><Chip title="Length" value={a.seconds} onChange={(v) => set({ seconds: v })} options={Array.from({ length: 14 }, (_, i) => i + 2).map((n) => ({ value: n, label: `${n} s` }))} />
       <Chip title="Shape" value={a.aspect} onChange={(v) => set({ aspect: v })} options={[{ value: "auto", label: ratio ? `Match the picture (${ratioLabel(ratio)})` : "Match the picture" }, { value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }, { value: "1:1", label: "1:1" }]} />
+      <Chip title="Music" value={a.music ?? "score"} onChange={(v) => set({ music: v })} options={MUSIC_OPTS} />
       <Chip title="Size" value={a.mp} onChange={(v) => set({ mp: v })} options={[{ value: 0.4, label: "Draft 0.4 MP" }, { value: 0.6, label: "Good 0.6 MP" }, { value: 0.98, label: "Full 1 MP" }, { value: 1.2, label: "1.2 MP" }, { value: 1.5, label: "1.5 MP" }, { value: 2, label: "2 MP" },
         ...([0.4, 0.6, 0.98, 1.2, 1.5, 2].includes(a.mp) ? [] : [{ value: a.mp, label: `${a.mp} MP` }])]} />
       {!isPlan(a.prompt) && <Chip title="Plain words" value={a.plan === false ? 0 : 1} onChange={(v) => set({ plan: v === 1 })} options={[{ value: 1, label: "Writer plans it (recommended)" }, { value: 0, label: "Send my words as typed" }]} />}
@@ -319,7 +320,7 @@ export default function AnimateTab() {
         placeholder={swap ? "Optional notes — e.g. “keep her sunglasses on”, “his jacket stays open”. Leave empty to keep everything from the pictures." : "Say what happens in plain words — the writer plans it second by second with your references and characters (like Plan a video)…"}
         below={<>
           {!swap && <AvoidLine value={a.avoid ?? ""} onChange={(v) => set({ avoid: v })} />}
-          {planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt + "\u0000" + (a.avoid ?? "")} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
+          {planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score")} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
         </>}
         action={<GoButton onClick={go} disabled={!!why} why={why}>{a.takes === 2 ? "Make 2" : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
       drawer={<>

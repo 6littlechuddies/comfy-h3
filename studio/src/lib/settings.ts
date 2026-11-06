@@ -88,6 +88,9 @@ export interface PromptS {
   idea: string; seconds: number; cuts: number; camera: string; guide: string; style: string;
   /** what to keep out of the video — the planner writes around it, and it goes along to Animate */
   avoid?: string;
+  /** music in the plan: a non-diegetic score (default — background music only the viewer hears), only sounds that
+   *  belong in the scene, or none */
+  music?: Music;
   /** which model plans videos (Animate + Plan a video): Fable 9B (fast) or Qwen3.8 27B (better, needs its download) */
   writer?: "small" | "big";
 }
@@ -102,7 +105,10 @@ export interface AnimateS {
   /** what to keep out of the video ("text, watermark, extra fingers") — H3 has no negative prompt, so the planner writes
    *  around it and H3 gets a plain "Avoid:" line */
   avoid?: string;
+  /** music: a non-diegetic score by default (see PromptS) */
+  music?: Music;
 }
+export type Music = "score" | "scene" | "none";
 export interface FinishS {
   transition: "cut" | "crossfade" | "black" | "white" | "slide" | "wipe"; transitionDur: number;
   ending: "once" | "boomerang" | "fade_start" | "fade_black"; fade: number;

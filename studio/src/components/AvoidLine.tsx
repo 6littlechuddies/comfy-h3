@@ -20,3 +20,10 @@ export function AvoidLine({ value, onChange }: { value: string; onChange: (v: st
     </label>
   );
 }
+
+/** the Music chip: a non-diegetic score is the default */
+export const MUSIC_OPTS: { value: "score" | "scene" | "none"; label: string; hint: string }[] = [
+  { value: "score", label: "Music: background score", hint: "Non-diegetic: music only the viewer hears, fitted to the action" },
+  { value: "scene", label: "Music: only in the scene", hint: "Just music that's playing in the scene (a radio, a band) — no score" },
+  { value: "none", label: "No music", hint: "Only the scene's own sounds: voices, footsteps, ambience" },
+];

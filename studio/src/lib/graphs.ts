@@ -637,6 +637,8 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   prompt: string;
   /** keep out of the video: H3 (CFG-distilled) has no negative prompt — it gets a plain "Avoid: …" line its text model reads */
   avoid?: string;
+  /** music when the prompt says nothing about it (a planned prompt has its own SOUND lines) */
+  music?: "score" | "scene" | "none";
   images: string[]; // ref mode: <Picture n>; i2v/loop: [first]; fl: [first, last]
   videos: VideoRef[];
   audios: string[];
@@ -692,7 +694,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   let cond: string;
   if (ref) {
     const inputs: Inputs = {
-      clip: o(clip), prompt: withAvoid(withTriggers(p.prompt, p.loras), p.avoid), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
+      clip: o(clip), prompt: withAvoid(withMusic(withTriggers(p.prompt, p.loras), p.music), p.avoid), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
       vae: o(vae), audio_vae: o(avae),
     };
     p.images.slice(0, 9).forEach((f, i) => (inputs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
@@ -713,7 +715,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     const lastFile = p.mode === "loop" ? p.images[0] : p.mode === "fl" ? p.images[1] : undefined;
     const last = lastFile ? (lastFile === p.images[0] && first ? first : g.add("LoadImage", { image: lastFile })) : null;
     cond = g.add("MiniMaxH3ImageToVideo", {
-      clip: o(clip), vae: o(vae), prompt: withAvoid(withTriggers(p.prompt, p.loras), p.avoid), width: p.width, height: p.height, length,
+      clip: o(clip), vae: o(vae), prompt: withAvoid(withMusic(withTriggers(p.prompt, p.loras), p.music), p.avoid), width: p.width, height: p.height, length,
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
   }
@@ -831,6 +833,30 @@ export interface PromptOpts {
   writer?: { file: string; params: StageParams; thinking?: "auto" | "on" | "off"; big?: boolean };
   /** saved characters among the pictures: their name, look line and the <Picture n> tags of their views */
   characters?: { name: string; look: string; tags: string[] }[];
+  /** music: "score" (default) = a non-diegetic background score, "scene" = only sounds in the scene, "none" */
+  music?: "score" | "scene" | "none";
+}
+
+/** the writer's music instruction for each choice */
+export function musicLine(music: "score" | "scene" | "none" | undefined, ownSound: boolean): string {
+  const m = music ?? "score";
+  if (m === "none") return "Music: none at all — only the sounds of the scene (voices, footsteps, ambience).";
+  if (m === "scene") return "Music: only music that is actually playing inside the scene, if any (a radio, a band, a phone). No background score.";
+  return ownSound
+    ? "Music: if the reference sound isn't music, add a non-diegetic score under it (see below); if it is, it's the soundtrack — don't add another."
+      + " A non-diegetic score is background music only the viewer hears — nothing in the scene plays it."
+    : "Music: add a non-diegetic score — background music only the viewer hears; nothing in the scene plays it (no speakers, instruments or radios on screen)."
+      + " Write ONE SOUND line for it covering the whole video: genre, instruments, tempo and mood, and how it builds, drops or swells with the action and cuts."
+      + " Keep the scene's own sounds (footsteps, cloth, voices, ambience) on their own SOUND lines, softer under the music, and keep speech clear above it.";
+}
+
+/** Animate without planning: a prompt that says nothing about music gets the score line (a plan already has its SOUND lines) */
+export function withMusic(prompt: string, music: "score" | "scene" | "none" | undefined): string {
+  const m = music ?? "score";
+  if (!prompt.trim() || /\b(music|score|soundtrack|song|melody|beat|SOUND \|)/i.test(prompt)) return prompt;
+  if (m === "none") return `${prompt.trimEnd()}\n\nNo music: only the sounds of the scene.`;
+  if (m === "scene") return prompt;
+  return `${prompt.trimEnd()}\n\nNon-diegetic background music (a score only the viewer hears) fitting the mood, under the scene's own sounds.`;
 }
 
 export const DEFAULT_GUIDE = `You plan short videos for the MiniMax H3 video model. You turn the user's idea into a precise, richly detailed timeline. H3 follows long, concrete descriptions far better than short phrases, so write a lot — never a few words where a full paragraph fits.
@@ -950,6 +976,7 @@ export function buildPromptHelper(p: PromptOpts): ApiGraph {
     `Video type: ${p.mode}. Length: ${fmtTime(p.seconds)} (${p.seconds} seconds).`,
     p.cuts > 0 ? `Use exactly ${p.cuts} cut${p.cuts > 1 ? "s" : ""}.` : "Choose how many cuts fit the idea.",
     p.camera && p.camera !== "auto" ? `Camera: ${p.camera}.` : "",
+    musicLine(p.music, p.audios.length > 0 || p.videos.some((v) => v.useSound)),
     "",
     `The idea: ${p.idea.trim() || defaultIdea(p)}`,
   ].filter((l) => l !== undefined).join("\n");
