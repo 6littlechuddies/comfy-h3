@@ -99,7 +99,7 @@ export interface AnimateS {
   /** Swap the person: who in the video to replace (words SAM looks for), which one if several match, and the working size */
   swapWho?: string; swapPick?: "largest" | "leftmost" | "rightmost"; swapRes?: "480" | "768";
   prompt: string; seconds: number; aspect: "auto" | "16:9" | "9:16" | "1:1"; mp: number;
-  turbo: boolean; takes: 1 | 2; loras: LoraPick[]; refImageSize: "match" | "max"; lowMemDecode: boolean; adv: Adv;
+  turbo: boolean; /** how many videos one press makes (different seeds, the same plan) */ takes: number; loras: LoraPick[]; refImageSize: "match" | "max"; lowMemDecode: boolean; adv: Adv;
   /** plain words: the video prompt writer (Plan a video) plans it second by second first, with your references (default on) */
   plan?: boolean;
   /** what to keep out of the video ("text, watermark, extra fingers") — H3 has no negative prompt, so the planner writes

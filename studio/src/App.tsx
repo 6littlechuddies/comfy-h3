@@ -17,6 +17,7 @@ import PromptTab from "./tabs/Prompt";
 import AnimateTab from "./tabs/Animate";
 import FinishTab from "./tabs/Finish";
 import BatchTab from "./tabs/Batch";
+import BoardTab from "./tabs/Board";
 import CharactersTab from "./tabs/Characters";
 import { GuideBanner, RECIPES, RecipesButton, applyRecipe } from "./components/Recipes";
 import { SelectionBar } from "./components/SelectionBar";
@@ -94,6 +95,7 @@ const TABS: { id: Tab; label: string; icon: string; blurb: string }[] = [
   { id: "edit", label: "Edit", icon: "brush", blurb: "change a picture with words or a brush" },
   { id: "prompt", label: "Prompt", icon: "script", blurb: "plan a video second by second" },
   { id: "animate", label: "Animate", icon: "film", blurb: "make the video with sound" },
+  { id: "board", label: "Video board", icon: "layers", blurb: "a box per character, many videos at once" },
   { id: "finish", label: "Finish", icon: "scissors", blurb: "trim, loop and export" },
   { id: "batch", label: "Batch", icon: "layers", blurb: "many at once, runs while you're away" },
 ];
@@ -104,7 +106,7 @@ const GROUPS: { id: string; label: string; members: Tab[]; names: Partial<Record
   { id: "scenes", label: "Scenes", members: ["scenes"], names: {} },
   { id: "create", label: "Create", members: ["create"], names: {} },
   { id: "edit", label: "Edit", members: ["edit"], names: {} },
-  { id: "animate", label: "Animate", members: ["animate", "prompt", "finish"], names: { animate: "Animate", prompt: "Plan a video (prompt writer)", finish: "Finish (trim, loop, export)" } },
+  { id: "animate", label: "Animate", members: ["animate", "board", "prompt", "finish"], names: { animate: "Animate", board: "Video board (many at once)", prompt: "Plan a video (prompt writer)", finish: "Finish (trim, loop, export)" } },
   // 06 opens Your site (profiles, photo sets, send as drafts) — Finish lives under Animate now
   { id: "site", label: "Your site", members: [], names: {} },
   { id: "batch", label: "Batch", members: ["batch"], names: {} },
@@ -178,7 +180,7 @@ export default function App() {
         {!loaded ? <div className="m-auto text-muted">Loading your settings…</div> : (
           ([
             ["characters", CharactersTab], ["scenes", ScenesTab], ["create", CreateTab], ["edit", EditTab],
-            ["prompt", PromptTab], ["animate", AnimateTab], ["finish", FinishTab], ["batch", BatchTab],
+            ["prompt", PromptTab], ["animate", AnimateTab], ["board", BoardTab], ["finish", FinishTab], ["batch", BatchTab],
           ] as [Tab, ComponentType][]).map(([id, C]) => (
             <div key={id} data-tab={id} className={cx("min-h-0 min-w-0 flex-1 flex-col", tab === id ? "fade-in flex" : "hidden")}>
               <SubTabs tab={id} />

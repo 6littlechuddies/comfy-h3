@@ -6,7 +6,7 @@ import { timeLeft, useJobs, type Job, type Tab } from "../lib/jobs";
 import { useSettings } from "../lib/settings";
 import { Icon, cx } from "./ui";
 
-const TAB_NAME: Record<Tab, string> = { characters: "Characters", scenes: "Scenes", create: "Create", edit: "Edit", compose: "Compose", prompt: "Prompt", animate: "Animate", finish: "Finish", batch: "Batch" } as Record<Tab, string>;
+const TAB_NAME: Record<Tab, string> = { characters: "Characters", scenes: "Scenes", create: "Create", edit: "Edit", compose: "Compose", prompt: "Prompt", animate: "Animate", board: "Video board", finish: "Finish", batch: "Batch" } as Record<Tab, string>;
 const mins = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
 
 /** the line, inside the left rail (it never covers the page): what's making now, and what waits behind it */

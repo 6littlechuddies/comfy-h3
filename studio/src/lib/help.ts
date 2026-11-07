@@ -21,7 +21,7 @@ export const HELP: Record<string, string> = {
   length: "Video length. H3 is trained on about 5–15 seconds; longer needs more memory.",
   animateMode: "References: H3 mixes all your pictures, clips and audio. Image → video: starts from one picture. First → last: moves from one picture to another. Seamless loop: ends exactly where it starts.",
   turbo: "Turbo uses a speed-up LoRA: 4 steps instead of 10, about 2–3× faster, a little less detail.",
-  takes: "2 quick previews makes two Turbo versions with different seeds, so you can pick the better one and redo it in full quality.",
+  takes: "How many videos one press makes: the same plan, each with its own seed, so you can pick the best take. They stack as one tile in the results.",
   refImageSize: "Match = references scaled to the video size (fast). Max = up to 2048 px for stronger likeness, several times slower.",
   lowMem: "Decodes the video in pieces. Use it if long or large videos run out of GPU memory. A bit slower.",
   size: "Draft ≈ 480p, Good ≈ 600p, Full = 768p (H3's official size). Bigger takes longer.",

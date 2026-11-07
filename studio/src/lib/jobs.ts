@@ -4,7 +4,7 @@ import { clientId, history, kindOf, queuePrompt, deleteQueued, interrupt, loadSt
 import type { ApiGraph } from "./graphs";
 import { useTray } from "./tray";
 
-export type Tab = "characters" | "scenes" | "create" | "compose" | "edit" | "prompt" | "animate" | "finish" | "batch";
+export type Tab = "characters" | "scenes" | "create" | "compose" | "edit" | "prompt" | "animate" | "board" | "finish" | "batch";
 export interface Output extends FileRef { kind: Kind; title: string }
 export interface Job {
   id: string;

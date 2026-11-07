@@ -155,7 +155,8 @@ export default function AnimateTab() {
   // turbo: References (its own 4-step LoRA), and every other type too with Speed-ups → Faster video steps (8 steps)
   const vt = useSpeed((st) => st.videoTurbo);
   const turboOk = !swap && (ref || (vt && !h3ErosOn()));
-  const etaKey = `animate:${a.mode}:${turboOk && (a.turbo || a.takes === 2) ? "turbo" : "full"}:${a.seconds}s:${a.mp}`;
+  const takes = Math.max(1, Math.min(8, Math.round(a.takes || 1)));
+  const etaKey = `animate:${a.mode}:${turboOk && a.turbo ? "turbo" : "full"}:${a.seconds}s:${a.mp}`;
 
   const opts = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}): AnimateOpts => ({
     ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, avoid: a.avoid, music: a.music, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
@@ -233,18 +234,16 @@ export default function AnimateTab() {
     try {
       const prompt = await planFirst();
       // a video made from a saved plan: counted on it
-      import("../lib/plans").then(({ planOfText, updatePlan }) => { const pl = planOfText(prompt); if (pl) updatePlan(pl.id, { made: (pl.made ?? 0) + (a.takes === 2 ? 2 : 1) }); }).catch(() => {});
+      import("../lib/plans").then(({ planOfText, updatePlan }) => { const pl = planOfText(prompt); if (pl) updatePlan(pl.id, { made: (pl.made ?? 0) + takes }); }).catch(() => {});
       const optsP = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}) => opts(seed, turbo, { prompt, ...over });
-      if (a.takes === 2) {
-        for (let i = 0; i < 2; i++) {
-          const seed = newSeed();
-          const o = optsP(seed, turboOk);
-          await run("animate", label(turboOk ? ` · quick preview ${i + 1}/2` : ` · take ${i + 1}/2`), buildAnimate(o), `animate:${a.mode}:${turboOk ? "turbo" : "full"}:${a.seconds}s:${a.mp}`, { opts: o, preview: turboOk, snapshot: { section: "animate", settings: a, media: { refs, frames } } });
-        }
-      } else {
-        const seed = seedFor(a.adv, (p) => set({ adv: { ...a.adv, ...p } }));
-        const o = optsP(seed, turboOk && a.turbo);
-        await run("animate", label(turboOk && a.turbo ? " · turbo" : ""), buildAnimate(o), etaKey, { opts: o, snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
+      // N takes: the same plan, each with its own seed — one press, every variation lined up (they stack as one tile)
+      const stack = `takes:${Date.now().toString(36)}`;
+      const turbo = turboOk && a.turbo;
+      for (let i = 0; i < takes; i++) {
+        const seed = takes === 1 ? seedFor(a.adv, (p) => set({ adv: { ...a.adv, ...p } })) : newSeed();
+        const o = optsP(seed, turbo);
+        await run("animate", label(`${turbo ? " · turbo" : ""}${takes > 1 ? ` · take ${i + 1}/${takes}` : ""}`), buildAnimate(o), etaKey,
+          { opts: o, ...(takes > 1 ? { stack } : {}), snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
       }
     } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); }
   };
@@ -273,10 +272,7 @@ export default function AnimateTab() {
     catch (e) { toast((e as Error).message, "bad"); }
   };
 
-  const speedOpts = turboOk
-    ? [{ value: "1f", label: `1 take · full` }, { value: "1t", label: "1 take · turbo" }, { value: "2t", label: "2 quick previews" }]
-    : [{ value: "1f", label: "1 take" }, { value: "2f", label: "2 takes" }];
-  const speedVal = a.takes === 2 ? (turboOk ? "2t" : "2f") : turboOk && a.turbo ? "1t" : "1f";
+  const takeOpts = [1, 2, 3, 4, 6, 8].map((n) => ({ value: n, label: n === 1 ? "1 take" : `${n} takes`, hint: n === 1 ? "one video" : `${n} videos from one press — same plan, different seeds` }));
   const chips = (
     <>
       <Chip title="Video type" value={a.mode} onChange={(v) => set({ mode: v })} options={[{ value: "swap", label: "Swap the person" }, { value: "ref", label: "References" }, { value: "i2v", label: "Image → video" }, { value: "fl", label: "First → last" }, { value: "loop", label: "Seamless loop" }]} />
@@ -294,7 +290,8 @@ export default function AnimateTab() {
       <Chip title="Size" value={a.mp} onChange={(v) => set({ mp: v })} options={[{ value: 0.4, label: "Draft 0.4 MP" }, { value: 0.6, label: "Good 0.6 MP" }, { value: 0.98, label: "Full 1 MP" }, { value: 1.2, label: "1.2 MP" }, { value: 1.5, label: "1.5 MP" }, { value: 2, label: "2 MP" },
         ...([0.4, 0.6, 0.98, 1.2, 1.5, 2].includes(a.mp) ? [] : [{ value: a.mp, label: `${a.mp} MP` }])]} />
       {!isPlan(a.prompt) && <Chip title="Plain words" value={a.plan === false ? 0 : 1} onChange={(v) => set({ plan: v === 1 })} options={[{ value: 1, label: "Writer plans it (recommended)" }, { value: 0, label: "Send my words as typed" }]} />}
-      <Chip title="Takes & speed" value={speedVal} onChange={(v) => set({ takes: v.startsWith("2") ? 2 : 1, turbo: v.endsWith("t") })} options={speedOpts} />
+      <Chip title="Takes" value={takes} onChange={(v) => set({ takes: v })} options={takeOpts} />
+      {turboOk && <Chip title="Speed" value={a.turbo ? 1 : 0} onChange={(v) => set({ turbo: v === 1 })} options={[{ value: 1, label: "Turbo", hint: "8 steps — fast" }, { value: 0, label: "Full quality", hint: "more steps — slower, finer detail" }]} />}
       <span className="ml-1 font-mono text-[11px] text-dim">{width}×{height} · {nFrames} frames{split > 1 ? ` · split across ${split} cards` : ""}</span></>}
     </>
   );
@@ -322,7 +319,7 @@ export default function AnimateTab() {
           {!swap && <AvoidLine value={a.avoid ?? ""} onChange={(v) => set({ avoid: v })} />}
           {planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score")} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
         </>}
-        action={<GoButton onClick={go} disabled={!!why} why={why}>{a.takes === 2 ? "Make 2" : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
+        action={<GoButton onClick={go} disabled={!!why} why={why}>{takes > 1 ? `Make ${takes}` : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
       drawer={<>
         <PresetBar section="animate" />
         <button onClick={() => openImageImport("", "collections")} className="press group flex items-center gap-2.5 border border-dashed border-line px-3 py-2.5 text-left hover:border-accent">

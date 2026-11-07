@@ -142,6 +142,11 @@ export default function PromptTab() {
   const sendToAnimate = () => {
     const mode = p.mode === "references" ? "ref" : p.mode === "first-last" ? "fl" : p.mode === "image" ? "i2v" : "ref";
     setWork({ animateRefs: refs.map((r) => ({ ...r })) });
+    // Image → video / First → last read the picture slots, not the reference list: put the pictures there too
+    if (mode !== "ref") {
+      const pics = refs.filter((r) => r.media.kind === "image").map((r) => r.media);
+      if (pics.length) setWork({ animateFrames: [pics[0], mode === "fl" ? pics[1] ?? null : null] });
+    }
     useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode, avoid: p.avoid ?? "", music: p.music ?? "score" });
     setWork({ sentPlan: finalText });
     const pl = planOfText(finalText); if (pl) updatePlan(pl.id, { sent: Date.now() });
