@@ -375,6 +375,17 @@ async def router_info(req):
         "cards_idle_s": int(now - GPU["busy_at"])})
 
 
+def tag_preview(data: bytes, pid: str | None) -> bytes:
+    """a live preview from one card, labelled with the job it belongs to. ComfyUI's plain previews (type 1) don't say
+    which job they're for: with two cards rendering at once the Studio showed both jobs' previews on one tile, flicking
+    between them. Rewritten as ComfyUI's own "preview with metadata" message (type 4) carrying the prompt_id."""
+    import struct
+    if not pid or len(data) < 8 or struct.unpack(">I", data[:4])[0] != 1: return data
+    fmt = struct.unpack(">I", data[4:8])[0]
+    meta = json.dumps({"prompt_id": pid, "image_type": "image/png" if fmt == 2 else "image/jpeg"}).encode()
+    return struct.pack(">II", 4, len(meta)) + meta + data[8:]
+
+
 async def ws(req):
     """the browser's live connection: every ComfyUI's messages for this client id, merged"""
     cid = req.query.get("clientId") or uuid.uuid4().hex
@@ -382,6 +393,7 @@ async def ws(req):
     await out.prepare(req)
     clients.setdefault(cid, set()).add(out)
     remaining: dict[int, int] = {}
+    on_card: dict[int, str] = {}  # card → the prompt it's running (from its own messages)
 
     async def pump(i: int, b: str):
         url = b.replace("http", "ws", 1) + f"{req.path}?clientId={cid}"
@@ -393,6 +405,8 @@ async def ws(req):
                         if m.type == aiohttp.WSMsgType.TEXT:
                             try: d = json.loads(m.data)
                             except ValueError: d = None
+                            pid_now = ((d or {}).get("data") or {}).get("prompt_id") if isinstance(d, dict) else None
+                            if pid_now: on_card[i] = str(pid_now)  # what this card is working on (for its previews)
                             if d and d.get("type") == "status":
                                 # one queue count for all the cards (+ jobs waiting in the router)
                                 ei = ((d.get("data") or {}).get("status") or {}).get("exec_info") or {}
@@ -402,7 +416,7 @@ async def ws(req):
                             else:
                                 await out.send_str(m.data)
                         elif m.type == aiohttp.WSMsgType.BINARY:
-                            await out.send_bytes(m.data)
+                            await out.send_bytes(tag_preview(m.data, on_card.get(i)))
                         elif m.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
             except Exception:  # noqa: BLE001  (that ComfyUI is restarting)
