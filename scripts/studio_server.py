@@ -2649,6 +2649,7 @@ async def _proton_keys():
             if civ: print(f"CivitAI: {len(civ)} key(s) from {_cloud()}", flush=True)
         except OSError as e:
             print("!! couldn't save the CivitAI keys:", e, flush=True)
+        await _hf_rest_get()  # before the keys file: the downloader picks its first key as soon as that appears
         try:
             os.makedirs(os.path.dirname(HF_KEYS_FILE), mode=0o700, exist_ok=True)
             fd = os.open(HF_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -2657,6 +2658,57 @@ async def _proton_keys():
             if keys: print(f"Hugging Face: {len(keys)} key(s) from {_cloud()}", flush=True)
         except OSError as e:
             print("!! couldn't save the Hugging Face keys:", e, flush=True)
+
+
+HF_MARKS = os.path.join(STATE, "hf_keys.json")  # the downloader's notes: which key/account slowed down when (fingerprints only)
+HF_MARKS_SENT = [0.0]
+
+
+def _merge_marks(a: dict, b: dict) -> dict:
+    out = {**a, **b}
+    for k in set(a) & set(b):
+        x, y = a[k], b[k]
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)): out[k] = max(x, y)
+        elif isinstance(x, dict) and isinstance(y, dict):
+            out[k] = {**x, **y, **{kk: max(x[kk], y[kk]) for kk in set(x) & set(y) if isinstance(x[kk], (int, float)) and isinstance(y[kk], (int, float))}}
+        elif isinstance(x, list) and isinstance(y, list): out[k] = sorted(set(x) | set(y))[-500:]
+    return out
+
+
+async def _hf_rest_get():
+    """which Hugging Face accounts the last rentals wore out (H3 Studio/hf_rest.json on your drive): a new rental right
+    after another one used to start on a tired account and crawl at ~1 MB/s until its first switch"""
+    try:
+        if not _proton_on(): return
+        folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        rc, txt = await _rclone("cat", f"proton:{folder}/hf_rest.json", timeout=60)
+        if rc != 0: return
+        far = json.loads(txt[txt.index("{"): txt.rindex("}") + 1])
+        try: here = json.load(open(HF_MARKS))
+        except (OSError, ValueError): here = {}
+        os.makedirs(STATE, exist_ok=True)
+        with open(HF_MARKS + ".tmp", "w") as f: json.dump(_merge_marks(far if isinstance(far, dict) else {}, here), f)
+        os.replace(HF_MARKS + ".tmp", HF_MARKS)
+        HF_MARKS_SENT[0] = os.path.getmtime(HF_MARKS)
+    except Exception as e:  # noqa: BLE001
+        print("!! Hugging Face key notes from your drive:", _redact(str(e))[:200], flush=True)
+
+
+async def _hf_rest_put():
+    """the downloader noted a slow key/account: send the notes to your drive for the next rental"""
+    try:
+        if not _proton_on() or not os.path.isfile(HF_MARKS) or os.path.getmtime(HF_MARKS) <= HF_MARKS_SENT[0]: return
+        HF_MARKS_SENT[0] = os.path.getmtime(HF_MARKS)
+        folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        rc, txt = await _rclone("cat", f"proton:{folder}/hf_rest.json", timeout=60)
+        try: far = json.loads(txt[txt.index("{"): txt.rindex("}") + 1]) if rc == 0 else {}
+        except ValueError: far = {}
+        merged = _merge_marks(far if isinstance(far, dict) else {}, json.load(open(HF_MARKS)))
+        tmp = os.path.join(WORK, "hf_rest.json"); os.makedirs(WORK, exist_ok=True)
+        with open(tmp, "w") as f: json.dump(merged, f)
+        await _rclone("copyto", tmp, f"proton:{folder}/hf_rest.json", timeout=120)
+    except Exception as e:  # noqa: BLE001
+        print("!! Hugging Face key notes to your drive:", _redact(str(e))[:200], flush=True)
 
 
 async def _proton_boot():
@@ -2727,8 +2779,9 @@ async def _keys_refresh_loop():
         await asyncio.sleep(60)
         try: active = json.load(open(os.path.join(run_dir, "downloads.json"))).get("active", True)
         except (OSError, ValueError): active = True
-        if not active: return
         if not _proton_on(): return
+        await _hf_rest_put()
+        if not active: return
         # stuck slow: ask your PC for fresh keys by itself — when every key was tried, or when Hugging Face has stayed
         # under 100 MB/s for 2 minutes in a row (switching keys didn't help). At most every 20 minutes.
         # OFF unless the template says HF_KEY_AUTO=1: each ask opens the key helper's Chrome window on your PC, and it kept
