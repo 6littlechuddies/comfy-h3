@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import { loadState, saveState, type FileRef } from "./api";
 import { buildAnimate, buildPromptHelper, MINOR_FLAG, type AnimateOpts, type LoraPick } from "./graphs";
-import { useJobs, waitForJob } from "./jobs";
+import { jobsReady, useJobs, waitForJob } from "./jobs";
 import { h3ErosOn, h3Size, h3SizeFor } from "./models";
 import { DEFAULTS, newSeed, useSettings, type Music } from "./settings";
 import { isAdult, useCharacters, type Character } from "./characters";
@@ -27,11 +27,22 @@ export const MIX_KINDS: { k: keyof Mix; label: string; short: string; hint: stri
 export const mixTotal = (m: Mix) => m.ref + m.i2v + m.loop;
 export const mixLabel = (m: Mix) => MIX_KINDS.filter((x) => m[x.k]).map((x) => `${m[x.k]} ${x.short.toLowerCase()}`).join(" + ") || "nothing";
 
+/** what a run was started with — kept on the run, so a reload can finish it the same way (not with today's settings) */
+export interface RunCfg {
+  seconds: number; mp: number; shape: BoardS["shape"]; turbo: boolean; avoid: string; music: Music;
+  pics: Media[]; loras: LoraPick[] | null; charId: string | null; name: string;
+}
+/** A run's states (docs/STATE_MACHINES.md): planning → queued (all its takes are in the line) | error.
+ *  planning: the writer job (planJob) is out, or its takes are still being lined up. A reload picks a run up again:
+ *  the plan is read from planJob (or the saved plan), and the takes not yet in the line are added — see resumeRuns(). */
 export interface BoardRun {
   id: string; at: number;
   /** the video type of this run's takes */
   mode?: keyof Mix;
   status: "planning" | "queued" | "error";
+  /** the writer job planning this run (its id, so a reload can wait for it) */
+  planJob?: string;
+  cfg?: RunCfg;
   words: string; plan?: string; error?: string;
   takes: number; jobIds: string[];
   /** the finished videos (kept here too, so the box still shows them after the job list moves on) */
@@ -74,6 +85,7 @@ export const useBoard = create<BoardS & { loaded: boolean }>(() => ({ ...DEF, lo
 loadState<Partial<BoardS>>("board").then((d) => {
   const boxes = (d?.boxes ?? []).map((b) => ({ ...b, mix: (b as Box).mix ?? null }));
   useBoard.setState({ ...DEF, ...(d ?? {}), mix: d?.mix ?? DEF.mix, boxes, loaded: true }); loaded = true;
+  void resumeRuns();
 }).catch(() => { useBoard.setState({ loaded: true }); loaded = true; });
 
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -182,15 +194,14 @@ async function runKind(boxId: string, mode: keyof Mix, takes: number, made: stri
   const c = b.charId ? useCharacters.getState().list.find((x) => x.id === b.charId) ?? null : null;
   const name = c?.name ?? "Pictures";
   const words = wordsOf(b);
-  const run: BoardRun = { id: uid(), at: Date.now(), mode, status: "planning", words, takes, jobIds: [], outputs: [] };
+  const ref = mode === "ref";
+  const pics = ref ? b.pics.slice(0, 9) : b.pics.slice(0, 1);
+  const cfg: RunCfg = { seconds: s.seconds, mp: s.mp, shape: s.shape, turbo: s.turbo, avoid: s.avoid, music: s.music, pics, loras: b.loras, charId: b.charId, name };
+  const run: BoardRun = { id: uid(), at: Date.now(), mode, status: "planning", words, takes, jobIds: [], outputs: [], cfg };
   setBox(b.id, (x) => ({ runs: [run, ...x.runs] }));
-  const jobs = useJobs.getState();
   const kind = MIX_KINDS.find((x) => x.k === mode)!.label;
   try {
-    const ref = mode === "ref";
-    const pics = ref ? b.pics.slice(0, 9) : b.pics.slice(0, 1);
     const tagged = pics.map((p, i) => ({ file: p.name, tag: `<Picture ${i + 1}>`, label: ref ? (c ? `${c.name}` : p.label || "reference") : "the first frame" }));
-    const a = useSettings.getState().s.animate;
     const pw = await planWriter(useSettings.getState().s.prompt.guide, DEFAULTS.prompt.guide, useBigPlanner());
     const { withAvoidNote } = await import("../components/AvoidLine");
     const madeNote = made ? `\n\nHow her picture was made (its prompt): “${made}”. Keep her outfit, accessories, props and setting from it, and have her interact naturally with her own things — touch, hold, adjust or use them — so the moment feels real. Ignore its camera and quality words.` : "";
@@ -200,34 +211,78 @@ async function runKind(boxId: string, mode: keyof Mix, takes: number, made: stri
       idea: withAvoidNote(words, s.avoid) + madeNote, music: s.music, seconds: s.seconds, cuts: 0, camera: "auto",
       mode: PLAN_MODE[mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
     });
-    const pj = await jobs.run("animate", `${name}: planning (${kind.toLowerCase()})`, g, "prompt:0v", { quiet: true, front: true, project: b.charId, board: b.id });
-    const done = await waitForJob(pj.id);
-    const raw = done.texts.timeline ?? "";
-    if (done.status !== "done" || !raw.trim()) throw new Error(done.error ?? "The writer didn't answer — try again");
-    if (Object.entries(done.texts).some(([k, v]) => k.startsWith("seen:") && v.includes(MINOR_FLAG)) || raw.includes(MINOR_FLAG)) throw new Error(stopMessage([words]));
-    const parsed = parseTimeline(raw, s.seconds);
-    const text = parsed.cuts.some((x) => x.text) ? toPrompt(parsed) : raw.trim();
-    setRun(b.id, run.id, { plan: text });
-    import("./plans").then(({ addPlan }) => addPlan({ chars: b.charId ? [b.charId] : [], project: b.charId, idea: words, seconds: s.seconds, mode, cuts: 0, camera: "auto", text, sent: Date.now(), made: takes })).catch(() => {});
-
-    const { width, height } = s.shape === "auto" ? h3SizeFor(await ratioOf(pics[0]), s.mp) : h3Size(s.shape, s.mp);
-    const turboOk = ref || (useSpeed.getState().videoTurbo !== false && !h3ErosOn());
-    const turbo = turboOk && s.turbo;
-    const etaKey = `animate:${mode}:${turbo ? "turbo" : "full"}:${s.seconds}s:${s.mp}`;
-    const ids: string[] = [];
-    for (let i = 0; i < takes; i++) {
-      const o: AnimateOpts = {
-        ...a.adv, seed: newSeed(), mode, prompt: text, avoid: s.avoid, music: s.music, seconds: s.seconds, width, height, turbo,
-        loras: b.loras ?? a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
-        images: pics.map((p) => p.name), videos: [], audios: [],
-      };
-      const j = await jobs.run("animate", `${name} · ${kind.toLowerCase()}${takes > 1 ? ` · take ${i + 1}/${takes}` : ""}`, buildAnimate(o), etaKey,
-        { opts: o, project: b.charId, stack: `board:${run.id}`, board: b.id, sent: { words, character: name } });
-      ids.push(j.id);
-      setRun(b.id, run.id, { jobIds: [...ids], status: "queued" });
-    }
+    const pj = await useJobs.getState().run("animate", `${name}: planning (${kind.toLowerCase()})`, g, "prompt:0v", { quiet: true, front: true, project: b.charId, board: b.id });
+    setRun(b.id, run.id, { planJob: pj.id });
   } catch (e) {
     setRun(b.id, run.id, { status: "error", error: (e as Error).message });
+    return;
+  }
+  await continueRun(b.id, run.id);
+}
+
+const going = new Set<string>();
+/** the rest of a run, from wherever it is: wait for its plan (unless it's saved), then line up the takes that aren't in
+ *  the line yet. Safe to call twice (the second call does nothing while the first is going). */
+async function continueRun(boxId: string, runId: string): Promise<void> {
+  if (going.has(runId)) return;
+  going.add(runId);
+  const get = () => useBoard.getState().boxes.find((x) => x.id === boxId)?.runs.find((r) => r.id === runId);
+  try {
+    const r0 = get();
+    if (!r0 || r0.status === "error" || !r0.cfg || !r0.mode) return;
+    const { cfg, mode, words, takes } = r0;
+    let text = r0.plan;
+    if (!text) {
+      if (!r0.planJob) throw new Error("interrupted — the page closed before planning started; press Make videos again");
+      if (!useJobs.getState().jobs.some((j) => j.id === r0.planJob)) throw new Error("interrupted — its planning job is gone (the page closed or the list was cleared); press Make videos again");
+      const done = await waitForJob(r0.planJob);
+      const raw = done.texts.timeline ?? "";
+      if (done.status !== "done" || !raw.trim()) throw new Error(done.error ?? "The writer didn't answer — try again");
+      if (Object.entries(done.texts).some(([k, v]) => k.startsWith("seen:") && v.includes(MINOR_FLAG)) || raw.includes(MINOR_FLAG)) throw new Error(stopMessage([words]));
+      const parsed = parseTimeline(raw, cfg.seconds);
+      text = parsed.cuts.some((x) => x.text) ? toPrompt(parsed) : raw.trim();
+      setRun(boxId, runId, { plan: text });
+      const plan = text;
+      import("./plans").then(({ addPlan }) => addPlan({ chars: cfg.charId ? [cfg.charId] : [], project: cfg.charId, idea: words, seconds: cfg.seconds, mode, cuts: 0, camera: "auto", text: plan, sent: Date.now(), made: takes })).catch(() => {});
+    }
+
+    const a = useSettings.getState().s.animate;
+    const ref = mode === "ref";
+    const { width, height } = cfg.shape === "auto" ? h3SizeFor(await ratioOf(cfg.pics[0]), cfg.mp) : h3Size(cfg.shape, cfg.mp);
+    const turboOk = ref || (useSpeed.getState().videoTurbo !== false && !h3ErosOn());
+    const turbo = turboOk && cfg.turbo;
+    const etaKey = `animate:${mode}:${turbo ? "turbo" : "full"}:${cfg.seconds}s:${cfg.mp}`;
+    const kind = MIX_KINDS.find((x) => x.k === mode)!.label;
+    const ids = [...(get()?.jobIds ?? [])];
+    for (let i = ids.length; i < takes; i++) {
+      const o: AnimateOpts = {
+        ...a.adv, seed: newSeed(), mode, prompt: text, avoid: cfg.avoid, music: cfg.music, seconds: cfg.seconds, width, height, turbo,
+        loras: cfg.loras ?? a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
+        images: cfg.pics.map((p) => p.name), videos: [], audios: [],
+      };
+      const j = await useJobs.getState().run("animate", `${cfg.name} · ${kind.toLowerCase()}${takes > 1 ? ` · take ${i + 1}/${takes}` : ""}`, buildAnimate(o), etaKey,
+        { opts: o, project: cfg.charId, stack: `board:${runId}`, board: boxId, sent: { words, character: cfg.name } });
+      ids.push(j.id);
+      setRun(boxId, runId, { jobIds: [...ids], status: ids.length >= takes ? "queued" : "planning" });
+    }
+    if (ids.length >= takes) setRun(boxId, runId, { status: "queued" });
+  } catch (e) {
+    setRun(boxId, runId, { status: "error", error: (e as Error).message });
+  } finally {
+    going.delete(runId);
+  }
+}
+
+/** after a reload: every run that was still planning (or lining up its takes) carries on — or says plainly that it can't */
+async function resumeRuns() {
+  await jobsReady;
+  for (const b of useBoard.getState().boxes) {
+    for (const r of b.runs) {
+      const short = r.status === "queued" && r.jobIds.length < r.takes;
+      if (r.status !== "planning" && !short) continue;
+      if (!r.cfg || !r.mode) { setRun(b.id, r.id, { status: "error", error: "interrupted — the page closed while this was planning; press Make videos again" }); continue; }
+      void continueRun(b.id, r.id);
+    }
   }
 }
 

@@ -59,12 +59,14 @@ export async function resendIfSent(id: string): Promise<string | null> {
 
 /** send one character as a draft; returns the job's end state */
 async function sendOne(c: Character, onStep?: (t: string) => void): Promise<{ ok: boolean; note: string }> {
-  let j = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id }) })).json();
-  while (j.status === "running") {
-    onStep?.(`${j.step}${j.total ? ` · ${j.done ?? 0}/${j.total} files` : ""}`);
-    await new Promise((ok) => setTimeout(ok, 1500));
-    j = await (await fetch(`/studio-api/site/push/${j.id}`)).json();
-  }
+  const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id }) })).json();
+  const { watchServerJob } = await import("../lib/serverJob");
+  type Push = { status: string; id: string; step?: string; total?: number; done?: number; uploaded?: number; error?: string };
+  let j: Push;
+  try {
+    j = await watchServerJob<Push & { [k: string]: unknown }>(`/studio-api/site/push/${start.id}`, { what: "the send", every: 1500,
+      onUpdate: (x) => onStep?.(`${x.step}${x.total ? ` · ${x.done ?? 0}/${x.total} files` : ""}`) });
+  } catch (e) { j = { status: "error", id: start.id, error: (e as Error).message }; }
   const ok = j.status === "done";
   const note = ok ? `${j.uploaded ?? 0} new file${j.uploaded === 1 ? "" : "s"}` : String(j.error);
   const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;

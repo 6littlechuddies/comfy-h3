@@ -340,12 +340,9 @@ export function LoraList({ value, onChange, family, label = "LoRAs", onSweep, on
     try {
       const id = await addLoraFromLink(link.trim());
       setDl({ status: "running", progress: 0 });
-      const t = setInterval(async () => {
-        const j = await loraJob(id).catch(() => null);
-        if (!j) return;
-        setDl(j);
-        if (j.status !== "running") {
-          clearInterval(t);
+      const { watchServerJob } = await import("../lib/serverJob");
+      void watchServerJob<LoraJob & { [k: string]: unknown }>(`/studio-api/loras/job/${id}`, { what: "the LoRA download", every: 700, onUpdate: (x) => setDl(x) }).then(async (j) => {
+        {
           if (j.status === "done" && j.name && j.kind === "model") {
             // a checkpoint, not a LoRA: it went to your models — pick it under Checkpoint
             forgetObjectInfo(); bumpModels();
@@ -358,7 +355,7 @@ export function LoraList({ value, onChange, family, label = "LoRAs", onSweep, on
             setLink(""); setAdding(false); setDl(null);
           } else toast(`Couldn't add that LoRA: ${j.error}`, "bad");
         }
-      }, 800);
+      }).catch((e) => { setDl(null); toast((e as Error).message, "bad"); });
     } catch (e) { toast((e as Error).message, "bad"); }
   };
   const upOwn = async (f: File) => {

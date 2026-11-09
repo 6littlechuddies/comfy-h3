@@ -19,12 +19,8 @@ export function TrainHere({ c, kept }: { c: Character; kept: TrainItem[] }) {
   useEffect(() => {
     if (!id) return;
     let live = true;
-    const tick = async () => {
-      const r = await fetch(`/studio-api/train/${id}`);
-      if (!r.ok) { if (live) { setRun(null); setId(null); try { localStorage.removeItem(KEY(c.id)); } catch { /* */ } } return; }
-      const j: Run = await r.json();
-      if (!live) return;
-      setRun(j);
+    const forget = () => { setId(null); try { localStorage.removeItem(KEY(c.id)); } catch { /* */ } };
+    const finished = (j: Run) => {
       if (j.status === "done" && j.lora) {
         const cur = useCharacters.getState().list.find((x) => x.id === c.id);
         if (cur && !(cur.loras ?? []).some((l) => l.name === j.lora)) {
@@ -32,9 +28,15 @@ export function TrainHere({ c, kept }: { c: Character; kept: TrainItem[] }) {
           toast(`${c.name}'s LoRA is trained and on their identity card (strength 1.0, trigger “${cur.trainset?.trigger ?? ""}”). An older trained one is switched off, not removed.`, "good", "characters");
         }
       }
-      if (j.status === "running") setTimeout(() => live && tick(), 3000);
     };
-    tick();
+    import("../lib/serverJob").then(({ watchServerJob, JobGone }) => watchServerJob<Run & { [k: string]: unknown }>(`/studio-api/train/${id}`, {
+      what: "the training", every: 3000, giveUpAfterMs: 120_000, cancelled: () => !live, onUpdate: (j) => { if (live) setRun(j); },
+    }).then((j) => { if (live && j.status !== "running") finished(j); }).catch((e) => {
+      if (!live) return;
+      // the rental restarted (it forgot the run) or stopped answering: say so, instead of the run just vanishing
+      setRun(null); forget();
+      toast(e instanceof JobGone ? `${c.name}'s LoRA training stopped: the rental restarted. Train again when you're ready.` : (e as Error).message, "bad", "characters");
+    }));
     return () => { live = false; };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -280,13 +280,10 @@ export async function civitFetchMedia(url: string, id: number): Promise<InputFil
 /** download a LoRA from a CivitAI link and wait for it, reporting progress */
 export async function installLora(url: string, onProgress?: (j: LoraJob) => void): Promise<LoraJob> {
   const id = await addLoraFromLink(url);
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 700));
-    const st = await loraJob(id).catch(() => null);
-    if (!st) continue;
-    onProgress?.(st);
-    if (st.status !== "running") { if (st.status === "done") forgetObjectInfo(); return st; }
-  }
+  const { watchServerJob } = await import("./serverJob");
+  const st = await watchServerJob<LoraJob & { [k: string]: unknown }>(`/studio-api/loras/job/${id}`, { what: "the LoRA download", every: 700, onUpdate: (j) => onProgress?.(j) });
+  if (st.status === "done") forgetObjectInfo();
+  return st;
 }
 
 // ------------------------------------------------------------------ your own LoRA files

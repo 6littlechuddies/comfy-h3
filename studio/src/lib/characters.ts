@@ -219,8 +219,24 @@ export const useCharacters = create<CharState>((set, get) => ({
 export const DEFAULT_AGE = 25;
 const withAge = (l: Character[]) => l.map((c) => (Number(c.age) > 0 ? c : { ...c, age: DEFAULT_AGE }));
 
+/** A training-set picture's states (docs/STATE_MACHINES.md): making → checking → done | failed. "making" and "checking"
+ *  only live while this page is building; a picture saved in one of them was cut off by a reload, and used to keep Build
+ *  busy (and greyed out) for good. On load: a picture that never came out is failed, one that came out but missed its
+ *  face check is kept unchecked — both say what to press. */
+function settleTrainSets(l: Character[]): Character[] {
+  return l.map((c) => {
+    const items = c.trainset?.items;
+    if (!items?.some((it) => it.status === "making" || it.status === "checking")) return c;
+    return { ...c, trainset: { ...c.trainset!, items: items.map((it): TrainItem =>
+      it.status === "making" ? { ...it, status: "failed", why: "The page was closed before this picture was made — build again or remove it" }
+      : it.status === "checking" ? (it.file ? { ...it, status: "done", score: undefined, keep: false, why: "The page closed before its face check — press Check again (left out until then)" }
+        : { ...it, status: "failed", why: "The page was closed before this picture was made — build again or remove it" })
+      : it) } };
+  });
+}
+
 loadState<Character[]>("characters").then((l) => {
-  const list = withAge(Array.isArray(l) ? l : []);
+  const list = settleTrainSets(withAge(Array.isArray(l) ? l : []));
   let last = ""; try { last = localStorage.getItem("h3.character") ?? ""; } catch { /* private mode */ }
   useCharacters.setState({ list, loaded: true, sel: list.some((x) => x.id === last) ? last : null });
 });

@@ -452,7 +452,13 @@ export async function syncJobs(o: { save?: boolean } = {}) {
   try { localStorage.setItem(KEEP_KEY, JSON.stringify(keep)); } catch { /* full or private mode */ }
   await saveState("jobs", keep);
 }
+/** resolves once the saved results list is back (so a job id kept elsewhere — a board run's planning job — can be looked up) */
+let jobsLoaded: () => void = () => {};
+export const jobsReady = new Promise<void>((r) => { jobsLoaded = r; });
 (async () => {
+  try { await loadSaved(); } finally { jobsLoaded(); }
+})();
+async function loadSaved() {
   let local: Job[] = [];
   try { local = JSON.parse(localStorage.getItem(KEEP_KEY) || "[]"); } catch { /* */ }
   const remote = (await loadState<Job[]>("jobs").catch(() => null)) ?? [];
@@ -467,7 +473,7 @@ export async function syncJobs(o: { save?: boolean } = {}) {
   for (const j of saved.filter((x) => x.status === "running" || x.status === "queued")) {
     history(j.id).then((h) => { if (h) collect(j.id); }).catch(() => {});
   }
-})();
+}
 
 connect();
 

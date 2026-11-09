@@ -2041,7 +2041,7 @@ async def add_lora(req):
     d = await req.json()
     jid = uuid.uuid4().hex[:10]
     LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0}
-    asyncio.create_task(lora_job(job, d.get("url", "")))
+    _spawn(lora_job(job, d.get("url", "")))
     return web.json_response({"id": jid})
 
 
@@ -2296,7 +2296,7 @@ async def finish(req):
     d = await req.json()
     jid = uuid.uuid4().hex[:12]
     JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "started": time.time()}
-    asyncio.create_task(finish_job(job, d))
+    _spawn(finish_job(job, d))
     return web.json_response({"id": jid})
 
 
@@ -2858,7 +2858,7 @@ async def _proton_loop():
 async def proton_status(req):
     if req.method == "POST":
         if not _proton_on(): return web.json_response({"error": "Backups aren't set up — add GDRIVE_TOKEN (Google Drive) or PROTON_USER + PROTON_PASSWORD (Proton Drive) to the Vast template"}, status=400)
-        asyncio.create_task(proton_sync(full=True, force=req.query.get("force") == "1"))
+        _spawn(proton_sync(full=True, force=req.query.get("force") == "1"))
         return web.json_response({"ok": True})
     return web.json_response({"on": _proton_on(), "cloud": _cloud(), "folder": (os.environ.get("PROTON_FOLDER") or "H3 Studio"), **{k: v for k, v in PROTON.items()}})
 
@@ -3465,6 +3465,88 @@ async def _usage_loop():
         await asyncio.sleep(600)
 
 
+# ------------------------------------------------------------------ state machines, in one place
+# Everything in the Studio that moves through states (jobs, downloads, imports, backups, the cards' job line…) reported
+# the same way: {machine, id, state, label, since, done, error}. GET /studio-api/machines answers for the rental and the
+# browser (the Studio posts its own every minute); the debug report lists whatever isn't idle. docs/STATE_MACHINES.md
+# says what each state means and how each one recovers.
+BROWSER_MACHINES: dict = {"at": 0.0, "items": []}
+TERMINAL = {"done", "error", "cancelled", "failed", "none", "ok", "off", "later", "skipped", "ready", "idle"}
+
+
+def _job_rows(machine: str, jobs: dict, label_key: str = "step") -> list[dict]:
+    out = []
+    for jid, j in list(jobs.items())[-40:]:
+        if not isinstance(j, dict): continue
+        out.append({"machine": machine, "id": jid, "state": j.get("status") or j.get("state") or "?",
+                    "label": str(j.get(label_key) or j.get("name") or j.get("title") or "")[:120],
+                    "since": j.get("started") or j.get("at"), "error": str(j.get("error") or "")[:300] or None,
+                    "progress": j.get("progress") if isinstance(j.get("progress"), (int, float)) else None})
+    return out
+
+
+async def machines_now() -> list[dict]:
+    rows = _job_rows("lora_download", LORA_JOBS, "title") + _job_rows("finish_export", JOBS) + _job_rows("lora_training", TRAIN_JOBS) \
+        + _job_rows("site_send", SITE_JOBS) + _job_rows("import", IMPORTS, "name")
+    for r in rows:  # an import that found nothing to bring back ("No exports yet") isn't a failure
+        if r["machine"] == "import" and r["state"] == "none": r["error"] = None
+    rows.append({"machine": "drive_backup", "id": "drive", "state": PROTON.get("state") or "off", "label": "running" if PROTON.get("running") else "",
+                 "since": PROTON.get("last_try"), "error": PROTON.get("error") or None})
+    w = str(WARM.get("state") or "idle")  # "waiting" → "sent to N card(s)" | "failed: …"
+    rows.append({"machine": "warmup", "id": "krea2", "state": "done" if w.startswith("sent") else "error" if w.startswith("failed") else "off" if w.startswith("off") else w,
+                 "label": w, "since": None, "error": w if w.startswith("failed") else None})
+    if KEY_REQ.get("at"): rows.append({"machine": "hf_key_request", "id": "pc", "state": "asked", "label": KEY_REQ.get("reason") or "", "since": KEY_REQ.get("at"), "error": None})
+    try:
+        st = json.load(open(os.path.join(H3_RUN, "status.json")))
+        rows.append({"machine": "rental", "id": "phase", "state": st.get("phase") or "?", "label": st.get("message") or "", "since": None, "error": None})
+    except (OSError, ValueError): pass
+    try:
+        dl = json.load(open(os.path.join(H3_RUN, "downloads.json")))
+        for g in dl.get("groups") or []:
+            rows.append({"machine": "download_group", "id": g.get("id"), "state": g.get("state") or "?", "label": g.get("label") or "",
+                         "since": None, "error": g.get("error") or g.get("why"), "progress": (g.get("pct") or 0) / 100})
+    except (OSError, ValueError): pass
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as s:
+            async with s.get(f"{COMFY}/h3-router") as r:
+                if r.status == 200 and "json" in r.headers.get("Content-Type", ""):
+                    rt = await r.json()
+                    for i, kinds in enumerate(rt.get("card_jobs") or []):
+                        rows.append({"machine": "card", "id": str(i), "state": "busy" if kinds else "idle", "label": ", ".join(kinds), "since": None,
+                                     "error": None if (rt.get("up") or [True] * 99)[i] else "not answering"})
+                    if rt.get("line"): rows.append({"machine": "card_line", "id": "router", "state": "waiting", "label": ", ".join(rt["line"]), "since": None, "error": None})
+                    if rt.get("raylight_off_why"): rows.append({"machine": "split_video", "id": "raylight", "state": "off", "label": "", "since": None, "error": rt["raylight_off_why"]})
+    except Exception: pass  # noqa: BLE001  (one card: no router)
+    for x in BROWSER_MACHINES.get("items") or []:
+        if isinstance(x, dict): rows.append({**x, "machine": f"browser:{x.get('machine')}", "reported": BROWSER_MACHINES.get("at")})
+    return rows
+
+
+async def machines(req):
+    """GET: every state machine and where it is · POST (from the Studio): the browser's own, every minute"""
+    if req.method == "POST":
+        try: d = await req.json()
+        except ValueError: d = {}
+        items = d.get("items") if isinstance(d, dict) else None
+        if isinstance(items, list): BROWSER_MACHINES.update(at=time.time(), items=items[:300])
+        return web.json_response({"ok": True})
+    rows = await machines_now()
+    if req.query.get("all") != "1": rows = [r for r in rows if r.get("state") not in TERMINAL or r.get("error")]
+    return web.json_response({"at": time.time(), "items": rows})
+
+
+def _machines_text(rows: list[dict]) -> list[str]:
+    busy = [r for r in rows if r.get("state") not in TERMINAL or r.get("error")]
+    if not busy: return ["  (nothing in progress, nothing stuck)"]
+    now = time.time()
+    out = []
+    for r in busy:
+        age = f" · {int(now - r['since'])} s" if isinstance(r.get("since"), (int, float)) and r["since"] else ""
+        out.append(f"  {r['machine']:<22} {str(r.get('id'))[:14]:<14} {r.get('state')}{age}{' · ' + r['label'] if r.get('label') else ''}{' · ERROR: ' + str(r['error']) if r.get('error') else ''}")
+    if BROWSER_MACHINES.get("at"): out.append(f"  (browser last reported {int(now - BROWSER_MACHINES['at'])} s ago)")
+    return out
+
+
 async def debug_report_text(lines_per_log=80):
     out = []
     add = out.append
@@ -3495,6 +3577,9 @@ async def debug_report_text(lines_per_log=80):
                     f"{' for ' + str(rt.get('raylight_running_s')) + ' s' if rt.get('raylight_running') else ''} · cards idle for {rt.get('cards_idle_s')} s")
             else: add("  cards: 1")
     except Exception as e: add(f"  (couldn't ask ComfyUI: {e.__class__.__name__})")  # noqa: BLE001
+    add("\n== In progress (state machines — docs/STATE_MACHINES.md) ==")
+    try: out.extend(_machines_text(await machines_now()))
+    except Exception as e: add(f"  ({e.__class__.__name__}: {e})")  # noqa: BLE001
     add("\n== What you use (all rentals) ==")
     try: out.extend(_usage_text())
     except Exception as e: add(f"  ({e.__class__.__name__}: {e})")  # noqa: BLE001
@@ -3792,7 +3877,7 @@ async def train_start(req):
     d = await req.json()
     jid = uuid.uuid4().hex[:10]
     TRAIN_JOBS[jid] = job = {"id": jid, "status": "running", "step": "starting", "done": 0, "total": 0, "char_id": d.get("char_id"), "started": time.time()}
-    asyncio.create_task(_train(job, d))
+    _spawn(_train(job, d))
     return web.json_response({"id": jid})
 
 
@@ -4049,10 +4134,16 @@ IMPORT_DIR = os.path.join(WORK, "h3-imports")
 MAIN_LOOP: list = []
 
 
+_BG: set = set()  # background jobs, kept until they finish: asyncio only holds weak references to tasks, so one nobody
+                  # keeps can be garbage-collected mid-run — its job would then say "running" forever
+
+
 def _spawn(coro):
     """start a background task from the server's loop — or, from an import running in a worker thread, hand it to that loop"""
     try:
-        return asyncio.get_running_loop().create_task(coro)
+        t = asyncio.get_running_loop().create_task(coro)
+        _BG.add(t); t.add_done_callback(_BG.discard)
+        return t
     except RuntimeError:
         return asyncio.run_coroutine_threadsafe(coro, MAIN_LOOP[0])
 
@@ -4762,7 +4853,7 @@ async def site_push(req):
     d = await req.json()
     jid = uuid.uuid4().hex[:10]
     SITE_JOBS[jid] = job = {"id": jid, "status": "running", "step": "starting", "done": 0, "total": 0}
-    asyncio.get_event_loop().create_task(_site_push(job, d))
+    _spawn(_site_push(job, d))
     return web.json_response(job)
 
 
@@ -5040,7 +5131,7 @@ def main():
         web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora),
         web.post("/studio-api/loras/upload", upload_lora),
         web.post("/studio-api/client-error", client_error),
-        web.get("/studio-api/storage", storage), web.post("/studio-api/usage", usage_post), web.get("/studio-api/usage", usage_get), web.post("/studio-api/storage", storage_act),
+        web.get("/studio-api/storage", storage), web.post("/studio-api/usage", usage_post), web.route("*", "/studio-api/machines", machines), web.get("/studio-api/usage", usage_get), web.post("/studio-api/storage", storage_act),
         web.post("/studio-api/results/missing", results_missing),
         web.post("/studio-api/activity", activity), web.get("/studio-api/activity", activity),
         web.get("/studio-api/civitai/key", civitai_key), web.put("/studio-api/civitai/key", civitai_key), web.delete("/studio-api/civitai/key", civitai_key), web.post("/studio-api/sheet/split", sheet_split),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
-import { finishStatus, startFinish, viewUrl, type FileRef } from "../lib/api";
+import { startFinish, viewUrl, type FileRef, type FinishJob } from "../lib/api";
 import { useJobs } from "../lib/jobs";
 import { useSection } from "../lib/settings";
 import { DRAG_TYPE, useTray, type Media } from "../lib/tray";
@@ -56,21 +56,19 @@ export default function FinishTab() {
   usePrimaryAction("finish", exportIt);
   useEffect(() => {
     if (!job) return;
-    const t = setInterval(async () => {
-      try {
-        const s = await finishStatus(job.id);
-        if (s.status === "running") setJob({ id: job.id, progress: s.progress });
-        else {
-          clearInterval(t); setJob(null);
-          if (s.status === "done" && s.output) {
-            useClips.setState({ result: s.output });
-            useTray.getState().addOutput(s.output, "Export");
-            toast("Export ready — saved to Outputs and backed up.", "good", "finish");
-          } else toast(`Export failed: ${s.error?.split("\n").slice(-3).join(" ") ?? "unknown error"}`, "bad", "finish");
-        }
-      } catch { /* keep polling */ }
-    }, 700);
-    return () => clearInterval(t);
+    let gone = false;
+    import("../lib/serverJob").then(({ watchServerJob }) => watchServerJob<FinishJob & { [k: string]: unknown }>(`/studio-api/finish/${job.id}`, {
+      what: "the export", every: 700, cancelled: () => gone, onUpdate: (s) => { if (s.status === "running" && !gone) setJob({ id: job.id, progress: s.progress }); },
+    })).then((s) => {
+      if (gone) return;
+      setJob(null);
+      if (s.status === "done" && s.output) {
+        useClips.setState({ result: s.output });
+        useTray.getState().addOutput(s.output, "Export");
+        toast("Export ready — saved to Outputs and backed up.", "good", "finish");
+      } else toast(`Export failed: ${s.error?.split("\n").slice(-3).join(" ") ?? "unknown error"}`, "bad", "finish");
+    }).catch((e) => { if (!gone) { setJob(null); toast(`Export: ${(e as Error).message}`, "bad", "finish"); } });
+    return () => { gone = true; };
   }, [job?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = clips.find((c) => c.id === sel) ?? clips[0];
