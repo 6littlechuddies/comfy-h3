@@ -492,7 +492,7 @@ async def fetch_missing_loras(req):
         if key: want[key] = reg[key]
         else: unknown.append(os.path.basename(rel).rsplit(".", 1)[0])
     before = set(LORA_JOBS)
-    _fetch_missing_loras(want)
+    _fetch_missing_loras(want, now=True)
     started = [k for k in want if not os.path.isfile(os.path.join(LORAS, k))]
     return web.json_response({"downloading": [os.path.basename(k).rsplit(".", 1)[0] for k in started], "unknown": unknown,
                               "jobs": [j for j in LORA_JOBS if j not in before], "key": bool(civitai_token())})
@@ -1065,6 +1065,9 @@ async def _backfill_tips():
         await asyncio.sleep(1)
 
 
+_DEST_BUSY: set = set()  # files a lora_job is writing right now
+
+
 async def lora_job(job: dict, url: str):
     auth = civitai_auth()
     try:
@@ -1104,46 +1107,60 @@ async def lora_job(job: dict, url: str):
                 job.update(status="done", progress=1.0, name=rel, kind="model", folder=folder, title=v["model"]["name"], family=fam, trigger="")
                 return
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            job.update(title=v["model"]["name"], base=v.get("baseModel", ""), total_mb=round(f.get("sizeKB", 0) / 1000))
-            # the exact file picked above (its own link), on the site that answered, then the other site; a plain version link last
-            vhost = HOST_OF.get(f'/api/v1/model-versions/{vid}', CIVITAI)
-            path0 = re.sub(r"^https?://[^/]+", "", str(f.get("downloadUrl") or "")) or f"/api/download/models/{vid}"
-            cands = []
-            for h in [vhost] + [x for x in civitai_hosts() if x != vhost]:
-                for pth in (path0, f"/api/download/models/{vid}" + ("?type=Model&format=SafeTensor" if is_model else ""), f"/api/download/models/{vid}"):
-                    if f"{h}{pth}" not in cands: cands.append(f"{h}{pth}")
-            loc, dl, statuses = None, cands[0], []
-            got_it = False
-            # every CivitAI key you have, one after another, when CivitAI says no (401/403) to one
-            for key in (civitai_tokens() or [""]):
-                auth = {"Authorization": f"Bearer {key}"} if key else {}
-                for cand in cands:
-                    async with s.get(cand, headers=auth, allow_redirects=False) as r:
-                        statuses.append(r.status)
-                        if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location") and "/login" not in r.headers["Location"]:
-                            loc, dl, got_it = r.headers["Location"], cand, True; break
-                        if r.status == 200: dl, got_it = cand, True; break
-                if got_it:
-                    if key: CIVITAI_GOOD["key"] = key
-                    break
-            if not got_it:
-                if 401 in statuses or 403 in statuses:
-                    raise RuntimeError(f"CivitAI said no to all {len(civitai_tokens())} of your keys for this one — it may be early access / members-only for its creator's supporters, or a key has expired (add more in civitai_keys.txt on your drive)")
-                raise RuntimeError(f"CivitAI wouldn't hand out the file (tried {len(cands)} links: {', '.join(map(str, sorted(set(statuses))))}) — it may be early access or removed")
-            target = loc or dl
-            # a signed download link: fetch it with 8 connections at once (much faster from CivitAI's storage)
-            if loc and shutil.which("aria2c") and await _aria_fetch(loc, dest + ".part", (f.get("sizeKB") or 0) * 1024, job):
-                os.replace(dest + ".part", dest)
-            else:
-              async with s.get(target, headers={} if loc else auth) as r:
-                if r.status != 200: raise RuntimeError(f"Download failed ({r.status})")
-                total = int(r.headers.get("Content-Length") or 0)
-                got = 0
-                with open(dest + ".part", "wb") as out:
-                    async for chunk in r.content.iter_chunked(1 << 20):
-                        out.write(chunk); got += len(chunk)
-                        if total: job["progress"] = round(got / total, 3)
-              os.replace(dest + ".part", dest)
+            # one download per file: a second copy of the same download (a restore that ran twice) used to delete the
+            # first one's half-written file under it and leave a broken model ("… extends past the end of the file")
+            waited = False
+            while dest in _DEST_BUSY:
+                job.setdefault("title", v["model"]["name"]); waited = True; job["step"] = "waiting: the same file is already downloading"; await asyncio.sleep(2)
+            job.pop("step", None)
+            if waited and os.path.isfile(dest) and is_model:
+                job.update(status="done", progress=1.0, name=rel, kind="model", folder=folder, title=v["model"]["name"], family=fam, trigger="")
+                return
+            if not (waited and os.path.isfile(dest)):
+              _DEST_BUSY.add(dest)
+              try:
+                job.update(title=v["model"]["name"], base=v.get("baseModel", ""), total_mb=round(f.get("sizeKB", 0) / 1000))
+                # the exact file picked above (its own link), on the site that answered, then the other site; a plain version link last
+                vhost = HOST_OF.get(f'/api/v1/model-versions/{vid}', CIVITAI)
+                path0 = re.sub(r"^https?://[^/]+", "", str(f.get("downloadUrl") or "")) or f"/api/download/models/{vid}"
+                cands = []
+                for h in [vhost] + [x for x in civitai_hosts() if x != vhost]:
+                    for pth in (path0, f"/api/download/models/{vid}" + ("?type=Model&format=SafeTensor" if is_model else ""), f"/api/download/models/{vid}"):
+                        if f"{h}{pth}" not in cands: cands.append(f"{h}{pth}")
+                loc, dl, statuses = None, cands[0], []
+                got_it = False
+                # every CivitAI key you have, one after another, when CivitAI says no (401/403) to one
+                for key in (civitai_tokens() or [""]):
+                    auth = {"Authorization": f"Bearer {key}"} if key else {}
+                    for cand in cands:
+                        async with s.get(cand, headers=auth, allow_redirects=False) as r:
+                            statuses.append(r.status)
+                            if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location") and "/login" not in r.headers["Location"]:
+                                loc, dl, got_it = r.headers["Location"], cand, True; break
+                            if r.status == 200: dl, got_it = cand, True; break
+                    if got_it:
+                        if key: CIVITAI_GOOD["key"] = key
+                        break
+                if not got_it:
+                    if 401 in statuses or 403 in statuses:
+                        raise RuntimeError(f"CivitAI said no to all {len(civitai_tokens())} of your keys for this one — it may be early access / members-only for its creator's supporters, or a key has expired (add more in civitai_keys.txt on your drive)")
+                    raise RuntimeError(f"CivitAI wouldn't hand out the file (tried {len(cands)} links: {', '.join(map(str, sorted(set(statuses))))}) — it may be early access or removed")
+                target = loc or dl
+                # a signed download link: fetch it with 8 connections at once (much faster from CivitAI's storage)
+                if loc and shutil.which("aria2c") and await _aria_fetch(loc, dest + ".part", (f.get("sizeKB") or 0) * 1024, job):
+                    os.replace(dest + ".part", dest)
+                else:
+                  async with s.get(target, headers={} if loc else auth) as r:
+                    if r.status != 200: raise RuntimeError(f"Download failed ({r.status})")
+                    total = int(r.headers.get("Content-Length") or 0)
+                    got = 0
+                    with open(dest + ".part", "wb") as out:
+                        async for chunk in r.content.iter_chunked(1 << 20):
+                            out.write(chunk); got += len(chunk)
+                            if total: job["progress"] = round(got / total, 3)
+                  os.replace(dest + ".part", dest)
+              finally:
+                _DEST_BUSY.discard(dest)
         trig = triggers_from(v.get("trainedWords"), v.get("description") or "")
         mdesc, mtags = "", []
         if v.get("modelId"):
@@ -4037,20 +4054,46 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
     return got
 
 
+_FETCHING: set = set()        # LoRAs (by file) being brought back
+_FETCHING_MODELS: set = set()  # your own checkpoints (by CivitAI version) being brought back
+_BG_SEM = asyncio.Semaphore(2)  # LoRAs and checkpoints coming back after a restore: two at a time
+
+
+async def _first_models_ready(job: dict):
+    """a new rental: your LoRAs and checkpoints wait until the models that open the Studio are in — a restore used to start
+    every one of them at once (8 connections each), next to the first models, and "Getting ready" crawled"""
+    run = os.environ.get("H3_RUN", "/opt/h3/run")
+    if not os.path.isfile(os.path.join(run, "downloads.json")): return  # no downloader here (your PC)
+    t0 = time.time()
+    while not os.path.isfile(os.path.join(run, "dl_first.done")) and time.time() - t0 < 3600:
+        job["step"] = "waits for the first models"
+        await asyncio.sleep(5)
+    job.pop("step", None)
+
+
+async def _bg_fetch(job: dict, url: str, release, now: bool = False):
+    try:
+        if now: await lora_job(job, url)  # a job of yours is waiting for it: straight away
+        else:
+            await _first_models_ready(job)
+            async with _BG_SEM: await lora_job(job, url)
+    finally:
+        release()
+
+
 def _fetch_missing_models(reg: dict):
-    """your own checkpoints from an imported checkpoint: downloaded again in the background"""
+    """your own checkpoints from an imported checkpoint: downloaded again in the background — once each, however many
+    times a restore or an import asks"""
     for rel, info in reg.items():
         vid = info.get("version_id")
-        if not vid or os.path.isfile(os.path.join(MODELS, info.get("folder", "diffusion_models"), rel)): continue
+        if not vid or vid in _FETCHING_MODELS or os.path.isfile(os.path.join(MODELS, info.get("folder", "diffusion_models"), rel)): continue
+        _FETCHING_MODELS.add(vid)
         jid = uuid.uuid4().hex[:10]
-        LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True}
-        _spawn(lora_job(job, f"https://civitai.com/api/download/models/{vid}"))
+        LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True, "title": info.get("title") or os.path.basename(rel)}
+        _spawn(_bg_fetch(job, f"https://civitai.com/api/download/models/{vid}", lambda v=vid: _FETCHING_MODELS.discard(v)))
 
 
-_FETCHING: set = set()
-
-
-def _fetch_missing_loras(reg: dict):
+def _fetch_missing_loras(reg: dict, now: bool = False):
     """LoRAs from an imported checkpoint that aren't on this rental yet: download them in the background"""
     for rel, info in reg.items():
         if os.path.isfile(os.path.join(LORAS, rel)) or rel in _FETCHING: continue
@@ -4062,8 +4105,8 @@ def _fetch_missing_loras(reg: dict):
             else: _FETCHING.discard(rel)
             continue
         jid = uuid.uuid4().hex[:10]
-        LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True}
-        _spawn(lora_job(job, url))
+        LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True, "title": info.get("title") or os.path.basename(rel)}
+        _spawn(_bg_fetch(job, url, lambda r=rel: _FETCHING.discard(r), now))
 
 
 def _import_zip(z, progress=None) -> dict:

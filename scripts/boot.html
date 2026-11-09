@@ -358,7 +358,9 @@
 
   async function poll() {
     try {
-      const [r, d] = await Promise.all([fetch("/h3-status", { cache: "no-store" }), fetch("/h3-downloads", { cache: "no-store" }).catch(() => null)]);
+      // each ask gives up after 8 s: one request lost in the tunnel used to freeze this page on "Connecting…" for good
+      const ask = (u) => fetch(u, { cache: "no-store", signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+      const [r, d] = await Promise.all([ask("/h3-status"), ask("/h3-downloads").catch(() => null)]);
       if (!r.ok) throw new Error(r.status);
       const dl = d && d.ok ? await d.json().catch(() => null) : null;
       render(await r.json(), dl); fails = 0;
