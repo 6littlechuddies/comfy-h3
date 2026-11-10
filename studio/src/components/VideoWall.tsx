@@ -3,7 +3,7 @@
 // own Download; Download all sends one .zip straight from the rental. Click a tile for the full-size viewer with sound.
 import { useEffect, useRef, useState } from "react";
 import { viewUrl, type FileRef } from "../lib/api";
-import { openViewer } from "./Viewer";
+import { noteSeen, openViewer } from "./Viewer";
 import { Icon, cx } from "./ui";
 
 export interface WallItem { file: FileRef; label: string; sub?: string }
@@ -57,7 +57,7 @@ export function VideoWall({ items, min = 200, empty, pending }: {
           </button>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6">
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">{it.label}{it.sub && <span className="text-muted"> · {it.sub}</span>}</span>
-            <a href={viewUrl(it.file)} download={saveName(it, i)} onClick={(e) => e.stopPropagation()} title="Download this video" aria-label={`Download ${it.label}`}
+            <a href={viewUrl(it.file)} download={saveName(it, i)} onClick={(e) => { e.stopPropagation(); noteSeen([it.file], "dl"); }} title="Download this video" aria-label={`Download ${it.label}`}
               className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md bg-black/70 text-ink opacity-80 hover:bg-accent hover:text-black group-hover:opacity-100">
               <Icon name="down" size={14} />
             </a>

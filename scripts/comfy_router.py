@@ -109,15 +109,21 @@ def planning_now() -> bool:
         or any(h["kind"] == "writer" for h in held)
 
 
+warm: dict[int, str] = {}  # card → the kind of job it ran last (that model is still loaded on it)
+
+
 def free_card(kind: str):
-    """the card this job should start on right now, or None (it waits in the line)"""
+    """the card this job should start on right now, or None (it waits in the line). Among the free cards, one that last
+    ran the same kind goes first: its model is still loaded, so the job starts at once — a plan sent to a card that just
+    made a video unloads the video model for the 19 GB writer, and the next video there loads it again (half a minute
+    each way). Plans that do have to spill over take the cards next to the writer's; videos fill from the other end."""
     w = writer_card()
     idle = [i for i in range(len(BACKENDS)) if up(i) and load(i) == 0]
     if not idle: return None
-    if w is None: return idle[0]
-    if kind == "writer": return w if w in idle else idle[0]
+    if w is None: return min(idle, key=lambda i: (warm.get(i) not in (kind, None), i))
+    if kind == "writer": return w if w in idle else min(idle, key=lambda i: (warm.get(i) != "writer", -i))
     others = [i for i in idle if i != w]
-    if others: return others[0]
+    if others: return min(others, key=lambda i: (warm.get(i) == "writer", warm.get(i) not in (kind, None), i))
     # only the writer's card is free
     if kind == "video" and (MODE["keep_writer"] or planning_now()): return None
     if kind == "other" and MODE["keep_writer"]: return None
@@ -223,7 +229,7 @@ async def _send_held(j: dict, target: int):
         sending.pop(j["pid"], None)
     if st == 200:
         owner[j["pid"]] = target
-        if target >= 0: busy[target].add(j["pid"])
+        if target >= 0: busy[target].add(j["pid"]); warm[target] = j["kind"]
         if j["ray"]: ray_pid.update(id=j["pid"], at=time.time(), client=j["client_id"])
     else:
         # the Studio already has its id: say it failed the way ComfyUI says it, over the live connection
@@ -284,7 +290,7 @@ async def prompt(req):
         if t is not None:
             try:
                 st, d = await send(t, body)
-                if st == 200: owner[pid] = t; busy[t].add(pid)
+                if st == 200: owner[pid] = t; busy[t].add(pid); warm[t] = kind
                 return web.json_response(d, status=st)
             except Exception as e:  # noqa: BLE001  (that card is restarting: the job waits in the line for a card that answers)
                 log(f"!! card {t} didn't take job {pid[:8]} ({type(e).__name__}) — it waits in the line")
@@ -401,6 +407,8 @@ async def router_info(req):
     return web.json_response({"cards": len(BACKENDS), "raylight": bool(RAY) and not RAY_STATE["broken"], "raylight_off_why": RAY_STATE["broken"] or None,
         "writer_card": writer_card(), "keep_writer": MODE["keep_writer"], "planning_now": planning_now(),
         "card_jobs": [sorted(kinds.get(x, "?") for x in busy[i]) for i in range(len(BACKENDS))],
+        "card_pids": [sorted(busy[i]) for i in range(len(BACKENDS))], "line_pids": [h["pid"] for h in _order()],
+        "warm": [warm.get(i) for i in range(len(BACKENDS))],
         "line": [h["kind"] + (" (split)" if h["ray"] else "") for h in _order()],
         "loads": [load(i) for i in range(len(BACKENDS))], "up": [up(i) for i in range(len(BACKENDS))], "raylight_up": up(-1) if RAY else None,
         "held": len(held), "held_jobs": [{"pid": h["pid"], "ray": h["ray"]} for h in held],

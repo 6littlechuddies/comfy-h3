@@ -1,5 +1,6 @@
-// Storage: what the rental's disk and your drive hold, which projects take the most room, and a clean-up for old results
-// (favourites are never touched), with a preview before anything is deleted.
+// Storage: what the rental's disk and your drive hold, a suggested clean-up (SmartClean.tsx: unused models, earlier tries
+// of reworked prompts, never-opened results, temp files), which projects take the most room, and a by-age clean-up for
+// old results (favourites are never touched), with a preview before anything is deleted.
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
@@ -9,6 +10,7 @@ import { useJobs } from "../lib/jobs";
 import { askConfirm } from "./Dialogs";
 import { usageReport, type UsageReport } from "../lib/usage";
 import { Icon, cx } from "./ui";
+import { SmartClean } from "./SmartClean";
 
 export const useStorage = create<{ open: boolean }>(() => ({ open: false }));
 export const openStorage = () => useStorage.setState({ open: true });
@@ -131,6 +133,8 @@ function StoragePanel() {
                 </>)}
             </section>
           )}
+
+          {info && <SmartClean onDone={() => load()} />}
 
           {info && !!info.projects.length && (
             <section className="card rounded-xl border border-line p-5 lg:col-span-2">

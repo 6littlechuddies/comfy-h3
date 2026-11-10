@@ -1,9 +1,27 @@
 // Full-screen viewer: wheel zooms at the cursor, drag pans, double-click toggles fit / 100 %, ←/→ flips through,
-// Esc closes. Used by the tray (click a thumbnail) and Compose's "Preview export".
+// F stars what you're looking at (a favourite: kept at clean-up, findable under ★), Esc closes. Used by the tray (click a thumbnail) and Compose's "Preview export".
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { Icon, cx } from "./ui";
+import { isFav, toggleFav, useFavs } from "../lib/favs";
+import type { FileRef } from "../lib/api";
+
+/** tell the rental you opened ("open") or downloaded ("dl") these results — clean-up never suggests downloaded ones */
+export function noteSeen(files: FileRef[], how: "open" | "dl") {
+  const out = files.filter((f) => f.type === "output").map((f) => ({ subfolder: f.subfolder, filename: f.filename }));
+  if (out.length) fetch("/studio-api/catalog/seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: out, how }), keepalive: true }).catch(() => {});
+}
+
+/** the file behind a viewer item (a /view?… link), so it can be starred from here — null for anything else */
+export function refOfUrl(url: string): FileRef | null {
+  try {
+    const u = new URL(url, location.origin);
+    if (u.pathname !== "/view" && u.pathname !== "/api/view") return null;
+    const filename = u.searchParams.get("filename");
+    return filename ? { filename, subfolder: u.searchParams.get("subfolder") ?? "", type: (u.searchParams.get("type") ?? "output") as FileRef["type"] } : null;
+  } catch { return null; }
+}
 
 export interface ViewItem { url: string; kind: "image" | "video" | "audio" | string; label?: string; trayId?: string; download?: string }
 interface ViewerState { items: ViewItem[]; index: number; actions?: (it: ViewItem) => { label: string; run: () => void }[] }
@@ -14,6 +32,11 @@ const close = () => useViewer.setState({ open: false });
 export function Viewer() {
   const { open, items, index, actions } = useViewer();
   const it = items[index];
+  const favs = useFavs((s) => s.set);
+  const ref = it ? refOfUrl(it.url) : null;
+  const fav = !!ref && isFav(favs, ref);
+  // opened full-size = not "never opened" at clean-up
+  useEffect(() => { if (open && ref && ref.type === "output") noteSeen([ref], "open"); }, [open, it?.url]); // eslint-disable-line react-hooks/exhaustive-deps
   const [z, setZ] = useState({ s: 1, x: 0, y: 0, fit: true });
   const [nat, setNat] = useState({ w: 0, h: 0 });
   const box = useRef<HTMLDivElement>(null);
@@ -32,6 +55,10 @@ export function Viewer() {
       if (e.key === "Escape") { e.stopPropagation(); close(); }
       if (e.key === "ArrowRight") useViewer.setState((s) => ({ index: Math.min(s.items.length - 1, s.index + 1) }));
       if (e.key === "ArrowLeft") useViewer.setState((s) => ({ index: Math.max(0, s.index - 1) }));
+      if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const cur = useViewer.getState(); const r = cur.items[cur.index] ? refOfUrl(cur.items[cur.index].url) : null;
+        if (r) { e.preventDefault(); e.stopPropagation(); toggleFav(r); }
+      }
       if (e.key === "0") fit();
       if (e.key === "1") setZ({ s: 1, x: 0, y: 0, fit: false });
     };
@@ -70,7 +97,9 @@ export function Viewer() {
           </div>
         )}
         {actions?.(it).map((a) => <button key={a.label} className="press btn-raised h-8 px-3 text-[13px]" onClick={() => { a.run(); close(); }}>{a.label}</button>)}
-        <a className="press btn-raised flex h-8 items-center px-3 text-[13px] text-ink" href={it.url} download={it.download ?? true}>Download</a>
+        {ref && <button className={cx("press btn-raised flex h-8 items-center gap-1.5 px-3 text-[13px]", fav ? "text-accent" : "text-ink")} aria-pressed={fav} onClick={() => toggleFav(ref)}
+          title={fav ? "Starred — press F to un-star" : "Star it (F): kept at clean-up, and under ★ in your results"}>{fav ? "★" : "☆"} <span className="font-mono text-[11px] text-dim">F</span></button>}
+        <a className="press btn-raised flex h-8 items-center px-3 text-[13px] text-ink" href={it.url} download={it.download ?? true} onClick={() => { if (ref) noteSeen([ref], "dl"); }}>Download</a>
         <button className="press btn-raised flex h-8 w-8 items-center justify-center" aria-label="Close" onClick={close}><Icon name="x" size={15} /></button>
       </div>
       <div ref={box} className={cx("relative min-h-0 flex-1 overflow-hidden", it.kind === "image" && (z.s > fitScale() + 0.001 ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"))}

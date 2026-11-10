@@ -495,11 +495,55 @@ SMALL_SKIP = {"video", "writer_xl", "autoprompter", "eros"}
 DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend").split(",") if x.strip()}
 
 
+# Smart start: your last rentals' usage log (kept on your drive) says which model groups you actually load. Groups you
+# use come first, most used first — the smallest one you use regularly opens the Studio — and groups no job of yours
+# has loaded wait as "Later" (one press on "Download now", or opening the tab that needs it, brings one in). It needs
+# 2+ rentals and 30+ logged jobs to judge; H3_START=all in the template downloads everything in models.txt order.
+START = {"uses": {}, "rentals": 0, "unused": set()}
+
+
+def start_profile(groups) -> dict:
+    if os.environ.get("H3_START", "smart").strip().lower() == "all": return {}
+    d = None
+    for fn in ("usage_start.json", "usage.json"):
+        try: d = json.load(open(os.path.join(STATE_DIR, fn))); break
+        except (OSError, ValueError): continue
+    rentals = (d or {}).get("rentals")
+    if not isinstance(rentals, dict) or len(rentals) < 2: return {}
+    files: dict[str, int] = {}
+    for e in rentals.values():
+        for n, v in ((e or {}).get("m") or {}).items():
+            try: files[n] = files.get(n, 0) + int(v[0])
+            except (TypeError, ValueError, IndexError): pass
+    uses = {g["id"]: sum(files.get(os.path.basename(f["name"]), 0) for f in g["files"]) for g in groups}
+    if sum(uses.values()) < 30: return {}
+    return {"uses": uses, "rentals": len(rentals)}
+
+
+def by_use(groups: list, prof: dict) -> list:
+    """the groups in smart-start order (see START); remembers which ones wait"""
+    uses = prof.get("uses") or {}
+    lib = [g for g in groups if g["id"] == "library"]
+    rest = [g for g in groups if g["id"] != "library"]
+    used = sorted((g for g in rest if uses.get(g["id"], 0) > 0), key=lambda g: -uses[g["id"]])
+    if not used: return groups
+    top = uses[used[0]["id"]]
+    size = lambda g: sum(f.get("size", 0) or 0 for f in g["files"])
+    regular = [g for g in used if uses[g["id"]] >= max(5, top * 0.02)]
+    first = min(regular, key=size) if regular else used[0]
+    if size(first) > 25 * 2**30: first = used[0]
+    unused = [g for g in rest if uses.get(g["id"], 0) <= 0]
+    START.update(uses=uses, rentals=prof.get("rentals", 0), unused={g["id"] for g in unused})
+    # your own LoRAs and checkpoints (CivitAI, slower) after the models you use, before the ones that wait
+    return [first] + [g for g in used if g is not first] + lib + unused
+
+
 def queue_order(groups, nxt=()) -> list:
-    """the download order: the first group, then what you asked for next, then the rest in models.txt order — on a small
-    card the groups it can't run go last"""
+    """the download order: the first group, then what you asked for next, then the rest in order (models.txt, or by use
+    on a smart start) — on a small card the groups it can't run go last, unless your usage log shows you do run them"""
     rest = [g for g in groups[1:] if g["id"] not in nxt]
-    if SMALL_GPU: rest = [g for g in rest if g["id"] not in SMALL_SKIP] + [g for g in rest if g["id"] in SMALL_SKIP]
+    small = {x for x in SMALL_SKIP if START["uses"].get(x, 0) <= 0}
+    if SMALL_GPU: rest = [g for g in rest if g["id"] not in small] + [g for g in rest if g["id"] in small]
     return groups[:1] + [g for x in nxt for g in groups if g["id"] == x] + rest
 
 
@@ -513,7 +557,7 @@ DISK_RESERVE = int(float(os.environ.get("DISK_RESERVE_GB", "15")) * 2**30)
 def later_ids(groups) -> set[str]:
     d = switches()
     small = SMALL_SKIP if SMALL_GPU and os.environ.get("H3_SMALL_LATER") == "1" else set()
-    ids = (SKIP | DEFAULT_LATER | small | set(d.get("later") or [])) - set(d.get("now") or [])
+    ids = (SKIP | DEFAULT_LATER | small | START["unused"] | set(d.get("later") or [])) - set(d.get("now") or [])
     vram = GPU.get("vram_mb", 0)
     ids |= {g for g, need in BIG_ONLY.items() if 0 < vram < need}
     if groups: ids.discard(groups[0]["id"])
@@ -621,7 +665,7 @@ def main() -> int:
     # imported export's — Later doesn't carry over; nor does "Next")
     try:
         d = json.load(open(LATER_FILE))
-        if d.get("later") or d.get("next"):
+        if (d.get("later") or d.get("next")) and not d.get("remove"):  # (a removal that's waiting keeps its Later)
             d.pop("later", None); d.pop("next", None)
             with open(LATER_FILE + ".tmp", "w") as fh: json.dump(d, fh)
             os.replace(LATER_FILE + ".tmp", LATER_FILE); log("starting with every group queued (Later is per rental)")
@@ -632,6 +676,13 @@ def main() -> int:
     write(groups, note="checking model files")
     with cf.ThreadPoolExecutor(16) as ex:
         list(ex.map(resolve, [f for g in groups for f in g["files"]]))
+    prof = start_profile(groups)
+    if prof:
+        groups[:] = by_use(groups, prof)
+        if START["unused"]:
+            log(f"smart start (your last {START['rentals']} rentals): first {groups[0]['id']}, then "
+                + ", ".join(f"{g['id']} ({START['uses'].get(g['id'], 0)})" for g in groups[1:] if g["id"] not in START["unused"])
+                + " · waiting as Later (never used): " + ", ".join(sorted(START["unused"])) + " · H3_START=all turns this off")
     for g in groups:
         g["state"] = "done" if all(complete(f) for f in g["files"]) else "waiting"
     write(groups)
@@ -662,7 +713,8 @@ def main() -> int:
             nd, lf = ROOM.get(g["id"], (0, 0))
             g["why"] = (f"not enough disk — needs {nd / 2**30:.0f} GB, only {lf / 2**30:.0f} GB free after the {DISK_RESERVE / 2**30:.0f} GB kept for your results. "
                         "Rent with a bigger disk, or press Later on a group you don't use (Storage page shows which)" if g["id"] in full
-                        else f"needs a {BIG_ONLY[g['id']] // 1000 + 4} GB+ card" if g["id"] in BIG_ONLY and 0 < vram < BIG_ONLY[g["id"]] else None) if g["later"] else None
+                        else f"needs a {BIG_ONLY[g['id']] // 1000 + 4} GB+ card" if g["id"] in BIG_ONLY and 0 < vram < BIG_ONLY[g["id"]]
+                        else f"not used on your last {START['rentals']} rentals — press Download now if you want it" if g["id"] in START["unused"] else None) if g["later"] else None
             if g["id"] in full and g["id"] not in NOSPACE_LOGGED: NOSPACE_LOGGED.add(g["id"]); log(f"{g['label']}: waiting — not enough disk")
     def check_groups(final=False):
         for gi, g in enumerate(groups):
@@ -698,7 +750,7 @@ def main() -> int:
     with open(os.path.join(RUN, "downloader.pid"), "w") as fh:
         fh.write(str(os.getpid()))
     mark_later(); check_groups(); write(groups)
-    lf_mtime = os.path.getmtime(LATER_FILE) if os.path.exists(LATER_FILE) else 0
+    lf_mtime = os.path.getmtime(LATER_FILE) if os.path.exists(LATER_FILE) and not switches().get("remove") else 0
 
     p = None; dl_start = None; dl_base = 0; launched_order: tuple = ()
     last_t, last_b = time.time(), sum(on_disk(f) for g in groups for f in g["files"])
@@ -714,6 +766,27 @@ def main() -> int:
         if m != lf_mtime:  # a switch was pressed: "Download now" on a failed group retries its files
             lf_mtime = m
             prune = True
+            # Storage → Remove from this disk: a group's files go (it's "later" now), except files a group you keep also uses
+            sw = switches(); rm = set(sw.get("remove") or [])
+            if rm:
+                keep_ids = {g["id"] for g in groups} - later_ids(groups)
+                for g in groups:
+                    if g["id"] not in rm or g is groups[0]: continue
+                    freed = 0
+                    for f in g["files"]:
+                        if any(x in keep_ids for x in [f["gid"], *f.get("also", [])]): continue
+                        for path in (f["path"], f["path"] + SUFFIX, f["path"] + SUFFIX + ".aria2"):
+                            try: freed += os.path.getsize(path); os.remove(path)
+                            except OSError: pass
+                    flagged.discard(g["id"])
+                    try: os.remove(os.path.join(RUN, f"dl_{g['id']}.done"))
+                    except OSError: pass
+                    g["state"] = "later"
+                    log(f"{g['label']}: removed from this disk ({freed / 2**30:.1f} GB freed) — Download now brings it back")
+                sw.pop("remove", None)
+                with open(LATER_FILE + ".tmp", "w") as fh: json.dump(sw, fh)
+                os.replace(LATER_FILE + ".tmp", LATER_FILE); lf_mtime = os.path.getmtime(LATER_FILE)
+                mark_later()
             for g in groups:
                 if g.get("later"): continue
                 for f in g["files"]:

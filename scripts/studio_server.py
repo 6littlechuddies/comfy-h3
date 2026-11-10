@@ -713,6 +713,7 @@ async def _warmup() -> None:
         if (_state_json("speed", {}) or {}).get("warmup") is False: WARM["state"] = "off (switch)"; return
         try: groups = {g.get("id"): g.get("state") for g in json.load(open(os.path.join(run_dir, "downloads.json"))).get("groups") or []}
         except (OSError, ValueError): continue
+        if groups.get("image") == "later": WARM["state"] = "off (the picture model isn't downloaded on this rental)"; return
         if groups.get("image") != "done": continue
         te = "qwen3VL4BAbliteratedComfyui_v10_full_fp8.safetensors" if groups.get("krea_te") == "done" else "qwen3vl_4b_fp8_scaled.safetensors"
         graph = {
@@ -2650,6 +2651,7 @@ async def _proton_keys():
         except OSError as e:
             print("!! couldn't save the CivitAI keys:", e, flush=True)
         await _hf_rest_get()  # before the keys file: the downloader picks its first key as soon as that appears
+        await _usage_start_get()  # and reads what you use, to choose what downloads first (smart start)
         try:
             os.makedirs(os.path.dirname(HF_KEYS_FILE), mode=0o700, exist_ok=True)
             fd = os.open(HF_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -2692,6 +2694,21 @@ async def _hf_rest_get():
         HF_MARKS_SENT[0] = os.path.getmtime(HF_MARKS)
     except Exception as e:  # noqa: BLE001
         print("!! Hugging Face key notes from your drive:", _redact(str(e))[:200], flush=True)
+
+
+async def _usage_start_get():
+    """your usage log from the drive, for the downloader's smart start (a copy: this rental's own log is merged later)"""
+    try:
+        if not _proton_on(): return
+        folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
+        rc, txt = await _rclone("cat", f"proton:{folder}/usage.json", timeout=60)
+        if rc != 0 or "{" not in txt: return
+        d = json.loads(txt[txt.index("{"): txt.rindex("}") + 1])
+        os.makedirs(STATE, exist_ok=True)
+        with open(os.path.join(STATE, "usage_start.json.tmp"), "w") as f: json.dump(d, f)
+        os.replace(os.path.join(STATE, "usage_start.json.tmp"), os.path.join(STATE, "usage_start.json"))
+    except Exception as e:  # noqa: BLE001
+        print("!! usage log for the smart start:", _redact(str(e))[:200], flush=True)
 
 
 async def _hf_rest_put():
@@ -3770,7 +3787,7 @@ def _build_export(want: set, results: bool = True) -> tuple[str, str]:
             if d is not None: z.writestr(f"{name}.json", json.dumps(d))
         if not want:  # everything: your preferences come along
             # a full checkpoint: preferences, timings, your LoRA library and own checkpoints (re-downloaded on import), results
-            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "input_sources", "site_addr", "speed"):
+            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "catalog_seen", "input_sources", "site_addr", "speed"):
                 d = _state_json(name)
                 if d is not None: z.writestr(f"{name}.json", json.dumps(d))
             _export_results(z, files=results)
@@ -3843,7 +3860,7 @@ async def files_zip(req):
         def take(self):
             out = b"".join(self.buf); self.buf = []; return out
 
-    sink, used = Sink(), set()
+    sink, used, got = Sink(), set(), []
     with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
         for x in files:
             try: path = _file_of(x)
@@ -3857,8 +3874,15 @@ async def files_zip(req):
             used.add(arc.lower())
             await asyncio.to_thread(z.write, path, arc)
             await resp.write(sink.take())
+            got.append(f"{x.get('subfolder') or ''}/{x['filename']}")
     await resp.write(sink.take())
     await resp.write_eof()
+    try:  # downloaded = a keeper at clean-up
+        sn = _seen(); now = int(time.time())
+        for k in got: sn.setdefault("files", {})[k] = [now, "dl"]
+        _state_write("catalog_seen", sn)
+    except Exception:  # noqa: BLE001
+        pass
     return resp
 
 
@@ -4082,6 +4106,10 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
     if isinstance(cm, dict) and cm:  # what each result was made from: yours stay, theirs are added
         cur = _state_json("catalog_meta", {}) or {}
         _state_write("catalog_meta", {**cm, **(cur if isinstance(cur, dict) else {})}); got["catalog"] = True
+    cs = rd("catalog_seen.json") if "catalog_seen.json" in names else None
+    if isinstance(cs, dict) and isinstance(cs.get("files"), dict):  # what you opened / downloaded on earlier rentals (clean-up keeps those)
+        cur = _seen()
+        _state_write("catalog_seen", {"since": min(float(cs.get("since") or time.time()), float(cur.get("since") or time.time())), "files": {**cs["files"], **(cur.get("files") or {})}})
     ins = rd("input_sources.json") if "input_sources.json" in names else None
     if isinstance(ins, dict) and ins:  # where earlier rentals' input copies came from (to make them again when needed)
         cur = _state_json("input_sources", {}) or {}
@@ -4392,6 +4420,8 @@ async def downloads_later(req):
     {group, next: true} — fetch it now AND move it to the front of the queue (right after the first group)."""
     d = await req.json()
     gid, later, nxt_req = str(d.get("group") or ""), bool(d.get("later")), bool(d.get("next"))
+    remove = bool(d.get("remove"))  # {group, remove: true}: Later, and its files come off this disk (Storage → clean-up)
+    if remove: later = True
     if nxt_req: later = False
     try:
         groups = json.load(open(os.path.join(H3_RUN, "downloads.json"))).get("groups") or []
@@ -4423,7 +4453,7 @@ async def downloads_later(req):
     os.makedirs(STATE, exist_ok=True)
     tmp = LATER_FILE + ".tmp"
     with open(tmp, "w") as f:
-        json.dump({"later": sorted(lat), "now": sorted(now), "next": nxt}, f)
+        json.dump({"later": sorted(lat), "now": sorted(now), "next": nxt, **({"remove": sorted(set(cur.get("remove") or []) | touched)} if remove else {})}, f)
     os.replace(tmp, LATER_FILE)
     # the downloader picks the change up within a few seconds; if it isn't running any more, start it again
     alive = False
@@ -4432,7 +4462,7 @@ async def downloads_later(req):
         os.kill(pid, 0); alive = True
     except (OSError, ValueError):
         pass
-    if not later and not alive and os.path.exists("/opt/h3/downloader.py"):
+    if (not later or remove) and not alive and os.path.exists("/opt/h3/downloader.py"):
         env = {**os.environ, "COMFY_DIR": COMFY_DIR, "H3_RUN": H3_RUN, "SPEED_CHECK_SECONDS": "999999"}
         subprocess.Popen(["python", "/opt/h3/downloader.py", "/opt/h3/models.txt"], env=env, start_new_session=True,
                          stdout=open("/var/log/downloader.log", "a"), stderr=subprocess.STDOUT)
@@ -4980,12 +5010,149 @@ async def catalog_meta(req):
     """POST {files: [{subfolder, filename}], label, prompt, tab, character} — what a result was made from, for the catalog"""
     d = await req.json()
     meta = _state_json("catalog_meta", {}) or {}
-    info = {k: str(d.get(k) or "")[:800] for k in ("label", "prompt", "tab", "character", "project") if d.get(k)}
+    info = {k: str(d.get(k) or "")[:800] for k in ("label", "prompt", "tab", "character", "project", "loras") if d.get(k)}
     info["at"] = int(time.time())
     for f in (d.get("files") or [])[:64]:
         if isinstance(f, dict) and f.get("filename"): meta[f"{f.get('subfolder', '')}/{f['filename']}"] = info
     _state_write("catalog_meta", meta)
     return web.json_response({"ok": True})
+
+
+# ------------------------------------------------------------------ smart clean-up (Storage → Suggested clean-up)
+# What's probably not worth its disk, the way phone cleaners do it: grouped by reason, with sizes, nothing deleted until
+# you've looked and pressed. Keepers are never suggested: starred (F in the viewer / ★), downloaded, a character's cover,
+# training-set or reference picture, a scene's picture. Reasons:
+#   early    — earlier tries of a prompt you kept changing (a "prompt family": the same project, near-identical words,
+#              in a row). The last version is where you ended up, so its takes stay; the tries before it are suggested.
+#   unopened — made 7+ days ago and never opened full-size (counted from the day this started being noted)
+#   scratch  — ComfyUI's temp files and the Studio's work files, older than an hour
+_WORD = re.compile(r"[a-z0-9']+")
+
+
+def _tokens(p: str) -> frozenset:
+    return frozenset(_WORD.findall((p or "").lower()))
+
+
+def _refs_in(node, out: set):
+    """every file a saved thing points at (covers, training sets, references…)"""
+    if isinstance(node, dict):
+        if node.get("filename") and "subfolder" in node: out.add(f"{node.get('subfolder') or ''}/{node['filename']}")
+        for v in node.values(): _refs_in(v, out)
+    elif isinstance(node, list):
+        for v in node: _refs_in(v, out)
+
+
+def _seen() -> dict:
+    d = _state_json("catalog_seen", {}) or {}
+    if not isinstance(d, dict) or "since" not in d: d = {"since": time.time(), "files": {}}; _state_write("catalog_seen", d)
+    return d
+
+
+async def catalog_seen(req):
+    """POST {files: [{subfolder, filename}], how: "open" | "dl"} — you opened these full-size, or downloaded them"""
+    d = await req.json()
+    how = "dl" if d.get("how") == "dl" else "open"
+    s = _seen(); files = s.setdefault("files", {}); n = 0
+    for f in (d.get("files") or [])[:500]:
+        if not isinstance(f, dict) or not f.get("filename"): continue
+        k = f"{f.get('subfolder') or ''}/{f['filename']}"
+        if how == "dl" or files.get(k, [0, ""])[1] != "dl": files[k] = [int(time.time()), how]; n += 1
+    if n: _state_write("catalog_seen", s)
+    return web.json_response({"ok": True})
+
+
+def _scratch_files() -> list:
+    out, now = [], time.time()
+    for root in (os.path.join(COMFY_DIR, "temp"), os.path.join(OUTPUT, "studio", "_work"), IMPORT_DIR):
+        for dp, _dirs, fns in os.walk(root):
+            for fn in fns:
+                p = os.path.join(dp, fn)
+                try: st = os.stat(p)
+                except OSError: continue
+                if now - st.st_mtime > 3600: out.append((p, st.st_size))
+    return out
+
+
+def _cleanup_scan() -> dict:
+    items = [it for it in _catalog_scan() if it["folder"] != "Testing"]
+    meta = _state_json("catalog_meta", {}) or {}
+    favs = _state_json("favorites", {}) or {}
+    seen = _seen(); opened = seen.get("files") or {}; since = float(seen.get("since") or time.time())
+    pinned: set = set()
+    for name in ("characters", "scenes"): _refs_in(_state_json(name, None), pinned)
+    key = lambda it: f"{it['subfolder']}/{it['filename']}"
+    def keeper(it) -> str:
+        k = key(it)
+        if favs.get(f"output/{k}"): return "starred"
+        if opened.get(k, [0, ""])[1] == "dl": return "downloaded"
+        if k in pinned: return "used by a character or scene"
+        return ""
+    # prompt families, per project and kind, in the order things were made
+    groups: dict = {}
+    for it in sorted(items, key=lambda x: x["mtime"]):
+        m = meta.get(key(it))
+        if isinstance(m, dict) and (m.get("prompt") or "").strip(): groups.setdefault((it["folder"], it["kind"]), []).append((it, m))
+    families, early = [], []
+    for (folder, kind), rows in groups.items():
+        fams: list = []
+        for it, m in rows:
+            p = m["prompt"].strip(); t = _tokens(p); lo = (m.get("loras") or "").strip()
+            fam = None
+            for f in reversed(fams[-12:]):
+                lt = f["tokens"]; union = len(t | lt) or 1
+                if p == f["versions"][-1]["prompt"] or len(t & lt) / union >= 0.55: fam = f; break
+            if fam is None:
+                fam = {"id": f"f{len(families) + len(fams)}_{abs(hash((folder, kind, p))) % 10**8}", "folder": folder, "kind": kind, "tokens": t, "versions": []}; fams.append(fam)
+            v = fam["versions"][-1] if fam["versions"] else None
+            if v is None or v["prompt"] != p or v["loras"] != lo:
+                prev_t = _tokens(v["prompt"]) if v else frozenset()
+                v = {"prompt": p, "loras": lo, "at": it["mtime"], "files": [],
+                     "added": sorted(t - prev_t)[:12] if fam["versions"] else [], "removed": sorted(prev_t - t)[:12] if fam["versions"] else [],
+                     "loras_changed": bool(fam["versions"]) and lo != fam["versions"][-1]["loras"]}
+                fam["versions"].append(v)
+            v["files"].append(it); fam["tokens"] = t
+        for f in fams:
+            if len(f["versions"]) < 2: continue
+            vs = []
+            for i, v in enumerate(f["versions"]):
+                final = i == len(f["versions"]) - 1
+                fl = []
+                for it in v["files"]:
+                    why = keeper(it)
+                    row = {"subfolder": it["subfolder"], "filename": it["filename"], "type": "output", "kind": it["kind"], "size": it["size"], "mtime": it["mtime"], "keep": why or ("where you ended up" if final else "")}
+                    fl.append(row)
+                    if not final and not why: early.append({**row, "family": f["id"], "version": i + 1})
+                vs.append({"n": i + 1, "prompt": v["prompt"][:600], "loras": v["loras"], "at": v["at"], "added": v["added"], "removed": v["removed"], "loras_changed": v["loras_changed"], "final": final, "files": fl})
+            families.append({"id": f["id"], "folder": f["folder"] or "Older results", "kind": f["kind"], "title": f["versions"][-1]["prompt"][:90], "versions": vs})
+    early_keys = {f"{x['subfolder']}/{x['filename']}" for x in early}
+    early_keys |= {f"{x['subfolder']}/{x['filename']}" for f in families for v in f["versions"] if v["final"] for x in v["files"]}  # where you ended up: not "unopened" either
+    week = time.time() - 7 * 86400
+    unopened = [{"subfolder": it["subfolder"], "filename": it["filename"], "type": "output", "kind": it["kind"], "size": it["size"], "mtime": it["mtime"]}
+                for it in items if since <= it["mtime"] < week and key(it) not in opened and key(it) not in early_keys and not keeper(it)]
+    scratch = _scratch_files()
+    du = shutil.disk_usage(COMFY_DIR)
+    families.sort(key=lambda f: -sum(x["size"] for v in f["versions"] if not v["final"] for x in v["files"] if not x["keep"]))
+    return {"disk": {"total": du.total, "free": du.free}, "since": since, "keepers": sum(1 for it in items if keeper(it)), "results": len(items),
+            "early": {"count": len(early), "bytes": sum(x["size"] for x in early), "items": early[:4000]},
+            "unopened": {"count": len(unopened), "bytes": sum(x["size"] for x in unopened), "items": unopened[:4000]},
+            "scratch": {"count": len(scratch), "bytes": sum(b for _p, b in scratch)},
+            "families": families[:200]}
+
+
+async def cleanup(req):
+    """GET → what could go (see above). POST {do: "scratch"} → delete the temp / work files older than an hour."""
+    if req.method == "GET":
+        return web.json_response(await asyncio.to_thread(_cleanup_scan))
+    d = await req.json()
+    if d.get("do") != "scratch": raise web.HTTPBadRequest(text="unknown")
+    def go():
+        n = b = 0
+        for p, size in _scratch_files():
+            try: os.remove(p); n += 1; b += size
+            except OSError: pass
+        return n, b
+    n, b = await asyncio.to_thread(go)
+    return web.json_response({"ok": True, "files": n, "bytes": b, "message": f"Removed {n} temp file{'' if n == 1 else 's'} · {b / 2**30:.1f} GB freed"})
 
 
 async def site_push(req):
@@ -5288,7 +5455,7 @@ def main():
         web.post("/studio-api/transcribe", transcribe),
         web.get("/studio-api/characters/export", characters_export), web.post("/studio-api/characters/import", characters_import),
         web.post("/studio-api/import/start", import_start), web.put("/studio-api/import/{id}/chunk", import_chunk),
-        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
+        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/catalog/seen", catalog_seen), web.route("*", "/studio-api/cleanup", cleanup), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
     ])
     if LOCAL:
         app.router.add_get("/h3-downloads", local_downloads)

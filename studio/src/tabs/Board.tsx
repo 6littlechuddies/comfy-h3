@@ -20,6 +20,8 @@ import { AvoidLine, MOUTH_OPTS, MUSIC_OPTS } from "../components/AvoidLine";
 import { WriterSetup } from "./Prompt";
 import { copyText } from "../lib/copy";
 import { AutoVideo, DownloadAll, VideoWall, type WallItem } from "../components/VideoWall";
+import { noteSeen } from "../components/Viewer";
+import { CardStrip } from "../components/CardStrip";
 
 /** 2 seamless loops + 2 image → video: a − n + per video type */
 function MixEditor({ mix, onChange }: { mix: Mix; onChange: (m: Mix) => void }) {
@@ -131,6 +133,7 @@ export default function BoardTab() {
           <WriterSetup />
         </Advanced>
       </>}>
+      <CardStrip />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Btn kind="primary" onClick={() => setChoosing(true)}><Icon name="plus" size={14} /> Add characters</Btn>
         <span className="text-[12.5px] text-dim">or drag them in from the left — or drop pictures from their projects (they go to that character's box)</span>
@@ -255,7 +258,7 @@ function BoxCard({ b, onOpen }: { b: Box; onOpen: () => void }) {
                   <AutoVideo src={viewUrl(it.file)} className="aspect-[9/16] w-full object-cover" />
                 </button>
                 {i === 3 && vids.length > 4 && <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55 text-[13px] font-semibold text-ink">+{vids.length - 4}</span>}
-                <a href={viewUrl(it.file)} download={saveNameOf(it, i)} title="Download this video" aria-label="Download this video"
+                <a href={viewUrl(it.file)} download={saveNameOf(it, i)} onClick={() => noteSeen([it.file], "dl")} title="Download this video" aria-label="Download this video"
                   className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded bg-black/75 text-ink opacity-0 hover:bg-accent hover:text-black group-hover:opacity-100 focus:opacity-100">
                   <Icon name="down" size={12} />
                 </a>

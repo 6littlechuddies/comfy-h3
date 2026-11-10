@@ -244,7 +244,9 @@ async function collect(id: string, mayLose = true) {
       const sent = job.meta?.sent as { prompt?: string; words?: string; character?: string } | undefined;
       fetch("/studio-api/catalog/meta", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         files: files.map((o) => ({ subfolder: o.subfolder, filename: o.filename })), label: job.label, tab: job.tab,
-        prompt: sent?.words || sent?.prompt || "", character: sent?.character || "", project: typeof job.meta?.project === "string" ? job.meta.project : "" }) }).catch(() => {});
+        prompt: sent?.words || sent?.prompt || "", character: sent?.character || "", project: typeof job.meta?.project === "string" ? job.meta.project : "",
+        // which LoRAs it used: a change of LoRAs is a new version of the prompt at clean-up (prompt families)
+        loras: ((job.meta?.opts as { loras?: { name?: string; off?: boolean }[] } | undefined)?.loras ?? []).filter((l) => l?.name && !l.off).map((l) => String(l.name).split("/").pop()!.replace(/\.safetensors$/, "")).join(", ") }) }).catch(() => {});
     }
     // the feed already shows it when you're on that tab — only nudge when you're elsewhere
     const here = (await import("./settings")).useSettings.getState().s.tab === job.tab;
