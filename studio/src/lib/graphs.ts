@@ -775,7 +775,7 @@ export interface PromptRefPicture { file: string; tag: string; label: string }
  *  from the reference pictures, by Ref2VA + the FL2V 8-step turbo + the Character Swap LoRA. Long clips go in overlapping
  *  windows (124 frames, 18 carried over) inside a native loop, then the source's own audio is put back. */
 export function buildSwap(p: { video: string; pictures: string[]; who: string; pick: "largest" | "leftmost" | "rightmost"; resolution: "480" | "768";
-  seconds: number; notes: string; seed: number; kitchen: boolean; prefix: string }): ApiGraph {
+  seconds: number; /** the whole prompt (swapPrompt, or your own edit of it) */ prompt: string; seed: number; kitchen: boolean; prefix: string }): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: M.h3Ref, weight_dtype: "default" });
   let model: Link = o(g.add("MiniMaxH3SigmaShift", { model: o(unet), shift_video: 12, shift_audio: 3 }));
@@ -804,12 +804,7 @@ export function buildSwap(p: { video: string; pictures: string[]; who: string; p
   const start = g.add("StartLoop", { mode: "simple", "mode.num_iterations": o(plan, 2), cache_iterations: false });
   const win = g.add("H3RelayWindowInputs", { source: o(prep), window: o(plan, 3), iteration_index: o(start), previous: o(start, 4), reference_history: true, fps: 24,
     resize_anchor: true, history_audio_mode: "source", source_audio: o(prep, 1), mask: o(expand) });
-  const prompt = [
-    "Replace the selected person with the reference character shown in the reference pictures — every picture shows this same character.",
-    "Keep the character's face, hair, body, outfit and accessories exactly as in the pictures.",
-    "Preserve the source performance (pose, movement, gaze and expression), the scene, the camera and the audio timing.",
-    p.notes.trim(),
-  ].filter(Boolean).join(" ");
+  const prompt = p.prompt.trim() || swapPrompt({ pictures: p.pictures.length, who: p.who });
   const refs: Inputs = {};
   p.pictures.slice(0, 8).forEach((f, i) => (refs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
   const cond = g.add("MiniMaxH3ReferenceToVideo", { clip: o(text), prompt, width: o(dims, 0), height: o(dims, 1), length: o(win, 8), ref_image_size: "match",
@@ -830,6 +825,27 @@ export function buildSwap(p: { video: string; pictures: string[]; who: string; p
   const video = g.add("CreateVideo", { images: o(fin), fps: o(fin, 2), audio: o(fin, 1) });
   g.add("SaveVideo", { video: o(video), filename_prefix: p.prefix, format: "auto", "format.codec": "auto" }, "result");
   return g.graph;
+}
+
+/** the swap prompt, the way the LoRA's author works: start from the default (the model card's wording, with the tags the model
+ *  was trained on — <Video 1> is the source clip, <Picture n> the character), then change bits when it struggles:
+ *  - nothing swapped → add the character's NAME (and how they look);
+ *  - it removed something you wanted → add it to the KEEP list. */
+export function swapPrompt(o: { pictures: number; who?: string; name?: string; look?: string; keep?: string; notes?: string }): string {
+  const n = Math.max(1, Math.min(8, o.pictures));
+  const tags = Array.from({ length: n }, (_, i) => `<Picture ${i + 1}>`);
+  const pics = n === 1 ? tags[0] : `${tags.slice(0, -1).join(", ")} and ${tags[n - 1]}`;
+  const who = (o.who ?? "").trim();
+  const name = (o.name ?? "").trim();
+  const keep = (o.keep ?? "").split(/[,\n;]+/).map((x) => x.trim()).filter(Boolean);
+  return [
+    `Replace the selected person${who && who !== "person" ? ` (the ${who})` : ""} in <Video 1> with ${name ? `${name}, ` : ""}the character in ${pics}${n > 1 ? ` — every picture shows this same character` : ""}.`,
+    o.look?.trim() ? `${name || "The character"}: ${o.look.trim().replace(/\.?$/, ".")}` : "",
+    `Keep ${name ? `${name}'s` : "the character's"} face, hair and clothing from ${n > 1 ? "the pictures" : tags[0]}.`,
+    "Follow the source pose, gaze, expression and movement, and preserve the scene, the camera, the other people and the audio timing.",
+    keep.length ? `Also preserve: ${keep.join(", ")}.` : "",
+    (o.notes ?? "").trim().replace(/^./, (c) => c.toUpperCase()).replace(/([^.!?])$/, "$1."),
+  ].filter(Boolean).join(" ");
 }
 
 export interface PromptRefVideo { file: string; tag: string; label: string; start: number; end: number; useSound: boolean }

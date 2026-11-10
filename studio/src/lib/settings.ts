@@ -100,6 +100,8 @@ export interface AnimateS {
   mode: "ref" | "i2v" | "fl" | "loop" | "swap";
   /** Swap the person: who in the video to replace (words SAM looks for), which one if several match, and the working size */
   swapWho?: string; swapPick?: "largest" | "leftmost" | "rightmost"; swapRes?: "480" | "768";
+  /** the character's name in the swap prompt ("nothing swapped? add the name") and what else to keep ("it removed X? add X") */
+  swapName?: string; swapKeep?: string;
   prompt: string; seconds: number; aspect: "auto" | "16:9" | "9:16" | "1:1"; mp: number;
   turbo: boolean; /** how many videos one press makes (different seeds, the same plan) */ takes: number; loras: LoraPick[]; refImageSize: "match" | "max"; lowMemDecode: boolean; adv: Adv;
   /** plain words: the video prompt writer (Plan a video) plans it second by second first, with your references (default on) */

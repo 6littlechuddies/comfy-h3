@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { activePack, planWriter, useBigPlanner } from "../lib/packs";
-import { buildAnimate, buildSwap, type AnimateOpts, type LoraPick } from "../lib/graphs";
+import { buildAnimate, buildSwap, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
 import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
@@ -143,6 +143,11 @@ export default function AnimateTab() {
     const trimmed = swapVid.end < Math.min(dur, 15) - 0.05;
     return { s: Math.round((trimmed ? swapVid.end : dur) * 10) / 10, trimmed };
   })();
+  // the swap prompt: the default with your name / keep list / notes — or, once you've edited the whole thing (it has <Video 1>), yours as typed
+  const swapChar = (() => { const id = swapPics.find((r) => r.charId)?.charId; return id ? useCharacters.getState().list.find((c) => c.id === id) ?? null : null; })();
+  const swapFull = /<Video 1>/.test(a.prompt);
+  const swapText = swapFull ? a.prompt.trim() : swapPrompt({ pictures: swapPics.length || 1, who: a.swapWho, name: (a.swapName ?? "").trim() || swapChar?.name,
+    look: swapChar?.block, keep: a.swapKeep, notes: a.prompt });
   const why = !dl.ready ? dl.why : swap ? (!swapVid ? "Add the video with the person to replace"
       : !swapPics.length ? "Add at least one picture of your character"
       : refs.filter((r) => r.media.kind === "video").length > 1 ? "Swap uses one video — remove the others"
@@ -218,7 +223,7 @@ export default function AnimateTab() {
       const kitchen = JSON.stringify(oi ?? {}).includes("comfy kitchen attention");
       const seed = seedFor(a.adv, (p) => set({ adv: { ...a.adv, ...p } }));
       const g = buildSwap({ video: swapVid.media.name, pictures: swapPics.map((r) => r.media.name), who: (a.swapWho ?? "").trim() || "person", pick: a.swapPick ?? "largest",
-        resolution: a.swapRes ?? "768", seconds: swapSecs.trimmed ? swapVid.end : 0, notes: a.prompt, seed, kitchen, prefix: "studio/animate/swap" });
+        resolution: a.swapRes ?? "768", seconds: swapSecs.trimmed ? swapVid.end : 0, prompt: swapText, seed, kitchen, prefix: "studio/animate/swap" });
       const secs = swapSecs.s;
       await run("animate", `Swap the person · ${(a.swapWho ?? "").trim() || "person"} → ${swapPics.length} picture${swapPics.length > 1 ? "s" : ""}`, g, `animate:swap:${a.swapRes ?? "768"}:${Math.round(secs)}s`,
         { snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
@@ -280,6 +285,12 @@ export default function AnimateTab() {
         <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Who in the video becomes your character — plain words, e.g. “woman”, “man in a red shirt”, “dancer”">
           Replace<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="person" aria-label="Who to replace" className="w-36 bg-transparent text-ink placeholder:text-dim focus:outline-none" />
         </label>
+        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Your character's name, written into the prompt. If the video comes back with no swap at all, adding the name is the first thing to try">
+          Name<input value={a.swapName ?? ""} onChange={(e) => set({ swapName: e.target.value })} placeholder={swapChar?.name ?? "optional"} aria-label="Character name" disabled={swapFull} className="w-28 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+        </label>
+        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Things the swap should keep — comma-separated, e.g. “sunglasses, red scarf, tattoos”. If it removed something you wanted, add it here">
+          Keep<input value={a.swapKeep ?? ""} onChange={(e) => set({ swapKeep: e.target.value })} placeholder="e.g. sunglasses, tattoos" aria-label="Also keep" disabled={swapFull} className="w-40 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+        </label>
         <Chip title="If several match" value={a.swapPick ?? "largest"} onChange={(v) => set({ swapPick: v })} options={[{ value: "largest", label: "The biggest one" }, { value: "leftmost", label: "The one on the left" }, { value: "rightmost", label: "The one on the right" }]} />
         <Chip title="Quality" value={a.swapRes ?? "768"} onChange={(v) => set({ swapRes: v })} options={[{ value: "768", label: "Sharp · 768p" }, { value: "480", label: "Fast · 480p" }]} />
         <span className="ml-1 text-[11px] text-dim">{swapVid ? `${swapSecs.s} s · the video's own length and sound` : "add a video"}</span>
@@ -315,9 +326,14 @@ export default function AnimateTab() {
   return (
     <Workspace needs={"video"} tab="animate" title="Animate" sub="MiniMax H3, video with sound"
       bar={<PromptBar value={a.prompt} onChange={(v) => set({ prompt: v })} chips={chips} minRows={3} maxRows={10} rewrite="animate" mention={mention}
-        placeholder={swap ? "Optional notes — e.g. “keep her sunglasses on”, “his jacket stays open”. Leave empty to keep everything from the pictures." : "Say what happens in plain words — the writer plans it second by second with your references and characters (like Plan a video)…"}
+        placeholder={swap ? "Optional notes added to the prompt — e.g. “his jacket stays open”. Leave empty for the default." : "Say what happens in plain words — the writer plans it second by second with your references and characters (like Plan a video)…"}
         below={<>
           {!swap && <AvoidLine value={a.avoid ?? ""} onChange={(v) => set({ avoid: v })} />}
+          {swap && <div className="mt-1.5 flex items-start gap-2 text-[11.5px] leading-snug text-dim">
+            <span className="min-w-0 flex-1"><span className="text-muted">{swapFull ? "Sent as you wrote it" : "Prompt it sends"}:</span> {swapFull ? "(your edit above)" : swapText}</span>
+            {swapFull ? <button onClick={() => set({ prompt: "" })} className="shrink-0 text-accent hover:underline" title="Go back to the default prompt with your Name and Keep">Back to the default</button>
+              : <button onClick={() => set({ prompt: swapText })} className="shrink-0 text-accent hover:underline" title="Put the whole prompt in the box to change any of it">Edit the whole prompt</button>}
+          </div>}
           {planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score")} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
         </>}
         action={<GoButton onClick={go} disabled={!!why} why={why}>{takes > 1 ? `Make ${takes}` : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
@@ -330,7 +346,8 @@ export default function AnimateTab() {
         </button>
         {swap && (
           <div className="border border-accent/40 bg-accent/[.05] px-3 py-2.5 text-[12.5px] leading-relaxed text-muted">
-            <b className="text-ink">Swap the person.</b> Add <b className="text-ink">one video</b> and <b className="text-ink">any pictures of your character</b> — face, outfit, accessories; they're all treated as the same character, no numbering. The video's movement, camera, background and sound stay; only the person you name above changes.
+            <b className="text-ink">Swap the person.</b> Add <b className="text-ink">one video</b> and <b className="text-ink">any pictures of your character</b> — face, outfit, accessories; they're all treated as the same character (a reference sheet counts as one picture). The video's movement, camera, background and sound stay; only the person you name above changes.
+            <span className="mt-1.5 block"><b className="text-ink">If it struggles:</b> no swap at all → add the character's <b className="text-ink">Name</b>. It removed something you wanted → add it to <b className="text-ink">Keep</b>. Anything else → <b className="text-ink">Edit the whole prompt</b> under the box.</span>
           </div>
         )}
         {refsMode ? (
