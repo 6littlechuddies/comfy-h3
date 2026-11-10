@@ -190,7 +190,10 @@ export function trimJobs(jobs: Job[]): Job[] {
 }
 
 const collected = new Set<string>();
-async function collect(id: string) {
+/** "lost" is only said when it's sure: a job missing from the line once can be one moving from the router's line to a
+ *  card, or on a card too busy to answer — it has to be missing from three checks in a row (~9 s) with no record of it */
+const misses = new Map<string, number>();
+async function collect(id: string, mayLose = true) {
   const job = find(id);
   if (!job || job.status === "cancelled" || collected.has(id)) return;
   collected.add(id);
@@ -201,6 +204,7 @@ async function collect(id: string) {
   }
   // ComfyUI didn't answer at all (the connection dropped): try again on the next check instead of guessing
   if (!h && !answered) { collected.delete(id); return; }
+  if (!h && !mayLose) { collected.delete(id); return; } // not finished, not in the line this once: ask again next check
   const outputs: Output[] = [];
   const texts: Record<string, string> = {};
   for (const [nid, out] of Object.entries(h?.outputs ?? {})) {
@@ -215,12 +219,16 @@ async function collect(id: string) {
   // not in the line and no record of it: the ComfyUI it was on restarted (a crash, or the rental was restarted) — say so,
   // instead of calling it done with nothing in it
   const lost = !h;
-  const errMsg = lost ? "Lost: the card's ComfyUI restarted before it finished (a crash or a restart). Run it again."
+  // a job the router or ComfyUI already said failed (it reached no card): that reason, not "Lost"
+  const errMsg = lost ? (job.error && !job.error.startsWith("Lost") ? job.error : "Lost: the card's ComfyUI restarted before it finished (a crash or a restart). Run it again.")
     : h?.status?.messages?.find((m) => m[0] === "execution_error")?.[1]?.exception_message as string | undefined;
   const failed = lost || h?.status?.status_str === "error";
   const endedAt = Date.now();
   patch(id, { status: failed ? "error" : "done", outputs, texts, endedAt, error: failed ? cleanError(errMsg) : undefined, preview: undefined });
   if (job.preview) URL.revokeObjectURL(job.preview);
+  // a lost job that turns up after all (a card that was only slow) is collected again when it finishes
+  if (lost) collected.delete(id);
+  misses.delete(id);
   const st = useJobs.getState();
   if (failed) {
     // training-set pictures show "failed" on their own tile; one message at the end instead of one per picture
@@ -482,13 +490,19 @@ connect();
 setInterval(async () => {
   const open = useJobs.getState().jobs.filter((j) => j.status === "queued" || j.status === "running");
   if (!open.length) return;
-  let q: { queue_running?: unknown[][]; queue_pending?: unknown[][] } | null = null;
+  let q: { queue_running?: unknown[][]; queue_pending?: unknown[][]; h3_partial?: boolean } | null = null;
   try { q = await (await fetch("/queue", { cache: "no-store" })).json(); } catch { return; }
+  const partial = !!q?.h3_partial; // a card didn't answer the router: nothing is called lost on this check
   const runningIds = new Set((q?.queue_running ?? []).map((x) => String(x[1])));
   const pendingIds = new Set((q?.queue_pending ?? []).map((x) => String(x[1])));
   for (const j of open) {
+    if (runningIds.has(j.id) || pendingIds.has(j.id)) misses.delete(j.id);
     if (runningIds.has(j.id)) { if (j.status !== "running") patch(j.id, { status: "running", startedAt: j.startedAt ?? Date.now() }); running = running ?? j.id; }
-    else if (!pendingIds.has(j.id) && Date.now() - j.queuedAt > 4000) collect(j.id);
+    else if (!pendingIds.has(j.id) && Date.now() - j.queuedAt > 4000) {
+      const n = (misses.get(j.id) ?? 0) + (partial ? 0 : 1);
+      misses.set(j.id, n);
+      collect(j.id, n >= 3); // finished → collected now; missing with no record → lost only on the third check in a row
+    }
   }
 }, 3000);
 

@@ -202,9 +202,25 @@ async def _fail(j: dict, st_msg: str, etype: str):
         "exception_message": st_msg, "exception_type": etype, "traceback": []}})
 
 
+sending: dict = {}  # jobs on their way from the line to a card (still listed in /queue while the card takes them)
+
+
 async def _send_held(j: dict, target: int):
     held.remove(j)
-    st, d = await send(target, j["body"])
+    sending[j["pid"]] = j
+    try:
+        st, d = await send(target, j["body"])
+    except Exception as e:  # noqa: BLE001
+        # the card's ComfyUI didn't take it (restarting, or too busy to answer): back in the line for another try — it used
+        # to vanish here (out of the line, on no card), and the Studio said "Lost: the card's ComfyUI restarted"
+        j["tries"] = j.get("tries", 0) + 1
+        if target >= 0: up_at[target] = time.time() - 3600  # down until its /queue answers again: the next try goes elsewhere
+        log(f"!! card {target} didn't take job {j['pid'][:8]} ({type(e).__name__}: {e}) — try {j['tries']}")
+        if j["tries"] < 3: held.append(j)
+        else: await _fail(j, f"The card's ComfyUI didn't take the job three times ({type(e).__name__}) — press it again", "CardNotAnswering")
+        return
+    finally:
+        sending.pop(j["pid"], None)
     if st == 200:
         owner[j["pid"]] = target
         if target >= 0: busy[target].add(j["pid"])
@@ -266,9 +282,13 @@ async def prompt(req):
         ahead = any(RANK.get(h["kind"], 1) <= RANK.get(kind, 1) or h["ray"] for h in held)
         t = None if (ray or ray_pid["id"] or ahead) else free_card(kind)
         if t is not None:
-            st, d = await send(t, body)
-            if st == 200: owner[pid] = t; busy[t].add(pid)
-            return web.json_response(d, status=st)
+            try:
+                st, d = await send(t, body)
+                if st == 200: owner[pid] = t; busy[t].add(pid)
+                return web.json_response(d, status=st)
+            except Exception as e:  # noqa: BLE001  (that card is restarting: the job waits in the line for a card that answers)
+                log(f"!! card {t} didn't take job {pid[:8]} ({type(e).__name__}) — it waits in the line")
+                up_at[t] = time.time() - 3600  # treat it as down until its /queue answers again
         held.append({"pid": pid, "body": body, "client_id": body.get("client_id"), "ray": ray, "number": number["n"], "kind": kind, "front": front})
     await dispatch_held()
     return web.json_response({"prompt_id": pid, "number": number["n"], "node_errors": {}})
@@ -296,14 +316,27 @@ async def queue(req):
                 try: await s.post(f"{b}/queue", json={**body, **({"delete": mine} if dele else {})})
                 except Exception: pass  # noqa: BLE001
         return web.json_response({})
-    running, pending = [], []
-    for b in BACKENDS + ([RAY] if RAY else []):
-        try:
-            async with s.get(f"{b}/queue") as r: q = await r.json()
+    # the line first: a job moving from the line to a card while the cards are asked is then seen in one place or the other
+    line = [[h["number"], h["pid"], h["body"]["prompt"], {"client_id": h["client_id"]}, []] for h in list(held) + list(sending.values())]
+    idx = list(range(len(BACKENDS))) + ([-1] if RAY else [])
+
+    async def ask(i):
+        async with s.get(f"{url_of(i)}/queue", timeout=aiohttp.ClientTimeout(total=8)) as r: return await r.json()
+    answers = await asyncio.gather(*(ask(i) for i in idx), return_exceptions=True)
+    running, pending, partial = [], [], False
+    seen = {x[1] for x in line}
+    for i, q in zip(idx, answers):
+        if isinstance(q, dict):
             running += q.get("queue_running") or []; pending += q.get("queue_pending") or []
-        except Exception: pass  # noqa: BLE001
-    pending += [[h["number"], h["pid"], h["body"]["prompt"], {"client_id": h["client_id"]}, []] for h in held]
-    return web.json_response({"queue_running": running, "queue_pending": pending})
+            continue
+        # this card didn't answer (busy loading a model, or restarting): its jobs as the router last saw them, so the
+        # Studio doesn't take a busy card for a lost job
+        partial = True
+        for pid in (busy.get(i, set()) if i >= 0 else ({ray_pid["id"]} if ray_pid["id"] else set())):
+            if pid not in seen: running.append([0, pid, {}, {}, []])
+    seen |= {str(x[1]) for x in running + pending}
+    pending += [x for x in line if x[1] not in {str(y[1]) for y in running + pending}]
+    return web.json_response({"queue_running": running, "queue_pending": pending, **({"h3_partial": True} if partial else {})})
 
 
 async def history(req):
