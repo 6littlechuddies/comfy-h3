@@ -91,6 +91,8 @@ export interface PromptS {
   /** music in the plan: a non-diegetic score (default — background music only the viewer hears), only sounds that
    *  belong in the scene, or none */
   music?: Music;
+  /** mouths: closed and still (default — no talking, mouthing, singing or lip-sync) or free */
+  mouth?: Mouth;
   /** which model plans videos (Animate + Plan a video): Fable 9B (fast) or Qwen3.8 27B (better, needs its download) */
   writer?: "small" | "big";
 }
@@ -107,8 +109,12 @@ export interface AnimateS {
   avoid?: string;
   /** music: a non-diegetic score by default (see PromptS) */
   music?: Music;
+  /** mouths: closed and still by default (see PromptS) */
+  mouth?: Mouth;
 }
 export type Music = "score" | "scene" | "none";
+/** "closed" (default): nobody talks, mouths words, sings or lip-syncs · "talk": mouths move freely */
+export type Mouth = "closed" | "talk";
 export interface FinishS {
   transition: "cut" | "crossfade" | "black" | "white" | "slide" | "wipe"; transitionDur: number;
   ending: "once" | "boomerang" | "fade_start" | "fade_black"; fade: number;

@@ -7,7 +7,7 @@ import { loadState, saveState, type FileRef } from "./api";
 import { buildAnimate, buildPromptHelper, MINOR_FLAG, type AnimateOpts, type LoraPick } from "./graphs";
 import { jobsReady, useJobs, waitForJob } from "./jobs";
 import { h3ErosOn, h3Size, h3SizeFor } from "./models";
-import { DEFAULTS, newSeed, useSettings, type Music } from "./settings";
+import { DEFAULTS, newSeed, useSettings, type Mouth, type Music } from "./settings";
 import { isAdult, useCharacters, type Character } from "./characters";
 import { look } from "./charVideo";
 import { parseTimeline, toPrompt } from "./timeline";
@@ -29,7 +29,7 @@ export const mixLabel = (m: Mix) => MIX_KINDS.filter((x) => m[x.k]).map((x) => `
 
 /** what a run was started with — kept on the run, so a reload can finish it the same way (not with today's settings) */
 export interface RunCfg {
-  seconds: number; mp: number; shape: BoardS["shape"]; turbo: boolean; avoid: string; music: Music;
+  seconds: number; mp: number; shape: BoardS["shape"]; turbo: boolean; avoid: string; music: Music; mouth?: Mouth;
   pics: Media[]; loras: LoraPick[] | null; charId: string | null; name: string;
 }
 /** A run's states (docs/STATE_MACHINES.md): planning → queued (all its takes are in the line) | error.
@@ -76,9 +76,11 @@ export interface BoardS {
   /** a box's own words: "add" to the shared prompt, or "own" = used instead of it */
   ownWords: "add" | "own";
   avoid: string; music: Music;
+  /** mouths closed and still (default: no talking, mouthing, singing or lip-sync) */
+  mouth: Mouth;
   boxes: Box[];
 }
-const DEF: BoardS = { words: "", mix: { ref: 0, i2v: 2, loop: 2 }, seconds: 8, mp: 0.6, shape: "auto", turbo: true, useMade: false, ownWords: "add", avoid: "", music: "none", boxes: [] };
+const DEF: BoardS = { words: "", mix: { ref: 0, i2v: 2, loop: 2 }, seconds: 8, mp: 0.6, shape: "auto", turbo: true, useMade: false, ownWords: "add", avoid: "", music: "none", mouth: "closed", boxes: [] };
 
 let loaded = false;
 export const useBoard = create<BoardS & { loaded: boolean }>(() => ({ ...DEF, loaded: false }));
@@ -196,7 +198,7 @@ async function runKind(boxId: string, mode: keyof Mix, takes: number, made: stri
   const words = wordsOf(b);
   const ref = mode === "ref";
   const pics = ref ? b.pics.slice(0, 9) : b.pics.slice(0, 1);
-  const cfg: RunCfg = { seconds: s.seconds, mp: s.mp, shape: s.shape, turbo: s.turbo, avoid: s.avoid, music: s.music, pics, loras: b.loras, charId: b.charId, name };
+  const cfg: RunCfg = { seconds: s.seconds, mp: s.mp, shape: s.shape, turbo: s.turbo, avoid: s.avoid, music: s.music, mouth: s.mouth, pics, loras: b.loras, charId: b.charId, name };
   const run: BoardRun = { id: uid(), at: Date.now(), mode, status: "planning", words, takes, jobIds: [], outputs: [], cfg };
   setBox(b.id, (x) => ({ runs: [run, ...x.runs] }));
   const kind = MIX_KINDS.find((x) => x.k === mode)!.label;
@@ -208,7 +210,7 @@ async function runKind(boxId: string, mode: keyof Mix, takes: number, made: stri
     const g = buildPromptHelper({
       pictures: tagged, videos: [], audios: [],
       characters: c ? [{ name: c.name, look: look(c), tags: tagged.map((t) => t.tag) }] : undefined,
-      idea: withAvoidNote(words, s.avoid) + madeNote, music: s.music, seconds: s.seconds, cuts: 0, camera: "auto",
+      idea: withAvoidNote(words, s.avoid) + madeNote, music: s.music, mouth: s.mouth, seconds: s.seconds, cuts: 0, camera: "auto",
       mode: PLAN_MODE[mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
     });
     const pj = await useJobs.getState().run("animate", `${name}: planning (${kind.toLowerCase()})`, g, "prompt:0v", { quiet: true, front: true, project: b.charId, board: b.id });
@@ -256,7 +258,7 @@ async function continueRun(boxId: string, runId: string): Promise<void> {
     const ids = [...(get()?.jobIds ?? [])];
     for (let i = ids.length; i < takes; i++) {
       const o: AnimateOpts = {
-        ...a.adv, seed: newSeed(), mode, prompt: text, avoid: cfg.avoid, music: cfg.music, seconds: cfg.seconds, width, height, turbo,
+        ...a.adv, seed: newSeed(), mode, prompt: text, avoid: cfg.avoid, music: cfg.music, mouth: cfg.mouth, seconds: cfg.seconds, width, height, turbo,
         loras: cfg.loras ?? a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
         images: cfg.pics.map((p) => p.name), videos: [], audios: [],
       };

@@ -27,3 +27,9 @@ export const MUSIC_OPTS: { value: "score" | "scene" | "none"; label: string; hin
   { value: "scene", label: "Music: only in the scene", hint: "Just music that's playing in the scene (a radio, a band) — no score" },
   { value: "none", label: "No music", hint: "Only the scene's own sounds: voices, footsteps, ambience" },
 ];
+
+/** the Mouth chip: closed and still is the default (no talking, mouthing, singing or lip-sync) */
+export const MOUTH_OPTS: { value: "closed" | "talk"; label: string; hint: string }[] = [
+  { value: "closed", label: "Mouth: closed", hint: "Nobody talks, mouths words, sings or lip-syncs — lips stay softly closed and still; feelings show in the eyes, brows and body" },
+  { value: "talk", label: "Mouth: can talk", hint: "Mouths move freely — talking, singing and lip-sync are allowed" },
+];

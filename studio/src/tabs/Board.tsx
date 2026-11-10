@@ -1,6 +1,7 @@
 // 05 Animate → Video board: a box per character — her pictures next to her own words — under one shared prompt.
 // Tick the boxes to run, set the takes, press Make videos: each box is planned by the video writer and its takes are
-// lined up, no copying between Plan a video and Animate. Results fold into their box; click to see every take.
+// lined up, no copying between Plan a video and Animate. Results play by themselves in their box (and in the Gallery of
+// every box), each with a Download, plus Download all as one .zip.
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -15,10 +16,10 @@ import { CHAR_DRAG } from "../components/ProjectRail";
 import { usePrimaryAction, useHandoffInto } from "../App";
 import { Advanced, Btn, Icon, JobBar, LoraList, cx } from "../components/ui";
 import { Chip, GoButton, Workspace } from "../components/Workspace";
-import { AvoidLine, MUSIC_OPTS } from "../components/AvoidLine";
+import { AvoidLine, MOUTH_OPTS, MUSIC_OPTS } from "../components/AvoidLine";
 import { WriterSetup } from "./Prompt";
-import { openViewer } from "../components/Viewer";
 import { copyText } from "../lib/copy";
+import { AutoVideo, DownloadAll, VideoWall, type WallItem } from "../components/VideoWall";
 
 /** 2 seamless loops + 2 image → video: a − n + per video type */
 function MixEditor({ mix, onChange }: { mix: Mix; onChange: (m: Mix) => void }) {
@@ -52,6 +53,8 @@ export default function BoardTab() {
   const dl = useGroup("video");
   const [choosing, setChoosing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [gallery, setGallery] = useState(false);
+  const total = s.boxes.reduce((n, b) => n + b.runs.reduce((m, r) => m + r.outputs.length, 0), 0);
   const [over, setOver] = useState(false);
 
   // finished takes are copied into their box, so it still shows them after the job list moves on
@@ -109,6 +112,7 @@ export default function BoardTab() {
         <Chip title="Size" value={s.mp} onChange={(v) => setBoard({ mp: v })} options={[{ value: 0.4, label: "Draft 0.4 MP" }, { value: 0.6, label: "Good 0.6 MP" }, { value: 0.98, label: "Full 1 MP", hint: "sharper — about 1.8× the time of 0.6" }, { value: 1.2, label: "1.2 MP" }, { value: 1.5, label: "1.5 MP", hint: "the most detail — about 3× the time of 0.6" }]} />
         <Chip title="Speed" value={s.turbo ? 1 : 0} onChange={(v) => setBoard({ turbo: v === 1 })} options={[{ value: 1, label: "Turbo" }, { value: 0, label: "Full quality" }]} />
         <Chip title="Music" value={s.music} onChange={(v) => setBoard({ music: v })} options={MUSIC_OPTS} />
+        <Chip title="Mouth" value={s.mouth ?? "closed"} onChange={(v) => setBoard({ mouth: v })} options={MOUTH_OPTS} />
         <label className="flex h-8 cursor-pointer items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted hover:text-ink" title="The planner also reads how each box's first picture was made (its Create prompt) and keeps her outfit, accessories, props and setting — she interacts with her own things. Off: only the prompt and her look.">
           <input type="checkbox" checked={s.useMade} onChange={(e) => setBoard({ useMade: e.target.checked })} className="accent-[var(--color-accent)]" />Use how her picture was made
         </label>
@@ -130,6 +134,7 @@ export default function BoardTab() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Btn kind="primary" onClick={() => setChoosing(true)}><Icon name="plus" size={14} /> Add characters</Btn>
         <span className="text-[12.5px] text-dim">or drag them in from the left — or drop pictures from their projects (they go to that character's box)</span>
+        {total > 0 && <Btn onClick={() => setGallery(true)}><Icon name="film" size={14} /> Gallery ({total})</Btn>}
         {s.boxes.length > 0 && <span className="ml-auto flex gap-2 text-[12.5px]">
           <button className="text-accent hover:underline" onClick={() => s.boxes.forEach((b) => setBox(b.id, { on: true }))}>Tick all</button>
           <button className="text-muted hover:text-ink" onClick={() => s.boxes.forEach((b) => setBox(b.id, { on: false }))}>Tick none</button>
@@ -150,6 +155,7 @@ export default function BoardTab() {
       </div>
       {choosing && <ChooseCharacters onClose={() => setChoosing(false)} />}
       {open && <BoxResults id={open} onClose={() => setOpen(null)} />}
+      {gallery && <Gallery onClose={() => setGallery(false)} />}
     </Workspace>
   );
 }
@@ -178,9 +184,8 @@ function BoxCard({ b, onOpen }: { b: Box; onOpen: () => void }) {
   const last = b.runs[0];
   const st = useRunState(last);
   const problem = boxProblem(b);
-  const allOut = b.runs.reduce((n, r) => n + r.outputs.length, 0);
   const cover = c ? coverOf(c) : undefined;
-  const firstVid = last?.outputs[0];
+  const vids = wallOf(b, c?.name ?? "Pictures");
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation(); setOver(false);
@@ -241,21 +246,32 @@ function BoxCard({ b, onOpen }: { b: Box; onOpen: () => void }) {
         </div>
       )}
 
-      <div className="mt-auto flex items-center gap-3 border-t border-line2 px-3 py-2.5">
-        {firstVid ? (
-          <button onClick={onOpen} className="press group relative h-[84px] w-[66px] shrink-0 overflow-hidden rounded-md border border-line bg-black" title="See every take">
-            <video src={viewUrl(firstVid)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" />
-            {allOut > 1 && <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-black/80 px-1 text-[10.5px] text-ink">{allOut}</span>}
-          </button>
-        ) : <span className="h-[84px] w-[66px] shrink-0 rounded-md border border-dashed border-line2" />}
-        <div className="min-w-0 flex-1 text-[12.5px]">
+      <div className="mt-auto flex flex-col gap-2 border-t border-line2 px-3 py-2.5">
+        {vids.length > 0 && (
+          <div className="grid grid-cols-4 gap-1.5">
+            {vids.slice(0, 4).map((it, i) => (
+              <div key={it.file.subfolder + it.file.filename} className="group relative overflow-hidden rounded-md border border-line bg-black">
+                <button onClick={onOpen} className="block w-full" title="Open this box's videos">
+                  <AutoVideo src={viewUrl(it.file)} className="aspect-[9/16] w-full object-cover" />
+                </button>
+                {i === 3 && vids.length > 4 && <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55 text-[13px] font-semibold text-ink">+{vids.length - 4}</span>}
+                <a href={viewUrl(it.file)} download={saveNameOf(it, i)} title="Download this video" aria-label="Download this video"
+                  className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded bg-black/75 text-ink opacity-0 hover:bg-accent hover:text-black group-hover:opacity-100 focus:opacity-100">
+                  <Icon name="down" size={12} />
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="min-w-0 text-[12.5px]">
           {problem ? <span className="text-hot">{problem[0].toUpperCase() + problem.slice(1)}</span>
             : !last ? <span className="text-dim">Ready — {mixLabel(mixOf(b))} on the next Make videos</span>
             : last.status === "planning" ? <span className="text-muted">Planning the video…</span>
             : last.status === "error" ? <span className="text-bad">{last.error}</span>
             : <span className="text-muted">{st?.ready ?? 0} of {last.takes} ready{st?.going ? ` · ${st.going} rendering or in line` : ""}{st?.failed ? ` · ${st.failed} failed` : ""}</span>}
-          <span className="mt-1 flex gap-3">
-            {b.runs.length > 0 && <button className="text-accent hover:underline" onClick={onOpen}>See all{allOut ? ` (${allOut})` : ""}</button>}
+          <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {vids.length > 0 && <button className="text-accent hover:underline" onClick={onOpen}>Open all {vids.length}</button>}
+            <DownloadAll items={vids} name={`${c?.name ?? "box"} videos`} />
             <button className="text-muted hover:text-ink disabled:opacity-40" disabled={!!problem} title={problem} onClick={() => { void runBox(b.id); }}>Run just this one</button>
           </span>
         </div>
@@ -264,32 +280,73 @@ function BoxCard({ b, onOpen }: { b: Box; onOpen: () => void }) {
   );
 }
 
+/** a box's finished videos, newest first, ready for the wall */
+function wallOf(b: Box, name: string): WallItem[] {
+  return b.runs.flatMap((r) => {
+    const kind = MIX_KINDS.find((x) => x.k === r.mode)?.short.toLowerCase() ?? "video";
+    return [...r.outputs].reverse().map((file) => ({ file, label: name, sub: kind }));
+  });
+}
+const saveNameOf = (it: WallItem, i: number) => `${it.label} - ${it.sub ?? "video"} ${String(i + 1).padStart(2, "0")}.mp4`.replace(/[\\/:*?"<>|]+/g, "_");
+
+/** every box's videos at once: they play by themselves; pick a character, download one or all */
+function Gallery({ onClose }: { onClose: () => void }) {
+  const boxes = useBoard((st) => st.boxes);
+  const chars = useCharacters((st) => st.list);
+  const [who, setWho] = useState<string>("all");
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  const per = boxes.map((b) => ({ b, name: (b.charId && chars.find((c) => c.id === b.charId)?.name) || "Pictures" })).map((x) => ({ ...x, items: wallOf(x.b, x.name) })).filter((x) => x.items.length);
+  // newest first across every box (a run's time, then its order)
+  const all = per.flatMap((x) => x.b.runs.flatMap((r) => [...r.outputs].reverse().map((file) => ({ at: r.at, it: x.items.find((i) => i.file === file)! })))).sort((p, q) => q.at - p.at).map((x) => x.it);
+  const shown = who === "all" ? all : per.find((x) => x.b.id === who)?.items ?? [];
+  const name = who === "all" ? "board videos" : `${per.find((x) => x.b.id === who)?.name ?? "box"} videos`;
+  return createPortal(
+    <div className="fade-in fixed inset-0 z-[80] flex flex-col bg-bg/95 backdrop-blur-[2px]" role="dialog" aria-modal aria-label="Board gallery">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line2 px-6 py-3">
+        <h2 className="display mr-2 text-[18px]">Gallery</h2>
+        <button onClick={() => setWho("all")} className={cx("press h-7 border px-2 text-[12.5px]", who === "all" ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}>Everyone ({all.length})</button>
+        {per.map((x) => (
+          <button key={x.b.id} onClick={() => setWho(x.b.id)} className={cx("press h-7 border px-2 text-[12.5px]", who === x.b.id ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}>{x.name} ({x.items.length})</button>
+        ))}
+        <span className="ml-auto flex items-center gap-3 text-[12.5px]">
+          <DownloadAll items={shown} name={name} />
+          <button onClick={onClose} aria-label="Close" className="press flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={16} /></button>
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <VideoWall items={shown} min={190} />
+      </div>
+    </div>, document.body);
+}
+
 /** a box opened up: every run, newest first — its plan and each take */
 function BoxResults({ id, onClose }: { id: string; onClose: () => void }) {
   const b = useBoard((st) => st.boxes.find((x) => x.id === id));
   const c = useCharacters((st) => (b?.charId ? st.list.find((x) => x.id === b.charId) : undefined));
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   if (!b) return null;
-  const all = b.runs.flatMap((r) => r.outputs);
-  const view = (f: FileRef) => openViewer(all.map((o) => ({ url: viewUrl(o), kind: "video", label: c?.name ?? "take" })), Math.max(0, all.findIndex((o) => o.filename === f.filename)));
+  const all = wallOf(b, c?.name ?? "Pictures");
   return createPortal(
     <div className="fade-in fixed inset-0 z-[80] flex flex-col bg-bg/95 backdrop-blur-[2px]" role="dialog" aria-modal aria-label={`${c?.name ?? "Box"} videos`}>
       <div className="flex items-center gap-3 border-b border-line2 px-6 py-3">
         <h2 className="display text-[18px]">{c?.name ?? "Pictures"}</h2>
         <span className="text-[12.5px] text-muted">{all.length} video{all.length === 1 ? "" : "s"} from the board · also in 05 Animate under {c ? `${c.name}'s project` : "Free work"}</span>
-        <button onClick={onClose} aria-label="Close" className="press ml-auto flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={16} /></button>
+        <DownloadAll items={all} name={`${c?.name ?? "box"} videos`} className="ml-auto text-[12.5px]" />
+        <button onClick={onClose} aria-label="Close" className="press flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={16} /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-6">
-          {b.runs.map((r) => <RunBlock key={r.id} r={r} onView={view} />)}
+          {b.runs.map((r) => <RunBlock key={r.id} r={r} name={c?.name ?? "Pictures"} />)}
         </div>
       </div>
     </div>, document.body);
 }
 
-function RunBlock({ r, onView }: { r: BoardRun; onView: (f: FileRef) => void }) {
+function RunBlock({ r, name }: { r: BoardRun; name: string }) {
   const st = useRunState(r);
   const waiting: Job[] = (st?.jobs ?? []).filter((j) => j.status === "running" || j.status === "queued");
+  const kind = MIX_KINDS.find((x) => x.k === r.mode)?.short.toLowerCase() ?? "video";
+  const items: WallItem[] = r.outputs.map((file) => ({ file, label: name, sub: kind }));
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-2 text-[12.5px]">
@@ -297,6 +354,7 @@ function RunBlock({ r, onView }: { r: BoardRun; onView: (f: FileRef) => void }) 
         <span className="text-muted">{r.takes} {MIX_KINDS.find((x) => x.k === r.mode)?.label.toLowerCase() ?? "video"}{r.takes > 1 ? "s" : ""} · “{r.words.length > 90 ? r.words.slice(0, 90) + "…" : r.words}”</span>
         {r.status === "planning" && <span className="text-accent">planning…</span>}
         {r.status === "error" && <span className="text-bad">{r.error}</span>}
+        {items.length > 1 && <DownloadAll items={items} name={`${name} ${kind}`} className="ml-auto" />}
       </div>
       {r.plan && (
         <details className="text-[12.5px]">
@@ -305,14 +363,8 @@ function RunBlock({ r, onView }: { r: BoardRun; onView: (f: FileRef) => void }) 
           <button className="mt-1 text-accent hover:underline" onClick={() => copyText(r.plan!, "Plan copied")}>Copy the plan</button>
         </details>
       )}
-      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
-        {r.outputs.map((o) => (
-          <button key={o.subfolder + o.filename} onClick={() => onView(o)} className="press group overflow-hidden rounded-md border border-line bg-black hover:border-accent">
-            <video src={viewUrl(o)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="aspect-[9/16] w-full object-contain" />
-          </button>
-        ))}
-        {waiting.map((j) => <div key={j.id} className="flex aspect-[9/16] flex-col justify-end rounded-md border border-dashed border-line p-2"><JobBar job={j} compact /></div>)}
-      </div>
+      <VideoWall items={items}
+        pending={waiting.length ? waiting.map((j) => <div key={j.id} className="flex aspect-[9/16] flex-col justify-end rounded-md border border-dashed border-line p-2"><JobBar job={j} compact /></div>) : undefined} />
     </section>
   );
 }

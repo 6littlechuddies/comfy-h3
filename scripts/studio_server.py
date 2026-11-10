@@ -3819,6 +3819,49 @@ async def trainset_zip(req):
     return resp
 
 
+async def files_zip(req):
+    """Download all: POST (a form, so the browser saves it as it arrives) payload = {name, files: [{filename, subfolder,
+    type, as}]} → one .zip streamed straight to you — nothing is written to the rental's disk first (it may be nearly full),
+    and the videos aren't squeezed again (they're stored as they are)."""
+    import zipfile
+    try:
+        form = await req.post()
+        d = json.loads(str(form.get("payload") or "{}"))
+    except ValueError:
+        raise web.HTTPBadRequest(text="bad list")
+    files = [x for x in (d.get("files") or []) if isinstance(x, dict) and x.get("filename")][:2000]
+    if not files: raise web.HTTPBadRequest(text="nothing to download")
+    stem = re.sub(r"[^\w-]+", "-", str(d.get("name") or "videos")).strip("-")[:60] or "videos"
+    resp = web.StreamResponse(headers={"Content-Type": "application/zip", "Content-Disposition": f'attachment; filename="{stem}.zip"'})
+    await resp.prepare(req)
+
+    class Sink:  # zipfile writes here; what it wrote goes out after each file
+        def __init__(self): self.buf, self.n = [], 0
+        def write(self, b): self.buf.append(bytes(b)); self.n += len(b); return len(b)
+        def tell(self): return self.n
+        def flush(self): pass
+        def take(self):
+            out = b"".join(self.buf); self.buf = []; return out
+
+    sink, used = Sink(), set()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for x in files:
+            try: path = _file_of(x)
+            except web.HTTPException: continue
+            if not os.path.isfile(path): continue
+            base = re.sub(r"[^\w .()-]+", "_", str(x.get("as") or os.path.basename(path))).strip() or os.path.basename(path)
+            name, ext = os.path.splitext(base)
+            if not ext: ext = os.path.splitext(path)[1]
+            arc, k = f"{name}{ext}", 2
+            while arc.lower() in used: arc, k = f"{name} ({k}){ext}", k + 1
+            used.add(arc.lower())
+            await asyncio.to_thread(z.write, path, arc)
+            await resp.write(sink.take())
+    await resp.write(sink.take())
+    await resp.write_eof()
+    return resp
+
+
 # ------------------------------------------------------------------ character LoRA training (Krea 2, musubi-tuner)
 MUSUBI = os.environ.get("H3_MUSUBI", "/opt/musubi-tuner")
 MUSUBI_PY = os.environ.get("H3_MUSUBI_PY", "/opt/musubi-venv/bin/python")
@@ -5215,7 +5258,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),

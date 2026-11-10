@@ -23,7 +23,7 @@ import { Moments, TimelineBar } from "../components/TimelineView";
 import { copyText } from "../lib/copy";
 import { addPlan, planOfText, updatePlan, usePlans, type Plan } from "../lib/plans";
 import { PlanHistory } from "../components/PlanHistory";
-import { AvoidLine, MUSIC_OPTS, withAvoidNote } from "../components/AvoidLine";
+import { AvoidLine, MOUTH_OPTS, MUSIC_OPTS, withAvoidNote } from "../components/AvoidLine";
 import { Modal } from "../components/Dialogs";
 
 const MODE_LABEL = { references: "References", "first-last": "First → last frame", image: "Image → video", text: "Text only" } as const;
@@ -123,7 +123,7 @@ export default function PromptTab() {
         pictures: refs.filter((r) => r.media.kind === "image").map((r) => ({ file: r.media.name, tag: tags[r.id], label: r.label })),
         videos: refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, tag: tags[r.id], label: r.label, start: r.start, end: r.end, useSound: r.useSound })),
         audios: refs.filter((r) => r.media.kind === "audio").map((r) => ({ tag: tags[r.id], label: r.label })),
-        characters: inUse, idea: withAvoidNote(p.idea, p.avoid), music: p.music, seconds: p.seconds, cuts: p.cuts, camera: p.camera, mode: MODE_LABEL[p.mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
+        characters: inUse, idea: withAvoidNote(p.idea, p.avoid), music: p.music, mouth: p.mouth, seconds: p.seconds, cuts: p.cuts, camera: p.camera, mode: MODE_LABEL[p.mode], guide: pw.guide, writer: pw.writer, seed: newSeed(),
       });
       const charIds = [...new Set(refs.map((r) => r.charId).filter((x): x is string => !!x))];
       await run("prompt", "Writing the timeline", graph, etaKey, { seconds: p.seconds,
@@ -147,7 +147,7 @@ export default function PromptTab() {
       const pics = refs.filter((r) => r.media.kind === "image").map((r) => r.media);
       if (pics.length) setWork({ animateFrames: [pics[0], mode === "fl" ? pics[1] ?? null : null] });
     }
-    useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode, avoid: p.avoid ?? "", music: p.music ?? "score" });
+    useSettings.getState().set("animate", { prompt: finalText, seconds: p.seconds, mode, avoid: p.avoid ?? "", music: p.music ?? "score", mouth: p.mouth ?? "closed" });
     setWork({ sentPlan: finalText });
     const pl = planOfText(finalText); if (pl) updatePlan(pl.id, { sent: Date.now() });
     useSettings.getState().setTab("animate");
@@ -160,6 +160,7 @@ export default function PromptTab() {
       <Chip title="Length" value={p.seconds} onChange={(v) => set({ seconds: v })} options={Array.from({ length: 14 }, (_, i) => i + 2).map((n) => ({ value: n, label: `${n} s` }))} />
       <Chip title="Cuts" value={p.cuts} onChange={(v) => set({ cuts: v })} options={[{ value: 0, label: "Auto cuts" }, ...[1, 2, 3, 4].map((n) => ({ value: n, label: `${n} cut${n > 1 ? "s" : ""}` }))]} />
       <Chip title="Music" value={p.music ?? "score"} onChange={(v) => set({ music: v })} options={MUSIC_OPTS} />
+      <Chip title="Mouth" value={p.mouth ?? "closed"} onChange={(v) => set({ mouth: v })} options={MOUTH_OPTS} />
       <Chip title="Camera" value={p.camera} onChange={(v) => set({ camera: v })} options={[{ value: "auto", label: "Camera: auto" }, { value: "still", label: "Still camera" }, { value: "slow push in", label: "Push in" }, { value: "orbit", label: "Orbit" }, { value: "handheld", label: "Handheld" }]} />
       <span className="ml-1 text-[11px] text-dim">{refs.length ? `${refs.length} reference${refs.length > 1 ? "s" : ""}` : "no references yet — add them on the left"}</span>
       <button onClick={() => setPast(true)} className="ml-auto text-[12px] text-accent hover:underline" title="Every plan made with the characters in your references">Past plans</button>

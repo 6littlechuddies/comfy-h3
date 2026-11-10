@@ -639,6 +639,8 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   avoid?: string;
   /** music when the prompt says nothing about it (a planned prompt has its own SOUND lines) */
   music?: "score" | "scene" | "none";
+  /** mouths closed and still (default) — or "talk" */
+  mouth?: "closed" | "talk";
   images: string[]; // ref mode: <Picture n>; i2v/loop: [first]; fl: [first, last]
   videos: VideoRef[];
   audios: string[];
@@ -653,6 +655,20 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   /** split across this many cards with Raylight (sequence parallel); 1 or unset = one card, as always */
   ray?: number;
 }
+
+// Mouths: by default nobody in a video talks, mouths words, sings or lip-syncs. H3 follows what a prompt says is there far
+// better than "no …" (it has no negative prompt), so the main line describes closed, still lips and where the feeling
+// shows instead; the Avoid line backs it up, and the planner is told the same (no dialogue, no speech in SOUND lines).
+export const MOUTH_LINE = "Mouths stay softly closed and still for the whole video: nobody talks, mouths words, whispers, sings or lip-syncs, and every jaw stays relaxed. Feelings show through the eyes, brows, breathing, posture and hands, with at most a gentle closed-lip smile. No dialogue and no voices on the soundtrack.";
+export const MOUTH_AVOID = "talking, moving lips, lip-sync, mouthing words, open-mouth speech, singing";
+export const MOUTH_PLAN = "Mouths: closed. Nobody speaks, mouths words, whispers, sings or lip-syncs at any moment — write no dialogue, no lines in quotes and no SOUND lines with speech or voices. In every cut, say that each person's lips stay softly closed and still (a closed-lip smile is fine), and show feeling through the eyes, brows, breathing, posture and hands instead.";
+/** the H3 prompt with the closed-mouth line (unless mouths may move) */
+export function withMouth(prompt: string, mouth?: "closed" | "talk"): string {
+  if (mouth === "talk" || !prompt.trim()) return prompt;
+  return `${prompt.trimEnd()}\n\n${MOUTH_LINE}`;
+}
+const mouthAvoid = (avoid: string | undefined, mouth?: "closed" | "talk") =>
+  mouth === "talk" ? avoid : [avoid?.trim().replace(/[\s,;.]+$/, ""), MOUTH_AVOID].filter(Boolean).join(", ");
 
 /** "Avoid: text, watermarks." after the prompt: H3's text model (Qwen3-VL) reads it as plain language */
 export function withAvoid(prompt: string, avoid?: string): string {
@@ -694,7 +710,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   let cond: string;
   if (ref) {
     const inputs: Inputs = {
-      clip: o(clip), prompt: withAvoid(withMusic(withTriggers(p.prompt, p.loras), p.music), p.avoid), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
+      clip: o(clip), prompt: withAvoid(withMouth(withMusic(withTriggers(p.prompt, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
       vae: o(vae), audio_vae: o(avae),
     };
     p.images.slice(0, 9).forEach((f, i) => (inputs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
@@ -715,7 +731,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     const lastFile = p.mode === "loop" ? p.images[0] : p.mode === "fl" ? p.images[1] : undefined;
     const last = lastFile ? (lastFile === p.images[0] && first ? first : g.add("LoadImage", { image: lastFile })) : null;
     cond = g.add("MiniMaxH3ImageToVideo", {
-      clip: o(clip), vae: o(vae), prompt: withAvoid(withMusic(withTriggers(p.prompt, p.loras), p.music), p.avoid), width: p.width, height: p.height, length,
+      clip: o(clip), vae: o(vae), prompt: withAvoid(withMouth(withMusic(withTriggers(p.prompt, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length,
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
   }
@@ -835,19 +851,22 @@ export interface PromptOpts {
   characters?: { name: string; look: string; tags: string[] }[];
   /** music: "score" (default) = a non-diegetic background score, "scene" = only sounds in the scene, "none" */
   music?: "score" | "scene" | "none";
+  /** mouths closed and still (default) — or "talk" */
+  mouth?: "closed" | "talk";
 }
 
 /** the writer's music instruction for each choice */
-export function musicLine(music: "score" | "scene" | "none" | undefined, ownSound: boolean): string {
+export function musicLine(music: "score" | "scene" | "none" | undefined, ownSound: boolean, mouth?: "closed" | "talk"): string {
   const m = music ?? "score";
-  if (m === "none") return "Music: none at all — only the sounds of the scene (voices, footsteps, ambience).";
+  if (m === "none") return `Music: none at all — only the sounds of the scene (${mouth === "talk" ? "voices, " : ""}footsteps, cloth, ambience).`;
   if (m === "scene") return "Music: only music that is actually playing inside the scene, if any (a radio, a band, a phone). No background score.";
   return ownSound
     ? "Music: if the reference sound isn't music, add a non-diegetic score under it (see below); if it is, it's the soundtrack — don't add another."
       + " A non-diegetic score is background music only the viewer hears — nothing in the scene plays it."
     : "Music: add a non-diegetic score — background music only the viewer hears; nothing in the scene plays it (no speakers, instruments or radios on screen)."
       + " Write ONE SOUND line for it covering the whole video: genre, instruments, tempo and mood, and how it builds, drops or swells with the action and cuts."
-      + " Keep the scene's own sounds (footsteps, cloth, voices, ambience) on their own SOUND lines, softer under the music, and keep speech clear above it.";
+      + (mouth === "talk" ? " Keep the scene's own sounds (footsteps, cloth, voices, ambience) on their own SOUND lines, softer under the music, and keep speech clear above it."
+        : " Keep the scene's own sounds (footsteps, cloth, breathing, ambience) on their own SOUND lines, softer under the music.");
 }
 
 /** Animate without planning: a prompt that says nothing about music gets the score line (a plan already has its SOUND lines) */
@@ -976,7 +995,8 @@ export function buildPromptHelper(p: PromptOpts): ApiGraph {
     `Video type: ${p.mode}. Length: ${fmtTime(p.seconds)} (${p.seconds} seconds).`,
     p.cuts > 0 ? `Use exactly ${p.cuts} cut${p.cuts > 1 ? "s" : ""}.` : "Choose how many cuts fit the idea.",
     p.camera && p.camera !== "auto" ? `Camera: ${p.camera}.` : "",
-    musicLine(p.music, p.audios.length > 0 || p.videos.some((v) => v.useSound)),
+    musicLine(p.music, p.audios.length > 0 || p.videos.some((v) => v.useSound), p.mouth),
+    p.mouth === "talk" ? "" : MOUTH_PLAN,
     "",
     `The idea: ${p.idea.trim() || defaultIdea(p)}`,
   ].filter((l) => l !== undefined).join("\n");
