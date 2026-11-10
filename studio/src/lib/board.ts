@@ -275,6 +275,32 @@ async function continueRun(boxId: string, runId: string): Promise<void> {
   }
 }
 
+const sameFile = (a: FileRef, b: FileRef) => a.filename === b.filename && (a.subfolder || "") === (b.subfolder || "");
+/** the job that made this video, when it's still in the results list and was a quick one (Turbo, or under 1 MP) */
+function draftJob(file: FileRef) {
+  const j = useJobs.getState().jobs.find((x) => x.outputs.some((o) => sameFile(o, file)));
+  const o = j?.meta?.opts as AnimateOpts | undefined;
+  if (!j || !o || j.meta?.final) return null;
+  return o.turbo || o.width * o.height < 0.9 * 1024 * 1024 ? { j, o } : null;
+}
+export const canFinalize = (file: FileRef) => !!draftJob(file);
+/** Finalize a take you like: the same plan, pictures, LoRAs and seed, made again at full quality — Turbo off, your full
+ *  step count, at least 1 MP (smoothing and the 1080p upscale apply as usual). A new video next to the draft, in the same
+ *  box; it follows the draft closely but isn't frame-for-frame the same (more steps change the details). */
+export async function finalize(boxId: string, file: FileRef): Promise<void> {
+  const d = draftJob(file);
+  const b = useBoard.getState().boxes.find((x) => x.id === boxId);
+  const r = b?.runs.find((x) => x.outputs.some((o) => sameFile(o, file)));
+  if (!d || !b || !r) throw new Error("This video's settings aren't in the results list any more — make it again from the box");
+  const mp = Math.max(0.98, (d.o.width * d.o.height) / (1024 * 1024));
+  const { width, height } = h3SizeFor(d.o.width / d.o.height, mp);
+  const o: AnimateOpts = { ...d.o, turbo: false, steps: useSettings.getState().s.animate.adv.steps, width, height };
+  const name = r.cfg?.name ?? "Video";
+  const j = await useJobs.getState().run("animate", `${name} · full quality`, buildAnimate(o), `animate:${o.mode}:full:${o.seconds}s:${Math.round(mp * 100) / 100}`,
+    { opts: o, final: true, project: d.j.meta?.project, stack: `board:${r.id}`, board: boxId, sent: d.j.meta?.sent });
+  setRun(boxId, r.id, { jobIds: [...r.jobIds, j.id], takes: r.takes + 1 });
+}
+
 /** after a reload: every run that was still planning (or lining up its takes) carries on — or says plainly that it can't */
 async function resumeRuns() {
   await jobsReady;

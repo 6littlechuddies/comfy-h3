@@ -12,6 +12,7 @@ import { useLoraBrowser } from "./LoraBrowser";
 import { GenData, openTab, usePickPurpose, type PickPurpose } from "./GenData";
 import { Icon, cx } from "./ui";
 import { copyText } from "../lib/copy";
+import { CollectionUses } from "./CollectionUses";
 
 type Mode = "collections" | "link" | "file";
 /** what you were looking at when you closed it — opening it again brings you back there */
@@ -208,6 +209,7 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
     useSettings.getState().setTab("batch");
   };
   const scroller = useRef<HTMLDivElement>(null);
+  const [uses, setUses] = useState(false);
   useEffect(() => { civitCollections().then((r) => { setList(r.items); if (!cur && r.items[0]) setCur(String(r.items.find((c) => c.type !== "Model")?.id ?? r.items[0].id)); }).catch((e) => setErr((e as Error).message)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const load = async (cursor: string | null) => {
     if (!cur) return;
@@ -273,6 +275,8 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
             <button disabled={!sel.length || !!sending} onClick={() => downloadWorkflows(sel.map((id) => `https://civitai.com/images/${id}`), setSending).catch((er) => alert((er as Error).message))}
               className="press border border-line px-2 py-1 text-[12px] text-muted hover:text-ink disabled:opacity-40" title="One .zip with each ticked picture's ComfyUI workflow, settings and resources">Workflows (.zip)</button>
           </>}
+          {cur && <button onClick={() => setUses(true)} className="press border border-line px-2 py-1 text-[12px] text-muted hover:text-ink" title="The LoRAs and settings these pictures were made with — most used first, ready to add">What these use</button>}
+          {uses && cur && <CollectionUses id={cur} onClose={() => setUses(false)} />}
           <span className="micro ml-auto text-dim">{items.filter((i) => i.has_prompt !== false).length}/{items.length} WITH PROMPTS{next ? " SO FAR" : ""}</span>
         </div>
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto p-4" onScroll={(e) => { const el = e.currentTarget; scrollPos.current = el.scrollTop; if (next && !loading && el.scrollTop + el.clientHeight > el.scrollHeight - 600) load(next); }}>

@@ -13,7 +13,7 @@ import { makeRef, tagsFor, useWork, type Ref } from "../lib/work";
 import { useTray } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
 import { useSettings } from "../lib/settings";
-import { usePrimaryAction, useHandoffInto } from "../App";
+import { usePrimary, usePrimaryAction, useHandoffInto } from "../App";
 import { Btn, EtaText, Help, Icon, JobBar, LoraList, PresetBar, Seg, TextArea, TextIn, cx } from "../components/ui";
 import { PromptFiles } from "./Scenes";
 import { savePackCopy } from "../lib/packs";
@@ -139,7 +139,7 @@ export default function PromptTab() {
     if (sent == null || !finalText || sent === finalText) return;
     if (useSettings.getState().s.animate.prompt === sent) { useSettings.getState().set("animate", { prompt: finalText }); setWork({ sentPlan: finalText }); }
   }, [finalText]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sendToAnimate = () => {
+  const sendToAnimate = (andMake = false) => {
     const mode = p.mode === "references" ? "ref" : p.mode === "first-last" ? "fl" : p.mode === "image" ? "i2v" : "ref";
     setWork({ animateRefs: refs.map((r) => ({ ...r })) });
     // Image → video / First → last read the picture slots, not the reference list: put the pictures there too
@@ -151,7 +151,12 @@ export default function PromptTab() {
     setWork({ sentPlan: finalText });
     const pl = planOfText(finalText); if (pl) updatePlan(pl.id, { sent: Date.now() });
     useSettings.getState().setTab("animate");
-    toast("Sent to Animate: references, timeline and length.", "good");
+    if (!andMake) { toast("Sent to Animate: references, timeline and length.", "good"); return; }
+    // one press: Animate takes the plan and starts the video with its own settings (size, takes, LoRAs) — no second button
+    setTimeout(() => {
+      const st = useSettings.getState().s.animate;
+      if (st.prompt === finalText) usePrimary.getState().fns.animate?.();
+    }, 150);
   };
 
   const chips = (
@@ -240,7 +245,8 @@ export default function PromptTab() {
               <Btn onClick={() => setAsText((v) => !v)}>{asText ? "Show as timeline" : "Show as plain text"}</Btn>
               <Btn onClick={() => { copyText(finalText, "Prompt copied"); }}>Copy</Btn>
               <Btn onClick={() => setPast(true)} title="Every plan made with the characters in your references">Past plans</Btn>
-              <Btn kind="primary" className="ml-auto px-6" onClick={sendToAnimate}>Send to Animate <Icon name="arrow" size={16} /></Btn>
+              <Btn className="ml-auto" onClick={() => sendToAnimate()} title="Open it in Animate to change size, takes or LoRAs before making it">Send to Animate</Btn>
+              <Btn kind="primary" className="px-6" onClick={() => sendToAnimate(true)} title="Sends this plan to Animate and starts the video — one press">Make video <Icon name="arrow" size={16} /></Btn>
             </div>
           </>
         )}

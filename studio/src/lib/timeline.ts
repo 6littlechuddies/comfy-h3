@@ -48,6 +48,28 @@ export function parseTimeline(raw: string, seconds: number): Timeline {
       const s = parseTime(parts[1]), e = parseTime(parts[2]);
       if (s != null && e != null) { const so = { id: uid(), start: s, end: e, text: parts.slice(3).join(" | ") }; t.sounds.push(so); last = so; continue; }
     }
+    // the writer doesn't always keep to "CUT | start | end | …": it also answers in the finished form ("CUT 2 (0:02–0:05),
+    // close-up: …"), or with a bare range ("0:02–0:05: …", "[0:02 - 0:05] …"). Those are cuts too — they used to be glued
+    // onto the cut above, which left one box marked 0:00–0:02 holding the whole plan.
+    const T = String.raw`(\d+:\d+(?:\.\d+)?)\s*(?:[–—-]|to)\s*(\d+:\d+(?:\.\d+)?)`; // m:ss only — "2-3 people" is not a time
+    const bare = line.replace(/\*\*/g, "");
+    const head = String.raw`^(?:CUT\s*\d*\s*)?[\[(]?\s*${T}\s*[\])]?\s*`;
+    const loose = bare.match(new RegExp(head + String.raw`(?:,\s*([^:|]{0,80}?))?\s*[:|]\s*(.+)$`, "i"))   // "(0:02–0:05), close-up: text"
+      ?? bare.match(new RegExp(head + String.raw`()[—-]?\s*(.+)$`, "i"));                                      // "0:02–0:05 text"
+    if (loose) {
+      const s2 = parseTime(loose[1]), e2 = parseTime(loose[2]);
+      if (s2 != null && e2 != null && e2 > s2) { const c = { id: uid(), start: s2, end: e2, shot: (loose[3] ?? "").trim(), text: loose[4].trim() }; t.cuts.push(c); last = c; continue; }
+    }
+    const said = line.match(/^At\s+(\d[\d:.]*s?),\s*(.+?)\s+says(?:\s+in the voice of\s+(.+?))?:\s*["“](.+?)["”]\s*$/i);
+    if (said) { const at = parseTime(said[1]); if (at != null) { t.says.push({ id: uid(), at, who: said[2], voice: said[3] ?? "", words: said[4] }); last = null; continue; } }
+    if (/^Sounds?:/i.test(line)) {
+      for (const part of line.replace(/^Sounds?:\s*/i, "").replace(/\.$/, "").split(/;\s*/)) {
+        const m2 = part.match(new RegExp(String.raw`^(.*?)\s*\(\s*${T}\s*\)$`));
+        const s3 = m2 && parseTime(m2[2]), e3 = m2 && parseTime(m2[3]);
+        if (m2 && s3 != null && e3 != null) t.sounds.push({ id: uid(), start: s3, end: e3, text: m2[1].trim() });
+      }
+      last = null; continue;
+    }
     // not a tagged line: it carries on the cut (or sound) above it
     if (last && !/^(CUT|SAY|SOUND|STYLE)\b/i.test(line)) last.text = `${last.text} ${line}`.trim();
   }

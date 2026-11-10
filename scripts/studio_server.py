@@ -1661,6 +1661,83 @@ async def civitai_collection(req):
     return web.json_response({"items": out, "next": str(nxt) if nxt not in (None, "") else None})
 
 
+async def _collection_raw(cid: int, cursor=None) -> tuple[list, object]:
+    """one page of a collection as CivitAI gives it (its own site API first, then the public one) → (items, next cursor)"""
+    payload = {"collectionId": cid, "limit": 48, "sort": "Newest", "period": "AllTime", "browsingLevel": 31}
+    if cursor not in (None, ""): payload["cursor"] = int(cursor) if str(cursor).isdigit() else cursor
+    try: d = await civitai_trpc("image.getInfinite", payload) or {}
+    except web.HTTPException: d = None
+    if _items_of(d): return _items_of(d), (d.get("nextCursor") if isinstance(d, dict) else None)
+    q = f"/api/v1/images?collectionId={cid}&limit=48&nsfw=X" + (f"&cursor={quote(str(cursor))}" if cursor not in (None, "") else "")
+    pub = await civitai_try(q)
+    if pub and _items_of(pub): return _items_of(pub), ((pub.get("metadata") or {}).get("nextCursor") if isinstance(pub.get("metadata"), dict) else None)
+    return [], None
+
+
+async def civitai_collection_summary(req):
+    """What the pictures you saved have in common (?id= or a collection link): the LoRAs they were made with — most used
+    first, with the usual strength, ready to add — and the settings they share. Reads up to ~190 pictures' own generation
+    data; pictures without any are counted but tell nothing."""
+    raw = req.query.get("id", "")
+    m = COLLECTION_LINK.search(raw) or re.fullmatch(r"\s*(\d+)\s*", raw)
+    if not m: return web.json_response({"error": "Pick a collection, or paste a link like https://civitai.com/collections/12345"}, status=400)
+    cid = int(m.group(1))
+    items, cursor = [], None
+    for _ in range(4):
+        page, cursor = await _collection_raw(cid, cursor)
+        items += [i for i in page if isinstance(i, dict) and i.get("id")]
+        if not page or cursor in (None, ""): break
+    if not items:
+        raise web.HTTPBadGateway(text=json.dumps({"error": "CivitAI didn't give this collection's pictures — check your key has read access, or that the collection is yours / public"}), content_type="application/json")
+    sem = asyncio.Semaphore(6)
+    async def meta_of(i):
+        mm = i.get("meta") if isinstance(i.get("meta"), dict) else {}
+        if mm.get("prompt") or mm.get("civitaiResources") or mm.get("resources") or i.get("hasMeta") is False: return mm
+        async with sem: return {**mm, **(await _gen_meta(int(i["id"])))}
+    metas = await asyncio.gather(*(meta_of(i) for i in items[:190]), return_exceptions=True)
+    by_ver: dict = {}; by_name: dict = {}; samplers: dict = {}; steps: list = []; cfgs: list = []; told = 0
+    for mm in metas:
+        if not isinstance(mm, dict) or not mm: continue
+        if not _minor_ok(mm.get("prompt") or ""): continue
+        told += 1
+        seen_here = set()
+        for r in mm.get("civitaiResources") or []:
+            if not isinstance(r, dict) or not r.get("modelVersionId"): continue
+            if str(r.get("type") or "").lower() in ("checkpoint", "vae", "embedding", "textualinversion", "upscaler"): continue
+            v = int(r["modelVersionId"])
+            if v in seen_here: continue
+            seen_here.add(v)
+            e = by_ver.setdefault(v, {"count": 0, "weights": [], "type": str(r.get("type") or "").lower()})
+            e["count"] += 1
+            if isinstance(r.get("weight"), (int, float)): e["weights"].append(float(r["weight"]))
+        for r in mm.get("resources") or []:
+            if not isinstance(r, dict) or str(r.get("type", "")).lower() not in ("lora", "locon", "lycoris") or not r.get("name"): continue
+            e = by_name.setdefault(str(r["name"])[:80], {"count": 0, "weights": []}); e["count"] += 1
+            if isinstance(r.get("weight"), (int, float)): e["weights"].append(float(r["weight"]))
+        for mt in re.finditer(r"<lora:([^:>]+):([\d.]+)>", mm.get("prompt") or ""):
+            e = by_name.setdefault(mt.group(1)[:80], {"count": 0, "weights": []}); e["count"] += 1; e["weights"].append(float(mt.group(2)))
+        sm = mm.get("sampler")
+        if sm: samplers[str(sm)[:40]] = samplers.get(str(sm)[:40], 0) + 1
+        for key, dst in (("steps", steps), ("cfgScale", cfgs)):
+            try: dst.append(float(mm[key]))
+            except (KeyError, TypeError, ValueError): pass
+    have = {int(x["version_id"]) for x in load_reg().values() if isinstance(x, dict) and str(x.get("version_id") or "").isdigit()}
+    top = sorted(by_ver.items(), key=lambda kv: -kv[1]["count"])[:24]
+    async def named(v, e):
+        d = await civitai_try(f"/api/v1/model-versions/{v}") or {}
+        md = d.get("model") or {}
+        if str(md.get("type") or e["type"] or "").upper() not in ("LORA", "LOCON", "DORA", "LYCORIS", ""): return None
+        w = e["weights"]
+        return {"version_id": v, "model_id": d.get("modelId"), "name": md.get("name") or f"version {v}", "version": d.get("name") or "", "base": d.get("baseModel") or "",
+                "family": family(d.get("baseModel") or ""), "count": e["count"], "weight": round(sum(w) / len(w), 2) if w else None, "installed": v in have,
+                "nsfw": bool(md.get("nsfw"))}
+    loras = [x for x in await asyncio.gather(*(named(v, e) for v, e in top), return_exceptions=True) if isinstance(x, dict)]
+    mid = lambda a: sorted(a)[len(a) // 2] if a else None
+    return web.json_response({"pictures": len(items), "told": told, "more": cursor not in (None, ""), "loras": loras,
+        "by_name": sorted(({"name": n, "count": e["count"], "weight": round(sum(e["weights"]) / len(e["weights"]), 2) if e["weights"] else None} for n, e in by_name.items()), key=lambda x: -x["count"])[:20],
+        "samplers": sorted(samplers.items(), key=lambda kv: -kv[1])[:5], "steps": mid(steps), "cfg": mid(cfgs)})
+
+
 WF_HAS: dict[int, bool] = {}
 
 
@@ -5444,7 +5521,7 @@ def main():
         web.get("/studio-api/civitai/search", civitai_search), web.get("/studio-api/civitai/model/{id}", civitai_model),
         web.get("/studio-api/civitai/images", civitai_images), web.get("/studio-api/civitai/workflows", civitai_workflows), web.post("/studio-api/civitai/workflows/zip", civitai_workflows_zip),
         web.get("/studio-api/civitai/image", civitai_image), web.get("/studio-api/civitai/media", civitai_media), web.get("/studio-api/civitai/pic", civitai_pic),
-        web.get("/studio-api/civitai/collections", civitai_collections), web.get("/studio-api/civitai/debug", civitai_debug), web.get("/studio-api/civitai/collection", civitai_collection), web.get("/studio-api/civitai/collection-models", civitai_collection_models), web.post("/studio-api/civitai/fetch-media", civitai_fetch_media),
+        web.get("/studio-api/civitai/collections", civitai_collections), web.get("/studio-api/civitai/debug", civitai_debug), web.get("/studio-api/civitai/collection", civitai_collection), web.get("/studio-api/civitai/collection-summary", civitai_collection_summary), web.get("/studio-api/civitai/collection-models", civitai_collection_models), web.post("/studio-api/civitai/fetch-media", civitai_fetch_media),
         web.post("/studio-api/notify/watch", notify_watch), web.post("/studio-api/notify/test", notify_test),
         web.get("/studio-api/packs", packs_list), web.post("/studio-api/packs", packs_add), web.put("/studio-api/packs/active", packs_activate),
         web.patch("/studio-api/packs/{id}", packs_update), web.delete("/studio-api/packs/{id}", packs_delete), web.get("/studio-api/packs/{id}/text", packs_text),

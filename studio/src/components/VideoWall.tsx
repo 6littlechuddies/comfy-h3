@@ -6,7 +6,9 @@ import { viewUrl, type FileRef } from "../lib/api";
 import { noteSeen, openViewer } from "./Viewer";
 import { Icon, cx } from "./ui";
 
-export interface WallItem { file: FileRef; label: string; sub?: string }
+export interface WallItem { file: FileRef; label: string; sub?: string;
+  /** Finalize: make this take again at full quality (only on quick drafts whose settings are still known) */
+  full?: () => void }
 
 /** the file name a video is saved as: "Mei · loop 3.mp4" rather than h3_00042_.mp4 */
 export const saveName = (it: WallItem, i: number) => `${it.label}${it.sub ? ` - ${it.sub}` : ""} ${String(i + 1).padStart(2, "0")}${it.file.filename.match(/\.\w+$/)?.[0] ?? ".mp4"}`.replace(/[\\/:*?"<>|]+/g, "_");
@@ -57,6 +59,8 @@ export function VideoWall({ items, min = 200, empty, pending }: {
           </button>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6">
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">{it.label}{it.sub && <span className="text-muted"> · {it.sub}</span>}</span>
+            {it.full && <button onClick={(e) => { e.stopPropagation(); it.full!(); }} title="Finalize: make this take again at full quality — same plan, pictures and seed; Turbo off, at least 1 MP" aria-label={`Finalize ${it.label}`}
+              className="pointer-events-auto flex h-7 items-center rounded-md bg-black/70 px-1.5 text-[11px] font-semibold text-ink opacity-0 hover:bg-accent hover:text-black focus:opacity-100 group-hover:opacity-100">Finalize</button>}
             <a href={viewUrl(it.file)} download={saveName(it, i)} onClick={(e) => { e.stopPropagation(); noteSeen([it.file], "dl"); }} title="Download this video" aria-label={`Download ${it.label}`}
               className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md bg-black/70 text-ink opacity-80 hover:bg-accent hover:text-black group-hover:opacity-100">
               <Icon name="down" size={14} />

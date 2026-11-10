@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
-import { addCharacter, addPic, addPicsBox, boxProblem, charOfFolder, MIX_KINDS, mixLabel, mixOf, removeBox, runBox, runTicked, setBoard, setBox, takesOf, useBoard, type Box, type BoardRun, type Mix } from "../lib/board";
+import { addCharacter, addPic, addPicsBox, boxProblem, canFinalize, charOfFolder, finalize, MIX_KINDS, mixLabel, mixOf, removeBox, runBox, runTicked, setBoard, setBox, takesOf, useBoard, type Box, type BoardRun, type Mix } from "../lib/board";
 import { coverOf, isAdult, useCharacters } from "../lib/characters";
 import { useJobs, type Job } from "../lib/jobs";
 import { useGroup } from "../lib/downloads";
@@ -287,7 +287,8 @@ function BoxCard({ b, onOpen }: { b: Box; onOpen: () => void }) {
 function wallOf(b: Box, name: string): WallItem[] {
   return b.runs.flatMap((r) => {
     const kind = MIX_KINDS.find((x) => x.k === r.mode)?.short.toLowerCase() ?? "video";
-    return [...r.outputs].reverse().map((file) => ({ file, label: name, sub: kind }));
+    return [...r.outputs].reverse().map((file) => ({ file, label: name, sub: kind,
+      ...(canFinalize(file) ? { full: () => { finalize(b.id, file).then(() => useJobs.getState().toast(`${name}: full-quality version in line — it lands in the same box`, "good")).catch((e) => useJobs.getState().toast((e as Error).message, "bad")); } } : {}) }));
   });
 }
 const saveNameOf = (it: WallItem, i: number) => `${it.label} - ${it.sub ?? "video"} ${String(i + 1).padStart(2, "0")}.mp4`.replace(/[\\/:*?"<>|]+/g, "_");
