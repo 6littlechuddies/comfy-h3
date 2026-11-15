@@ -70,7 +70,9 @@ async function sendOne(c: Character, onStep?: (t: string) => void): Promise<{ ok
   const ok = j.status === "done";
   const note = ok ? `${j.uploaded ?? 0} new file${j.uploaded === 1 ? "" : "s"}` : String(j.error);
   const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
-  useCharacters.getState().save({ ...cur, site: { ...cur.site, sent: { at: Date.now(), ok, note, hash: fp(cur) } } });
+  // which files the site has now (ON SITE in the folder picker, so a picture isn't put in a second set by accident)
+  const sentKeys = ok ? [...new Set([...(cur.site?.sentKeys ?? []), ...(cur.site?.sets ?? []).flatMap((x) => x.items.map((it) => `${it.subfolder}/${it.filename}`))])] : cur.site?.sentKeys;
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, sent: { at: Date.now(), ok, note, hash: fp(cur) }, ...(sentKeys ? { sentKeys } : {}) } });
   return { ok, note };
 }
 
@@ -427,7 +429,12 @@ function Folder({ c, index }: { c: Character; index: number }) {
   const [size, setSize] = useState<"s" | "m" | "l">(() => { try { return (localStorage.getItem("h3.site.thumb") as "s" | "m" | "l") || "m"; } catch { return "m"; } });
   const pickSize = (v: "s" | "m" | "l") => { setSize(v); try { localStorage.setItem("h3.site.thumb", v); } catch { /* */ } };
   const merged = useMemo(() => { const seen = new Set<string>(); return [...outs, ...disk].filter((o) => { const k = `${o.subfolder}/${o.filename}`; if (seen.has(k)) return false; seen.add(k); return true; }); }, [outs, disk]);
-  const shown = merged.filter((o) => kind === "all" || o.kind === kind);
+  // pictures already in another of their folders (free or premium) or already on the site: marked, and hidden with "Hide used"
+  const elsewhere = useMemo(() => { const m = new Map<string, string[]>(); sets.forEach((x, j) => { if (j === index) return; for (const it of x.items) { const k = `${it.subfolder}/${it.filename}`; m.set(k, [...(m.get(k) ?? []), `${x.tier === "premium" ? "Premium" : "Free"}: ${x.title || "Untitled"}`]); } }); return m; }, [sets, index]);
+  const onSite = useMemo(() => new Set(c.site?.sentKeys ?? []), [c.site?.sentKeys]);
+  const [hideUsed, setHideUsed] = useState(false);
+  const shown = merged.filter((o) => (kind === "all" || o.kind === kind) && (!hideUsed || s.items.some((x) => x.filename === o.filename && x.subfolder === o.subfolder) || (!elsewhere.has(`${o.subfolder}/${o.filename}`) && !onSite.has(`${o.subfolder}/${o.filename}`))));
+  const usedN = merged.filter((o) => elsewhere.has(`${o.subfolder}/${o.filename}`) || onSite.has(`${o.subfolder}/${o.filename}`)).length;
   const order = useMemo(() => new Map(s.items.map((x, i) => [`${x.subfolder}/${x.filename}`, i])), [s.items]);
   /** add (want = true) or take out one picture — from the latest saved folder, so a fast drag never loses one */
   const setOne = (o: FileRef, want: boolean) => {
@@ -495,7 +502,8 @@ function Folder({ c, index }: { c: Character; index: number }) {
         <div className="flex items-center gap-2">
           <span className="text-[13px] text-muted"><b className="text-ink">{s.items.length}</b> in this folder · click, or drag across several, to add or remove — the number is the order on the site</span>
           <div className="ml-auto flex gap-1">
-            <button onClick={() => setEvery((v) => !v)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", every && "on")} title="Also pick from results made outside this character's project">{every ? "All my results" : `${c.name}'s project`}</button>
+            {(usedN > 0 || hideUsed) && <button onClick={() => setHideUsed((v) => !v)} className={cx("press tag-btn !h-7 whitespace-nowrap !px-2.5 !text-[12px]", hideUsed && "on")} title="Pictures already in another of their folders, or already sent to the site">{hideUsed ? "New only" : `Hide used (${usedN})`}</button>}
+            <button onClick={() => setEvery((v) => !v)} className={cx("press tag-btn !h-7 whitespace-nowrap !px-2.5 !text-[12px]", every && "on")} title="Also pick from results made outside this character's project">{every ? "All my results" : `${c.name}'s project`}</button>
             <span className="mx-1 w-px bg-line" />
             {(["all", "image", "video"] as const).map((k) => <button key={k} onClick={() => setKind(k)} className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", kind === k && "on")}>{k === "all" ? "All" : k === "image" ? "Pictures" : "Videos"}</button>)}
             <span className="mx-1 w-px bg-line" />
@@ -514,6 +522,11 @@ function Folder({ c, index }: { c: Character; index: number }) {
                 </button>
                 {n != null && <span className="pointer-events-none absolute left-1 top-1 flex h-6 min-w-6 items-center justify-center bg-accent px-1 font-mono text-[12px] font-bold text-accentink">{n + 1}</span>}
                 {o.kind === "video" && <span className="micro pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 text-white">VIDEO</span>}
+                {(elsewhere.has(k) || onSite.has(k)) && <span title={[...(elsewhere.get(k) ?? []).map((t) => `Also in ${t}`), onSite.has(k) ? "Already sent to the site" : ""].filter(Boolean).join("\n")}
+                  className="pointer-events-auto absolute bottom-1 left-1 flex max-w-[85%] flex-wrap gap-0.5">
+                  {onSite.has(k) && <span className="micro bg-good/90 px-1 text-black">ON SITE</span>}
+                  {(elsewhere.get(k) ?? []).slice(0, 2).map((t) => <span key={t} className={cx("micro truncate px-1", t.startsWith("Premium") ? "bg-hot/90 text-black" : "bg-white/80 text-black")}>{t.toUpperCase()}</span>)}
+                </span>}
                 <button aria-label="See it full size" title="See it full size" onClick={() => import("./Viewer").then((v) => v.openViewer(shown.map((x) => ({ url: viewUrl(x), kind: x.kind === "video" ? "video" : "image", label: x.filename })), shown.indexOf(o)))}
                   className="absolute right-1 top-1 hidden h-7 w-7 items-center justify-center bg-black/75 text-white hover:text-accent group-hover:flex"><Icon name="search" size={14} /></button>
               </div>

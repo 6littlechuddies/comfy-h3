@@ -27,6 +27,8 @@ export interface SiteSet { set_key: string; title: string; description: string; 
 export interface SiteInfo {
   bio?: string; greeting?: string; backstory?: string; personality?: string; persona?: string; voice?: string; tags?: string[];
   avatar?: View; cover?: View; send_reference?: boolean; sets?: SiteSet[];
+  /** every file the site has had from them ("subfolder/filename"), as of the last good send — shown as ON SITE */
+  sentKeys?: string[];
   /** any picture as their avatar / cover (from the tray or their results) — wins over the sheet view above */
   avatarFile?: FileRef; coverFile?: FileRef;
   /** her hover loop: the short video her card plays when someone hovers it (made 540 px wide, the card's shape, when sent) */

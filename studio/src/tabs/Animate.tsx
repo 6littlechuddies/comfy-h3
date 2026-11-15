@@ -230,8 +230,17 @@ export default function AnimateTab() {
       if (swapVid.start > 0.05) toast("Swap uses the video from its start — trim the clip itself if you only want part of it", "info");
     } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); }
   };
+  // the CivitAI posts among the references / frames ("CivitAI 12345") get marked ANIMATED, with the characters in it
+  const noteCivit = () => {
+    const ms = [...refs.map((r) => r.media), ...frames].filter(Boolean) as { label?: string }[];
+    const ids = ms.map((m) => /^CivitAI (\d+)$/.exec(m.label ?? "")?.[1]).filter((x): x is string => !!x);
+    if (!ids.length) return;
+    const chars = [...new Set(refs.map((r) => r.charId).filter((x): x is string => !!x))];
+    import("../lib/civitUsed").then(({ noteUsed }) => noteUsed(ids, "animate", chars.length ? chars : [useCharacters.getState().sel], Math.max(1, takes))).catch(() => {});
+  };
   const go = async () => {
     if (why) return;
+    noteCivit();
     if (swap) return goSwap();
     import("../lib/promptHistory").then(({ remember }) => remember("animate", a.prompt, "sent"));
     setBusy(true);

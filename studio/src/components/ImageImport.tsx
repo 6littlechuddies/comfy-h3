@@ -13,6 +13,8 @@ import { GenData, openTab, usePickPurpose, type PickPurpose } from "./GenData";
 import { Icon, cx } from "./ui";
 import { copyText } from "../lib/copy";
 import { CollectionUses } from "./CollectionUses";
+import { USE_LABEL, loadCivitUsed, useCivitUsed, usedLines, type UseKind } from "../lib/civitUsed";
+import { useCharacters } from "../lib/characters";
 
 type Mode = "collections" | "link" | "file";
 /** what you were looking at when you closed it — opening it again brings you back there */
@@ -179,6 +181,11 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
   const [loading, setLoading] = useState(false);
   // which pictures to show: all, ones with a prompt, or ones made in ComfyUI (their whole workflow comes along)
   const [show, setShow] = useState<"all" | "prompt" | "workflow">(() => (pref("collectionOnly", "prompt") as "all" | "prompt" | "workflow"));
+  // posts you've already recreated / animated / swapped: marked, and hidden with "Hide used"
+  const used = useCivitUsed((s) => s.uses);
+  useEffect(() => { loadCivitUsed(); }, []);
+  const [hideUsed, setHideUsed] = useState(() => pref("hideUsed", "0") === "1");
+  const nameOf = (id: string) => useCharacters.getState().list.find((c) => c.id === id)?.name;
   const [wf, setWf] = useState<Record<number, boolean | null>>({});
   const [paste, setPaste] = useState("");
   // pick several → Batch (each one becomes a row; Swap in puts your character in all of them)
@@ -240,7 +247,9 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
   const keep = useRef({ cur, items, next }); keep.current = { cur, items, next };
   useEffect(() => () => { collMem = { ...keep.current, scroll: scrollPos.current }; }, []);
   const wfOf = (i: CollectionItem) => (i.has_workflow != null ? i.has_workflow : wf[i.id]);
-  const shown = show === "prompt" ? items.filter((i) => i.has_prompt !== false) : show === "workflow" ? items.filter((i) => wfOf(i) === true) : items;
+  const shown0 = show === "prompt" ? items.filter((i) => i.has_prompt !== false) : show === "workflow" ? items.filter((i) => wfOf(i) === true) : items;
+  const usedN = shown0.filter((i) => used[String(i.id)]).length;
+  const shown = hideUsed ? shown0.filter((i) => !used[String(i.id)]) : shown0;
   // "with a workflow": ask CivitAI about the loaded pictures it didn't say about yet (a few dozen at a time)
   const asking = useRef(false);
   useEffect(() => {
@@ -280,6 +289,8 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
             ))}
           </div>
           {checking && <span className="text-[11.5px] text-dim">checking which have a workflow…</span>}
+          {(usedN > 0 || hideUsed) && <button onClick={() => { setHideUsed((v) => !v); setPref("hideUsed", hideUsed ? "0" : "1"); }} aria-pressed={hideUsed} title="Posts you've already recreated, animated, swapped or sent to Create"
+            className={cx("press border px-2 py-1 text-[12px]", hideUsed ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}>{hideUsed ? `Showing new only (${usedN} used hidden)` : `Hide used (${usedN})`}</button>}
           <button onClick={() => { setPicking((v) => !v); setSel([]); }} className={cx("press border px-2 py-1 text-[12px]", picking ? "border-accent text-accent" : "border-line text-muted hover:text-ink")} title="Tick several pictures: recreate them all, or swap your character into them, in Batch">{picking ? "Cancel picking" : "Pick several → Batch"}</button>
           {picking && <>
             <button className="text-[12px] text-muted hover:text-ink" onClick={() => setSel(shown.filter((i) => !i.video).map((i) => i.id))}>All {shown.filter((i) => !i.video).length}</button>
@@ -304,6 +315,8 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
                   {picking && !it.video && <span className={cx("absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center border text-[13px] font-bold", sel.includes(it.id) ? "border-accent bg-accent text-black" : "border-white/60 bg-black/50 text-transparent")}>✓</span>}
                   {it.has_prompt === false && <span className="absolute inset-x-0 bottom-0 bg-black/70 py-0.5 text-center text-[10px] text-white/70">no prompt</span>}
                   {wfOf(it) === true && <span className="micro absolute bottom-1.5 left-1.5 bg-black/75 px-1 text-accent">WORKFLOW</span>}
+                  {used[String(it.id)] && <span title={usedLines(it.id, nameOf).join("\n")} className="pointer-events-auto absolute inset-x-1.5 top-1.5 flex flex-wrap gap-0.5" style={picking ? { right: "2.25rem" } : undefined}>
+                    {(Object.keys(used[String(it.id)]) as UseKind[]).map((k) => <span key={k} className="micro bg-good/90 px-1 text-black">{USE_LABEL[k]}</span>)}</span>}
                 </button>
               ))}
               {loading && Array.from({ length: 12 }, (_, i) => <div key={`s${i}`} className="shimmer aspect-[3/4]" />)}

@@ -1,5 +1,6 @@
 // How a CivitAI picture or video was made — prompt, settings, every resource used — with one-click
 // "Send to Animate", "Use in Create" and "Plan in Prompt". Used in the LoRA browser and the link importer.
+import { loadCivitUsed, useCivitUsed, usedLines } from "../lib/civitUsed";
 import { Fragment, useEffect, useState } from "react";
 import { saveWorkflow, type CivitGen, type CivitResource } from "../lib/api";
 import { genMedia, cleanPrompt, createTargetOf, targetFamily, ensureLoras, genAsText, genClipWithCharacter, genStyleToCreate, genSwap, genToAnimate, genToCreate, genToPrompt, lorasFor, type SwapMode } from "../lib/civitUse";
@@ -57,6 +58,7 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
       if (what === "animate") failed = (await genToAnimate(gen, { media, loras: videoLoras }, setBusy)).failed;
       else if (what === "create") failed = (await genToCreate(gen, setBusy)).failed;
       else await genToPrompt(gen, media, setBusy);
+      if (what !== "prompt" && /civitai/.test(gen.page ?? "")) import("../lib/civitUsed").then(async ({ noteUsed }) => { const { useCharacters } = await import("../lib/characters"); noteUsed([gen.id], what === "animate" ? "animate" : "create", [useCharacters.getState().sel]); }).catch(() => {});
       toast(what === "animate" ? `Sent to Animate: the prompt${videoLoras.length - failed.length > 0 ? `, ${videoLoras.length - failed.length} video LoRA${videoLoras.length - failed.length > 1 ? "s" : ""}` : ""}${media ? `, and the ${gen.video ? "clip" : "picture"} as <${gen.video ? "Video" : "Picture"}>` : ""}.`
         : what === "create" ? `Set up in Create (${ctLabel}, Exact prompt) with its settings — press Generate.` : "Sent to Prompt — press Write timeline.", "good");
       if (failed.length) toast(`Couldn't add: ${failed.join("; ")}`, "bad");
@@ -146,6 +148,7 @@ export function GenData({ gen: original, loading, onDone }: { gen: CivitGen; loa
         {gen.page ? <a href={gen.page} target="_blank" rel="noreferrer" className="ml-auto flex items-center gap-1 text-muted hover:text-ink">CivitAI<Icon name="external" size={12} /></a>
           : <span className="micro ml-auto text-dim">{gen.process === "a1111" ? "A1111 / FORGE METADATA" : gen.process === "comfyui" ? "COMFYUI METADATA" : "YOUR FILE"}</span>}
       </div>
+      {gen.page && <UsedBefore id={gen.id} />}
 
       {prompt || startPrompt ? (
         <div className="flex flex-col gap-1.5">
@@ -321,6 +324,7 @@ function WithCharacter({ gen, busy, setBusy, onDone }: { gen: CivitGen; busy: st
     if (!c || busy) return;
     setBusy("Starting…");
     try {
+      import("../lib/civitUsed").then(({ noteUsed }) => noteUsed([gen.id], gen.video ? "animate" : "swap", [c.id])).catch(() => {});
       if (gen.video) { await genClipWithCharacter(gen, c, setBusy); toast(`In Prompt: ${c.name}'s pictures + the clip. Press Write timeline (or Read the clip first), then Send to Animate.`, "good"); onDone("prompt"); }
       else {
         const tab = await genSwap(gen, c, { mode, outfit, who }, setBusy);
@@ -382,6 +386,7 @@ function PickFor({ gen, busy, setBusy, onDone }: { gen: CivitGen; busy: string |
         const c = useCharacters.getState().list.find((x) => x.id === p.id);
         if (!c) throw new Error("That character is gone");
         usePickPurpose.setState({ p: null });
+        import("../lib/civitUsed").then(({ noteUsed }) => noteUsed([gen.id], "swap", [c.id])).catch(() => {});
         onDone(await genSwap(gen, c, { mode: "swap", outfit: "theirs", who: "" }, setBusy));
         return;
       }
@@ -452,3 +457,13 @@ const USE_PIECES: { label: string; run: (text: string, cats: string[]) => void }
     useJobs.getState().toast("Added to Edit chat's message box.", "good");
   } },
 ];
+
+/** "Already: Recreated ×4 for Mei · 14 Nov" — so a post isn't done twice by accident */
+function UsedBefore({ id }: { id: number }) {
+  const uses = useCivitUsed((s) => s.uses[String(id)]);
+  useEffect(() => { loadCivitUsed(); }, []);
+  const chars = useCharacters((s) => s.list);
+  if (!uses) return null;
+  const lines = usedLines(id, (c) => chars.find((x) => x.id === c)?.name);
+  return <p className="-mt-1.5 border border-good/40 bg-good/5 px-2.5 py-1.5 text-[12px] text-good">Already used: {lines.join(" · ")}</p>;
+}

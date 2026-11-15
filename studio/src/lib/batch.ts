@@ -295,6 +295,14 @@ export async function planExactRows(o: { charIds: string[]; items: { url: string
 }
 
 let recTurn = 0;
+/** a row made from a CivitAI picture or clip ("CivitAI 12345" in the tray): mark the post as used — animated (videos) or
+ *  swapped (pictures) — with the characters it was made for */
+function noteRowUse(r: Row, b: BatchState, charId: string | null, stars?: (string | null)[]) {
+  const m = /^CivitAI (\d+)$/.exec(r.imitate?.label ?? "");
+  if (!m) return;
+  const who = stars?.length ? stars : [charId ?? r.charId ?? b.characterId];
+  import("./civitUsed").then(({ noteUsed }) => noteUsed([m[1]], b.target === "video" ? "animate" : "swap", who, r.takes)).catch(() => {});
+}
 export async function queueAll(only?: string[]): Promise<number> {
   // rows from saved scenes (or with their own expression) need their prompt written first
   if (useBatch.getState().target === "image" && picturesToWrite().some((r) => r.inspo || r.expression)) await writePicturePrompts();
@@ -334,6 +342,7 @@ export async function queueAll(only?: string[]): Promise<number> {
             loras: pl.loras.map((l) => ({ name: l.name, strength: l.strength })), size: `${pl.width}×${pl.height}`, seed, steps: pl.adv.steps, cfg: pl.adv.cfg, sampler: pl.adv.sampler, scheduler: pl.adv.scheduler } });
           rowIds.push(job.id); ids.push(job.id);
         }
+        import("./civitUsed").then(({ noteUsed }) => noteUsed([r.civit!.id], "recreate", [project], r.takes)).catch(() => {});
         useBatch.getState().update(r.id, { status: "queued", jobIds: rowIds, step: undefined, error: pl.failed.length ? `Without ${pl.failed.length} LoRA${pl.failed.length > 1 ? "s" : ""} it couldn't download: ${pl.failed.join("; ")}` : undefined });
       } catch (e) { useBatch.getState().update(r.id, { status: "error", step: undefined, error: (e as Error).message }); }
       continue;
@@ -361,6 +370,7 @@ export async function queueAll(only?: string[]): Promise<number> {
             for (const who of stars) if (who) swaps.push({ row: r, who, outfit: b.swapOutfit ?? "theirs", toSet });
             if (!stars.some(Boolean)) throw new Error("Pick a character to swap in (Star, or tick them under Photo set)");
             useBatch.getState().update(r.id, { status: "queued", jobIds: [], error: undefined, step: "Waiting its turn", results: [] });
+            noteRowUse(r, b, null, stars.map((x) => x?.id ?? null));
             continue;
           }
           for (const who of stars) {
@@ -380,6 +390,7 @@ export async function queueAll(only?: string[]): Promise<number> {
             job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1}${who ? ` · ${who.name}` : ""} · picture`, buildEdit({ ...editArgs(st.edit, engine), enhance: false, seed: newSeed(), images, instruction, negative: "", resolution: 1024, prefix: "studio/batch/edit" }), "edit:batch", { batchRow: r.id, kind: "make", ...extra(rr, who) });
             rowIds.push(job.id); ids.push(job.id);
           }
+          noteRowUse(r, b, null, stars.map((x) => x?.id ?? null));
           continue;
         } else {
           const anime = c ? c.style === "anime" : st.create.style === "anime";
@@ -413,6 +424,7 @@ export async function queueAll(only?: string[]): Promise<number> {
         rowIds.push(job.id); ids.push(job.id);
       }
       useBatch.getState().update(r.id, { status: "queued", jobIds: rowIds, error: undefined });
+      noteRowUse(r, b, c?.id ?? null);
     } catch (e) { useBatch.getState().update(r.id, { status: "error", error: (e as Error).message }); }
   }
   if (swaps.length) (await import("./batchSwap")).startSwaps(swaps);
