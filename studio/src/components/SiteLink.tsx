@@ -28,15 +28,15 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
+const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.quirks, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
 
 /** the writer fills the profile from their look, their pictures' prompts and set titles; what you wrote stays unless `all` */
-async function writeProfile(c: Character, all = false) {
+async function writeProfile(c: Character, all = false, onStep?: (t: string) => void) {
   const { fillProfile } = await import("../lib/siteAuto");
-  return fillProfile(c, { all });
+  return fillProfile(c, { all, onStep });
 }
 
 /** a believable adult age when she still has the default one: 21–30, mostly early twenties */
@@ -78,8 +78,8 @@ export async function resendIfSent(id: string): Promise<string | null> {
 }
 
 /** send one character as a draft; returns the job's end state */
-async function sendOne(c: Character, onStep?: (t: string) => void): Promise<{ ok: boolean; note: string }> {
-  const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id }) })).json();
+async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
+  const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id, short_persona: short }) })).json();
   const { watchServerJob } = await import("../lib/serverJob");
   type Push = { status: string; id: string; step?: string; total?: number; done?: number; uploaded?: number; error?: string };
   let j: Push;
@@ -87,6 +87,12 @@ async function sendOne(c: Character, onStep?: (t: string) => void): Promise<{ ok
     j = await watchServerJob<Push & { [k: string]: unknown }>(`/studio-api/site/push/${start.id}`, { what: "the send", every: 1500,
       onUpdate: (x) => onStep?.(`${x.step}${x.total ? ` · ${x.done ?? 0}/${x.total} files` : ""}`) });
   } catch (e) { j = { status: "error", id: start.id, error: (e as Error).message }; }
+  // the site refused the deep persona for its length: sent again with the short one (the deep one stays in the Studio)
+  if (j.status !== "done" && !short && c.site?.personaCore && /persona/i.test(String(j.error)) && /long|length|characters|max|exceed|too many/i.test(String(j.error))) {
+    onStep?.("The site wants a shorter persona — sending the short one…");
+    const r = await sendOne(c, onStep, true);
+    return r.ok ? { ok: true, note: `${r.note} · short persona (the site refused the deep one: ${String(j.error).slice(0, 120)})` } : r;
+  }
   const ok = j.status === "done";
   const note = ok ? `${j.uploaded ?? 0} new file${j.uploaded === 1 ? "" : "s"}` : String(j.error);
   const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
@@ -386,6 +392,18 @@ function Connection({ cfg, onSaved }: { cfg: Cfg | null; onSaved: () => void }) 
   );
 }
 
+/** Deep profile on/off (on by default): her life, reactions, sample texts and an editor pass after the profile */
+function DeepToggle() {
+  const [on, setOn] = useState(true);
+  useEffect(() => { import("../lib/siteAuto").then((m) => setOn(m.deepOn())); }, []);
+  const flip = () => import("../lib/siteAuto").then((m) => { m.setDeepOn(!on); setOn(!on); });
+  return (
+    <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-muted" title="After her profile: her life between chats, how she reacts in 13 situations, sample texts in her style, then an editor pass that rewrites anything generic — about 2–3 minutes per character instead of 40 seconds. Off: the short profile only.">
+      <input type="checkbox" checked={on} onChange={flip} /> Deep profile
+    </label>
+  );
+}
+
 // ------------------------------------------------------------------ level 1: every character, many at once
 function Characters({ connected }: { connected: boolean }) {
   const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && c.views.front);
@@ -402,7 +420,7 @@ function Characters({ connected }: { connected: boolean }) {
   const writeAll = async () => {
     for (const c of chosen) {
       mark(c.id, "Writing profile…");
-      try { await writeProfile(c); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
+      try { await writeProfile(c, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
     }
     toast(`Profiles written for ${chosen.length} — check them, then send`, "good");
@@ -437,7 +455,7 @@ function Characters({ connected }: { connected: boolean }) {
     let ok = 0;
     for (const c of chosen) {
       const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
-      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); continue; } }
+      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); continue; } }
       mark(c.id, "Sending…");
       const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, (t) => mark(c.id, t));
       if (r.ok) ok++; else toast(`${c.name}: ${r.note}`, "bad");
@@ -454,6 +472,7 @@ function Characters({ connected }: { connected: boolean }) {
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <DeepToggle />
         <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
@@ -513,10 +532,16 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   const [pickLoop, setPickLoop] = useState(false);
   const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && c.views[v.id]);
   const sets = site.sets ?? [];
+  const step = useSiteBusy((s) => s.busy[c.id]);
+  const deep = async () => {
+    mark(c.id, "Starting the deep profile…");
+    try { const { deepProfile } = await import("../lib/siteAuto"); await deepProfile(c, { onStep: (t) => mark(c.id, t) }); toast(`${c.name}'s deep persona is written — read it below`, "good"); }
+    catch (e) { toast((e as Error).message, "bad"); } finally { mark(c.id, null); }
+  };
   const write = async (all: boolean) => {
-    setWriting(true);
-    try { const r = await writeProfile(c, all); toast(`${all ? "Profile rewritten" : `Filled ${r.filled} blank field${r.filled === 1 ? "" : "s"}`} from their look${r.pictures ? ` and ${r.pictures} pictures` : ""} — change anything you like`, "good"); }
-    catch (e) { toast((e as Error).message, "bad"); } finally { setWriting(false); }
+    setWriting(true); mark(c.id, "Writing her profile…");
+    try { const { fillProfile } = await import("../lib/siteAuto"); const r = await fillProfile(c, { all, onStep: (t) => mark(c.id, t) }); toast(`${all ? "Profile rewritten" : `Filled ${r.filled} blank field${r.filled === 1 ? "" : "s"}`} from their look${r.pictures ? ` and ${r.pictures} pictures` : ""} — change anything you like`, "good"); }
+    catch (e) { toast((e as Error).message, "bad"); } finally { setWriting(false); mark(c.id, null); }
   };
   const [sorting, setSorting] = useState<string | null>(null);
   const sort = async () => {
@@ -545,18 +570,24 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <div className="flex items-center gap-3">
           <img src={viewUrl(coverOf(c)!)} alt="" className="h-14 w-14 border border-line object-cover" />
           <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
-          <Btn className="ml-auto" onClick={() => write(false)} disabled={writing} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing ? "Writing…" : "Fill the blanks"}</Btn>
-          {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing} title="Rewrite every field">Rewrite all</Btn>}
+          <Btn className="ml-auto" onClick={() => write(false)} disabled={writing || !!step} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing || step ? "Writing…" : "Fill the blanks"}</Btn>
+          {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing || !!step} title="Rewrite every field">Rewrite all</Btn>}
+          {!!site.persona && <Btn onClick={deep} disabled={writing || !!step} title="Her life, how she reacts in 15 situations, sample texts in her style, then an editor pass — from her current profile, about 2–3 minutes"><Icon name="sparkle" size={14} /> {site.deepAt ? "Redo deep" : "Make it deep"}</Btn>}
         </div>
+        {step && <p className="border border-accent/40 bg-accent/5 px-3 py-2 text-[12.5px]"><span className="pulse text-accent">●</span> {step}</p>}
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
         <TextIn label="How she texts · typing style, sent to the site as voice notes" value={site.voice ?? ""} onChange={(v) => up({ voice: v })} placeholder="all lowercase, no full stops, 'lmao' a lot, one emoji max" />
+        <TextIn label="Texting habits · added to the voice notes" value={site.quirks ?? ""} onChange={(v) => up({ quirks: v })} placeholder="sends ? on its own, trailing lol, corrects typos with *" />
+        <TextIn label="Opinions she'll argue about · fuel for pushback" value={site.opinions ?? ""} onChange={(v) => up({ opinions: v })} placeholder="pineapple on pizza is fine, voice notes over 1 min are a crime…" />
+        <TextIn label="Her flaw" value={site.flaw ?? ""} onChange={(v) => up({ flaw: v })} placeholder="flaky with plans" />
         <TextIn label="Tags" value={(site.tags ?? []).join(", ")} onChange={(v) => up({ tags: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="fitness, playful, gym" />
         <TextArea label="Backstory" rows={3} value={site.backstory ?? ""} onChange={(v) => up({ backstory: v })} />
-        <TextArea label="Chat persona · private, the site's chat model reads it" rows={6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />
+        <TextArea label={`Chat persona · private, the site's chat model reads it${site.deepAt ? ` · deep, ${site.persona?.split(/\s+/).length ?? 0} words` : ""}`} rows={site.deepAt ? 14 : 6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />
+        {site.deepAt && site.personaCore && site.personaCore !== site.persona && <button className="self-start text-[12px] text-muted hover:text-ink" title="The short persona from the first pass — sent instead automatically if the site ever refuses the long one" onClick={() => up({ persona: site.personaCore, deepAt: 0 })}>Back to the short persona</button>}
         <span className="lbl mt-1">Profile pictures</span>
         <div className="grid grid-cols-2 gap-3">
           {(["avatar", "cover"] as const).map((role) => {

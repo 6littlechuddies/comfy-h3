@@ -25,7 +25,7 @@ export type View = (typeof VIEWS)[number]["id"];
 export interface SiteItem extends FileRef { rating?: "sfw" | "suggestive" | "explicit"; caption?: string; duration?: number }
 export interface SiteSet { set_key: string; title: string; description: string; tier: "free" | "premium"; price?: number; rating: "sfw" | "suggestive" | "explicit"; items: SiteItem[] }
 export interface SiteInfo {
-  bio?: string; greeting?: string; backstory?: string; personality?: string; persona?: string; voice?: string; tags?: string[];
+  bio?: string; greeting?: string; backstory?: string; personality?: string; persona?: string; voice?: string; /** the short persona from the first pass, kept when the deep one is used (sent instead if the site refuses the long one) */ personaCore?: string; /** when the deep profile was written */ deepAt?: number; /** deep-profile notes from the first pass */ quirks?: string; opinions?: string; flaw?: string; summary?: string; tags?: string[];
   avatar?: View; cover?: View; send_reference?: boolean; sets?: SiteSet[];
   /** every file the site has had from them ("subfolder/filename"), as of the last good send — shown as ON SITE */
   sentKeys?: string[];

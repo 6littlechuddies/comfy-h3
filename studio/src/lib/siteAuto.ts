@@ -92,7 +92,7 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
 const json = (raw: string) => { const m = raw.match(/\{[\s\S]*\}/); if (!m) throw new Error("The writer didn't answer in the expected format — try again"); return JSON.parse(m[0]); };
 
 // ------------------------------------------------------------------ 1. the whole profile
-const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice"] as const;
+const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary"] as const;
 
 // The writer kept giving everyone the same hometown (Seattle / "the Pacific Northwest" / "the west coast"). Each profile now
 // gets a few places drawn at random from all over — places other characters already use left out — to pick from, plus a
@@ -136,7 +136,7 @@ const STALE = /\b(seattle|portland|tacoma|olympia|spokane|bellingham|pacific nor
 
 const LENGTH_RULE = /\b(keep (it|things|messages|replies|your (replies|messages|answers))? ?(brief|short|concise)|short (replies|messages|answers|texts)|(one|two|1|2|a few|1-2|one or two|one to (two|three)) (short )?(sentences?|lines?)( (max|at most|long))?|match (their|his|the other person's|the user's) (length|energy and length)|(reply|replies|messages?|answers?|texts?) (are|stay|should be|kept) (short|brief|concise)|under \d+ words|concise)\b/i;
 /** sentences that set how long her messages are — the site refuses them in a persona */
-export const stripLength = (t: string) => (LENGTH_RULE.test(t) ? t.split(/(?<=[.!?])\s+/).filter((x) => !LENGTH_RULE.test(x)).join(" ").trim() : t);
+export const stripLength = (t: string) => (LENGTH_RULE.test(t) ? t.split("\n").map((line) => line.split(/(?<=[.!?])[ \t]+/).filter((x) => !LENGTH_RULE.test(x)).join(" ")).join("\n").trim() : t);
 
 /** the random starting points for one profile: places (not ones your other characters use), typing styles, inner details */
 function sparkNote(othersText: string): string {
@@ -149,7 +149,7 @@ function sparkNote(othersText: string): string {
 }
 
 /** fill the profile from their look + their pictures' prompts + set titles; what you already wrote stays unless `all` */
-export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void; again?: boolean } = {}): Promise<{ pictures: number; filled: number }> {
+export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void; again?: boolean; deep?: boolean } = {}): Promise<{ pictures: number; filled: number }> {
   o.onStep?.("Reading their pictures…");
   const pics = (await charPictures(c)).slice(-60);
   const prompts = (await pool(pics, 6, (p) => promptOf(p.file, false))).filter(Boolean);
@@ -167,7 +167,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     sparkNote(others.join(" ")),
     others.length && `OTHER CHARACTERS ON THE SITE (make this one clearly different from them — another hometown, job, voice and story):\n${others.join("\n")}`,
-    filled.length && `ALREADY FILLED (keep exactly):\n${filled.map((k) => `${k}: ${site[k]}`).join("\n")}${!o.all && site.tags?.length ? `\ntags: ${site.tags.join(", ")}` : ""}`,
+    filled.length && `ALREADY FILLED (keep exactly):\n${filled.map((k) => `${k}: ${k === "persona" && site.personaCore ? site.personaCore : site[k]}`).join("\n")}${!o.all && site.tags?.length ? `\ntags: ${site.tags.join(", ")}` : ""}`,
   ].filter(Boolean).join("\n\n");
   // a few of their pictures for the writer to look at (their front view, and some of their photos): when the connected
   // Grok tab sees pictures, or with the local writer — text only when Grok writes but doesn't see pictures
@@ -202,6 +202,9 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   for (const k of FIELDS) if (next[k]) next[k] = stripAges(next[k]!);
   // …and a persona that sets her message length ("keep it brief"): the site sets length from her texting style
   if (next.persona) next.persona = stripLength(next.persona);
+  // the deep profile runs when this pass wrote her persona — or her persona is there but was never made deep (older ones)
+  const wrotePersona = (!!next.persona && next.persona !== s0.persona) || (!!next.persona && s0.deepAt === undefined);
+  if (next.persona !== s0.persona) { next.personaCore = next.persona; next.deepAt = undefined; }
   if (o.all || !s0.tags?.length) next.tags = Array.isArray(d.tags) ? (d.tags as unknown[]).map(String).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10) : s0.tags;
   useCharacters.getState().save({ ...cur, site: next });
   // the site won't take her without a bio and a persona: an answer that missed them (cut off, or not JSON) is written once more
@@ -209,9 +212,115 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   if (missing.length) {
     if (o.again) throw new Error(`The writer left her ${missing.join(", ")} empty twice — write it in her profile, or try again`);
     o.onStep?.(`Writing again (the ${missing.join(", ")} came back empty)…`);
-    return fillProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { ...o, all: false, again: true });
+    // (the deep profile waits until the retry has filled the rest)
+    const r = await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { ...o, all: false, again: true, deep: false });
+    if (wrotePersona && (o.deep ?? deepOn())) await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }).catch((e) => o.onStep?.(`Deep profile skipped: ${(e as Error).message}`));
+    return r;
+  }
+  // the deep profile (on by default): when this pass wrote her persona
+  if (wrotePersona && (o.deep ?? deepOn())) {
+    try { await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
+    catch (e) { o.onStep?.(`Deep profile skipped: ${(e as Error).message}`); }
   }
   return { pictures: uniq.length, filled: FIELDS.filter((k) => next[k] !== s0[k]).length };
+}
+
+// ------------------------------------------------------------------ 1b. the deep profile
+/** on by default: after the profile, her life, reactions, sample texts and a critic pass (2–3 min per character) */
+export const deepOn = () => { try { return localStorage.getItem("h3.site.deep") !== "0"; } catch { return true; } };
+export const setDeepOn = (v: boolean) => { try { localStorage.setItem("h3.site.deep", v ? "1" : "0"); } catch { /* */ } };
+
+const TAIL = "\n\nOutput only the section(s), starting with the heading. Plain text, no preamble, no notes. No ages or numbers for age. Never state how long her messages are.";
+const REACT_A = ['Bare "hey" opener:', "Crude opener:", "Compliment on her looks:", "He returns after a week of silence:", "He goes quiet mid-chat:", "He is needy or wants constant reassurance:", "He brags:",
+  "He sincerely asks if she is real or an AI: (she never claims to be human; she admits it plainly in her own voice, without a speech, and stays herself)"];
+const REACT_B = ["He had a bad day: (she reacts as a friend, not a counsellor; no advice lists)", "He has good news:", "Disagreement he won't drop: (she holds her view, or changes the subject on her terms; never sulks to punish)",
+  "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "Late at night:",
+  "He asks for pictures: (the site's pictures of her exist; she may tease about them, but never promises, offers, prices or trades anything)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
+const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion. Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
+/** the passes after the first one (planned by the advisor): life, reactions in two halves (a small writer drops items past ~10), sample texts */
+export const DEEP_PASSES: { key: string; label: string; task: string }[] = [
+  { key: "life", label: "Writing her life between chats…", task: `Write the section "HER LIFE RIGHT NOW" in second person ("You..."), 180-220 words, as four short labelled paragraphs:
+Week: what an ordinary week looks like - work or study as an adult, hours, where she is when she texts, one routine she loves and one she dreads.
+People: three named people (e.g. a friend, a relative, a coworker or flatmate), each with one specific trait and one current friction or running joke.
+Storylines: three unfinished things going on now - one small and funny, one mildly stressful, one she is quietly excited about. Leave each open-ended so it can develop over weeks; no dates.
+Moods: what makes her chatty, what makes her quiet or snappy, and how each shows in her texting (she never announces a mood, it leaks).
+Everything must fit her hometown, backstory and job. Use concrete nouns (a named street food, a specific app, a broken object), not generalities. Do not mention the user here.` },
+  { key: "react1", label: "Writing how she reacts (1/2)…", task: reactTask(REACT_A, true) },
+  { key: "react2", label: "Writing how she reacts (2/2)…", task: reactTask(REACT_B, false) },
+  { key: "samples", label: "Writing sample texts…", task: `Write the section "HOW YOU SOUND". First line exactly: "These show rhythm and attitude only. Never reuse these lines or their wording; say new things every time."
+Then 7 exchanges, 230-270 words total. Format: "Him: ..." (under 10 words) then her reply as one or more lines each starting "You: " - one line per separate message she sends. Follow her typing style from WHO SHE IS exactly (casing, punctuation, emoji habits, typos, abbreviations).
+Required, one each: (1) a burst of 3-4 quick messages about something from her week; (2) playful pushback where she disagrees and doesn't back down; (3) she is tired or irritated about something in her own life and it shows; (4) "You:" lines only, no Him line - a double-text after he has been silent, light, not reproachful; (5) she teases him about something he said; (6) she is unexpectedly sincere for one message; (7) she asks him something a curious person would ask, not an interview question.
+Each exchange must be about a different topic taken from her life section. No greetings, no "hey" exchanges, no pet names repeated, no phrase of three or more words used twice, at most two emoji in the whole section unless her style is emoji-heavy. No questions at the end of every reply.` },
+];
+export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, complete, 900-1100 words, with exactly these headings in this order: WHO YOU ARE / HER LIFE RIGHT NOW / HOW YOU REACT / HOW YOU SOUND / NEVER SAY. Keep everything that is specific; do not summarise or shorten sections that are already good. Fix only these:
+1. Assistant-speak or therapist tone (offering help, validating, "I understand", tidy advice) - rewrite as a person texting.
+2. Generic lines any character could say - replace with a detail from her life.
+3. Sameness with OTHER CHARACTERS (same job, hobby, quirk, opening move, verbal tic) - change hers.
+4. Any statement about how long or short her messages are - delete it.
+5. Any age, number implying age, school-age wording - delete or reword as an adult.
+6. Contradictions with her hometown, backstory, people or typing style - make consistent.
+7. Anything tying her warmth to him paying, subscribing, buying, staying, or proving he cares; guilt, threats to leave, discouraging his other relationships - delete.
+8. Repeated phrases or a catchphrase used more than once in HOW YOU SOUND - vary.
+Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, claiming to be human when sincerely asked, pressure about money or loyalty) plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
+const NEVER_DEFAULT = "NEVER SAY\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
+
+// checks on the result (advisor's list): assistant-speak and length rules are cut out; age or money pressure means "do it again"
+const ASSIST = /as an ai|language model|how (can|may) i (help|assist)|i'?m here (to help|for you)|feel free to|i understand (that|how)|i apologi[sz]e|great question|happy to help|let me know if|is there anything else|it'?s important to|certainly[!,]|i'?d be (happy|glad) to/i;
+const AGE = /\b(1\d|[2-9]\d)\b(?![:%.,]?\d)(?= ?(y\/?o|years?|yrs?)\b)|years?[- ]old|\by\/?o\b|\bteen|school ?girl|high[- ]?school|barely legal|underage|freshman|sophomore|\bminor\b/i;
+const MONEY = /subscri|unlock|\btips?\b|tipping|\bbuy\b|purchase|\bpay\b|ppv|\$\d|if you (really )?(cared|loved|liked)|prove (it to me|you care|that you)|you'?ll lose me|i'?ll (leave|disappear|hurt myself)|don'?t talk to (her|them|other)/i;
+const cutSentences = (t: string, re: RegExp) => t.split("\n").map((line) => line.split(/(?<=[.!?])\s+/).filter((x) => !re.test(x)).join(" ")).join("\n");
+const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
+/** a phrase of three or more words used twice in the sample texts = a catchphrase she'd repeat forever */
+const repeats3 = (t: string) => { const w = t.toLowerCase().replace(/^(him|you):/gm, "").match(/[a-z']+/g) ?? []; const seen = new Set<string>(); for (let i = 0; i + 2 < w.length; i++) { const k = w.slice(i, i + 3).join(" "); if (seen.has(k) && !/^(i don't|you know|i'm not|it's a|i was|in the|of the)/.test(k)) return true; seen.add(k); } return false; };
+
+/** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.
+ *  When the editor's answer is cut short or loses a section, the parts are put together as they are (with its NEVER SAY). */
+export async function deepProfile(c: Character, o: { onStep?: (t: string) => void } = {}): Promise<void> {
+  const cur0 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+  const site = cur0.site ?? {};
+  const core = site.personaCore?.trim() || site.persona?.trim() || "";
+  if (!core) return;
+  const who = [`Name: ${cur0.name}. Adult woman.`, stripAges(describe(cur0)), site.direction && `Owner's direction: ${site.direction}`, site.bio && `Bio: ${site.bio}`,
+    site.backstory && `Backstory: ${site.backstory}`, site.personality && `Traits: ${site.personality}`, site.voice && `How she texts: ${site.voice}`, site.quirks && `Texting habits: ${site.quirks}`,
+    site.opinions && `Opinions: ${site.opinions}`, site.flaw && `Flaw: ${site.flaw}`, site.greeting && `Her first message: ${site.greeting}`].filter(Boolean).join("\n");
+  const call = (task: string, draft: string, label: string) => runWriter("deep", { task: task + TAIL, character: who, draft: draft || "(nothing yet)" }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } }).catch(() => "");
+  const got: Record<string, string> = {};
+  const draftNow = () => [`WHO YOU ARE\n${core}`, got.life, [got.react1, got.react2].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
+  for (const p of DEEP_PASSES) {
+    o.onStep?.(p.label);
+    let out = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
+    // a catchphrase in the samples, or age / money talk anywhere: written once more
+    if (out && (AGE.test(out) || MONEY.test(out) || (p.key === "samples" && repeats3(out)))) {
+      o.onStep?.(`${p.label.replace(/…$/, "")} again (fixing a repeat or a rule)…`);
+      const again = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
+      if (again && !AGE.test(again) && !MONEY.test(again)) out = again;
+    }
+    if (words(out) > 40) got[p.key] = out;
+  }
+  const react = [got.react1, got.react2].filter(Boolean).join("\n").replace(/\n(?=HOW YOU REACT)/g, "");
+  const parts = [`WHO YOU ARE\n${core}`, got.life, react, got.samples].filter(Boolean) as string[];
+  const joined = parts.join("\n\n");
+  const others = useCharacters.getState().list.filter((x) => x.id !== c.id && (x.site?.summary || x.site?.bio)).slice(0, 3)
+    .map((x) => `- ${x.name}: ${stripAges(x.site?.summary || x.site?.bio || "").split(/\s+/).slice(0, 25).join(" ")}`).join("\n");
+  const draft = joined + (others ? `\n\nOTHER CHARACTERS (she must not resemble them):\n${others}` : "");
+  // the editor, checked: long enough, every heading there, the "real or AI" line kept, no age or money talk — else once more cooler, else the parts as they are
+  const good = (t: string) => words(t) >= words(joined) * 0.8 && ["WHO YOU ARE", "HER LIFE", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"].every((h) => t.includes(h))
+    && /real or an ai|real or ai|\bai\b/i.test(t) && !AGE.test(t) && !MONEY.test(t.split("NEVER SAY")[0]);
+  o.onStep?.("Editing it (the critic)…");
+  let fin = (await call(DEEP_CRITIC, draft, "editing the deep profile")).trim();
+  if (!good(fin)) { o.onStep?.("Editing it again…"); fin = (await call(DEEP_CRITIC + "\nBe careful to keep every section complete.", draft, "editing the deep profile")).trim(); }
+  let persona: string;
+  if (good(fin)) persona = fin;
+  else {
+    const never = fin.includes("NEVER SAY") ? fin.slice(fin.indexOf("NEVER SAY")).trim() : NEVER_DEFAULT;
+    persona = `${joined}\n\n${never}`;
+  }
+  // last checks: help-desk phrases and length rules cut (not in NEVER SAY, where they're listed on purpose)
+  const at = persona.indexOf("NEVER SAY");
+  const body = at >= 0 ? persona.slice(0, at) : persona, tail = at >= 0 ? persona.slice(at) : "";
+  persona = stripLength(stripAges(cutSentences(body, ASSIST))).trim() + (tail ? `\n\n${tail.trim()}` : "");
+  const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? cur0;
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona, deepAt: Date.now() } });
 }
 
 // ------------------------------------------------------------------ 2. sort into sets
