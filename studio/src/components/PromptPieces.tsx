@@ -27,6 +27,18 @@ export function PromptPieces({ value, onChange, tab, className, onUse }: { value
   const noteBox = useRef<HTMLInputElement>(null);
   const update = (ps: Piece[]) => { const v = fromPieces(ps, tags); setPieces(ps); last.current = v; onChange(v); };
   const chosen = pieces.filter((p) => sel.has(p.id));
+  /** the selected pieces → a pose or background from your library (in their place) */
+  const swapWith = (kind: "pose" | "scene") => {
+    setMenu(null);
+    const ids = new Set(sel);
+    import("./LibraryPick").then(({ pickFromLibrary }) => pickFromLibrary(kind, (text) => {
+      const at = pieces.findIndex((p) => ids.has(p.id));
+      const rest = pieces.filter((p) => !ids.has(p.id));
+      const add = { id: pid(), text: tags ? text.replace(/[,\s]+$/, "") : text.replace(/\.?$/, "."), cat: (kind === "pose" ? "pose" : "setting") as PieceCat };
+      rest.splice(at < 0 ? rest.length : Math.min(at, rest.length), 0, add);
+      update(rest); setSel(new Set());
+    }));
+  };
   const why = rewriteWhy();
 
   const change = async () => {
@@ -110,6 +122,8 @@ export function PromptPieces({ value, onChange, tab, className, onUse }: { value
       {menu && createPortal(
         <div className="fixed z-[95] w-48 border border-line bg-raised2 py-1 shadow-2xl" style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 200) }} onMouseLeave={() => setMenu(null)}>
           <MenuItem onClick={() => act("change")} icon="brush">Change this…</MenuItem>
+          <MenuItem onClick={() => swapWith("pose")} icon="user">Swap with a saved pose…</MenuItem>
+          <MenuItem onClick={() => swapWith("scene")} icon="image">Swap with a saved background…</MenuItem>
           {tags && <MenuItem onClick={() => act("up")} icon="up">Stronger</MenuItem>}
           {tags && <MenuItem onClick={() => act("down")} icon="down">Weaker</MenuItem>}
           <MenuItem onClick={() => act("copy")} icon="script">Copy</MenuItem>
@@ -174,6 +188,11 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
             placeholder={state.start === 0 && state.end >= value.length ? "What to change? e.g. make her sit on the bed, hands on her knees" : "How? e.g. make it a red silk dress"} aria-label="How to change this part" className="inset h-8 min-w-0 flex-1 border border-line px-2 text-[12.5px] focus:border-accent focus:outline-none" />
           <span title={why}><button onClick={apply} disabled={!note.trim() || busy || !!why} className="press chamfer-sm btn-hot h-8 px-3 text-[12.5px] font-bold disabled:opacity-40">{busy ? "…" : "Change"}</button></span>
         </div>
+        {!busy && <div className="mt-1.5 flex gap-1.5">
+          {(["pose", "scene"] as const).map((k) => <button key={k} onClick={() => { const st = state; setState(null); import("./LibraryPick").then(({ pickFromLibrary }) => pickFromLibrary(k, (text) => {
+            onChange(value.slice(0, st.start) + text.trim() + value.slice(st.end));
+          })); }} className="press flex-1 border border-line px-2 py-1 text-[12px] text-muted hover:border-accent hover:text-ink">{k === "pose" ? "A saved pose…" : "A saved background…"}</button>)}
+        </div>}
         <p className="mt-1.5 text-[11px] text-dim">{busy ? "Rewriting… you can keep working — the change lands in the box when it's done." : `${writerOutside() ? "Grok" : "The local writer"} changes only what you ask${state.start === 0 && state.end >= value.length ? "" : " in the highlighted part"} — the rest stays word for word.`}</p>
       </div>
     </div>, document.body);

@@ -43,6 +43,7 @@ import { Assistant, AssistantButton } from "./components/Assistant";
 import { useBatch } from "./lib/batch";
 import { SelfCheck, openSelfCheck } from "./components/SelfCheck";
 import { SiteLink, openSiteLink } from "./components/SiteLink";
+import { LibraryPick } from "./components/LibraryPick";
 import { Viewer, openViewer, type ViewItem } from "./components/Viewer";
 import { setLater, useDownloads, type Group } from "./lib/downloads";
 import { getHttpsLink } from "./lib/api";
@@ -201,6 +202,7 @@ export default function App() {
       <SweepHost />
       <LoraBrowser />
       <ImageImport />
+      <LibraryPick />
       <PictureMenuHost />
       <SelectionBar />
       <RecipeEditorHost />

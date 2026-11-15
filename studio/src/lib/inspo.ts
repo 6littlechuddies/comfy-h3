@@ -77,3 +77,58 @@ export const HEAD = [
 export function expressionFor(i: number): string {
   return `${EXPRESSIONS[(i * 7) % EXPRESSIONS.length]}, ${HEAD[(i * 3) % HEAD.length]}`;
 }
+
+// ------------------------------------------------------------------ poses and backgrounds pulled out of CivitAI posts
+/** a prompt's pose words (pose + expression pieces) and its place words (setting, plus the light that goes with it) */
+export async function partsOf(prompt: string): Promise<{ pose: string; place: string }> {
+  const { toPieces, isTagPrompt, fromPieces } = await import("./tweak");
+  const clean = cleanPrompt(prompt);
+  const tags = isTagPrompt(clean);
+  const ps = toPieces(clean);
+  const pick = (cats: string[]) => fromPieces(ps.filter((p) => cats.includes(p.cat)), tags).replace(/^[,.\s]+|[,\s]+$/g, "").trim();
+  const pose = pick(["pose"]);
+  const place = pick(["setting"]);
+  const light = pick(["lighting"]);
+  return { pose, place: place ? [place, light].filter(Boolean).join(tags ? ", " : " ") : "" };
+}
+const HARVEST = { pose: "Poses · from CivitAI", scene: "Backgrounds · from CivitAI" } as const;
+function harvestSet(kind: InspoKind): string {
+  const s = useInspo.getState().sets.find((x) => x.kind === kind && x.name === HARVEST[kind]);
+  return s?.id ?? useInspo.getState().newSet(HARVEST[kind], kind);
+}
+/** ticked CivitAI posts → their poses into "Poses · from CivitAI" and their backgrounds into "Backgrounds · from CivitAI"
+ *  (each with the post's picture, so you can see it before picking) */
+export async function harvestPosts(ids: (number | string)[], onStep?: (t: string) => void): Promise<{ poses: number; places: number; none: number }> {
+  const { civitImage } = await import("./api");
+  let poses = 0, places = 0, none = 0;
+  const ids_ = { pose: harvestSet("pose"), scene: harvestSet("scene") };
+  const before = (k: InspoKind) => useInspo.getState().sets.find((x) => x.id === ids_[k])?.items.length ?? 0;
+  const p0 = before("pose"), s0 = before("scene");
+  for (const [i, id] of ids.entries()) {
+    onStep?.(`Reading ${i + 1} of ${ids.length}…`);
+    try {
+      const g = await civitImage(String(id));
+      if (g.video) { none++; continue; }
+      const { pose, place } = await partsOf(g.prompt || g.workflow?.prompt || "");
+      const meta = { thumb: g.thumb || g.url, url: g.url, page: g.page };
+      if (pose) useInspo.getState().add(ids_.pose, { text: pose, ...meta });
+      if (place) useInspo.getState().add(ids_.scene, { text: place, ...meta });
+      if (!pose && !place) none++;
+    } catch { none++; }
+  }
+  poses = before("pose") - p0; places = before("scene") - s0;
+  return { poses, places, none };
+}
+/** a prompt with its pose (or its background) swapped for another — the rest word for word */
+export async function swapPart(prompt: string, kind: InspoKind, text: string): Promise<string> {
+  const { toPieces, isTagPrompt, fromPieces, pid } = await import("./tweak");
+  const tags = isTagPrompt(prompt);
+  // a background brings its own light, so the old light goes with the old place
+  const cats = kind === "pose" ? ["pose"] : ["setting", "lighting"];
+  let ps = toPieces(prompt);
+  const at = ps.findIndex((p) => cats.includes(p.cat));
+  ps = ps.filter((p) => !cats.includes(p.cat));
+  const t = text.trim().replace(/[,\s]+$/, "");
+  ps.splice(at < 0 ? ps.length : Math.min(at, ps.length), 0, { id: pid(), cat: kind === "pose" ? "pose" : "setting", text: tags ? t : t.replace(/\.?$/, ".") });
+  return fromPieces(ps, tags);
+}

@@ -285,6 +285,11 @@ export default function CreateTab() {
       {!c.raw && c.make === "character" && <Chip title="Background" value={c.cutout ? 1 : 0} onChange={(v) => set({ cutout: v === 1 })} options={[{ value: 0, label: "With background" }, { value: 1, label: "Cut out" }]} />}
       {person && !c.raw && <Chip title="Who's in the picture" value={cast} onChange={(v) => set({ cast: v })} options={CAST_OPTIONS} />}
       <WordBankButton value={c.extra} onChange={(v) => set({ extra: v })} />
+      {(["pose", "scene"] as const).map((k) => (
+        <button key={k} type="button" title={k === "pose" ? "Swap the pose in the box for a saved one (yours, built-in, or pulled from CivitAI posts)" : "Swap the background in the box for a saved one"}
+          onClick={() => import("../components/LibraryPick").then(({ pickFromLibrary }) => pickFromLibrary(k, async (text) => { const { swapPart } = await import("../lib/inspo"); set({ extra: await swapPart(useSettings.getState().s.create.extra, k, text) }); }))}
+          className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name={k === "pose" ? "user" : "image"} size={13} className="text-muted" />{k === "pose" ? "Saved poses" : "Backgrounds"}</button>
+      ))}
       {ch && person && !c.raw && <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 px-3 text-[12.5px]">{ch.name}<button aria-label="Stop using this character" className="text-muted hover:text-ink" onClick={() => set({ characterId: null })}>×</button></span>}
     </>
   );
