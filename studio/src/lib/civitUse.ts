@@ -145,7 +145,7 @@ const RECREATE_SIZES = {
   anime: { portrait: [832, 1216], tall: [832, 1248], square: [1024, 1024], wide: [1216, 832] },
   realistic: { portrait: [1088, 1920], tall: [1152, 1728], square: [1440, 1440], wide: [1920, 1088] },
 } as const;
-export async function recreatePlan(g: CivitGen, onStep?: (msg: string) => void) {
+export async function recreatePlan(g: CivitGen, onStep?: (msg: string) => void, settings: "mine" | "post" = "mine") {
   const t = createTargetOf(g);
   const c = useSettings.getState().s.create;
   const mi = modelOf(c, undefined, t);
@@ -169,21 +169,39 @@ export async function recreatePlan(g: CivitGen, onStep?: (msg: string) => void) 
     const gone = picks.filter((l) => !onDisk.has(l.name));
     if (gone.length) { picks = picks.filter((l) => onDisk.has(l.name)); failed = [...failed, ...gone.map((l) => `${l.name.split("/").pop()} (not on this rental's disk yet — your LoRA library may still be downloading)`)]; }
   }
-  const adv = copySettings(g, mi.adv, t, false);
+  // "mine" (default): only the post's words and LoRAs come over — sampler, steps, shape, size, finish, checkpoint and
+  // negative are your own Create settings (a post's 30-step ancestral settings or SDXL size don't suit Krea 2 Turbo).
+  // "post": its sampler / steps / CFG and its own shape, as before.
+  const mine = settings === "mine";
+  const adv = mine ? { ...mi.adv } : copySettings(g, mi.adv, t, false);
   const [gw, gh] = (g.size || `${g.width}x${g.height}`).split("x").map(Number);
   const r = gw && gh ? gw / gh : 0.75;
-  const shape = r < 0.62 ? "portrait" : r < 0.85 ? "tall" : r <= 1.2 ? "square" : "wide";
-  const [w0, h0] = RECREATE_SIZES[mi.style][shape];
-  // Create's Draft size (~1 MP, twice as fast) carries over, as in the rest of Batch
+  const shape = mine ? (c.shape ?? "portrait") : r < 0.62 ? "portrait" : r < 0.85 ? "tall" : r <= 1.2 ? "square" : "wide";
+  const [w0, h0] = RECREATE_SIZES[mi.style][shape] ?? RECREATE_SIZES[mi.style].portrait;
+  // Create's Draft size (~1 MP, twice as fast) and its "Finish at" enlargement carry over
   const draft = mi.style === "realistic" && !!c.draft;
   const r16 = (n: number) => Math.round(n / 16) * 16;
   const [width, height] = draft ? [r16(w0 * 0.72), r16(h0 * 0.72)] : [w0, h0];
-  return { target: t, mi, adv, loras: picks, failed, width, height, seed: seedOk(g.seed) ? g.seed! : null, negative: g.negative ? cleanPrompt(g.negative) : c.negative };
+  const up = mine ? c.upscale ?? 1 : 1;
+  const hires = up > 1.01 ? { scale: up, denoise: mi.style === "anime" ? 0.42 : 0.35 } : undefined;
+  // LoRAs fitted into what the model holds, as Create does (a stack of 6 at 1–1.5 each burns the picture: blotches)
+  let balanced: string[] = [];
+  if (c.balance !== false && picks.length > 1) {
+    const [{ balanceLoras, BUDGET }, { loraLibrary }] = await Promise.all([import("./loraBalance"), import("./api")]);
+    const key = (mi.family === "sdxl" ? "sdxl" : mi.family === "anima" ? "anima" : "krea2") as keyof typeof BUDGET;
+    const res = balanceLoras(picks, await loraLibrary().catch(() => []), BUDGET[key]);
+    picks = res.loras; balanced = res.changed;
+  }
+  const own = c.checkpoint?.[mi.model] || "";
+  return { target: t, mi, adv, loras: picks, failed, balanced, width, height, hires, up, checkpoint: own ? own.split("/").pop()! : "official",
+    seed: !mine && seedOk(g.seed) ? g.seed! : null, negative: mine ? c.negative : g.negative ? cleanPrompt(g.negative) : c.negative };
 }
 /** the exact prompt as Create's "Exact prompt" sends it: <lora:…> tags out, and people said to be adults */
 export function exactPrompt(p: string): string {
   const q = cleanPrompt(p);
-  return /\b(\d?girls?|\d?boys?|wom[ae]n|m[ae]n|female|male|person|people)\b/i.test(q) && !/\badult\b/i.test(q) ? `${q}, adult` : q;
+  if (!/\b(\d?girls?|\d?boys?|wom[ae]n|m[ae]n|female|male|person|people)\b/i.test(q) || /\badult\b/i.test(q)) return q;
+  // a sentence prompt gets a sentence (", adult" after a full stop dangles); a tag prompt gets the tag
+  return /[.!]\s*$/.test(q) ? `${q} Everyone in the picture is an adult.` : `${q}, adult`;
 }
 /** a CivitAI image's sampler / scheduler / steps / CFG (/ seed) onto a model's settings, within what that model likes */
 function copySettings(g: CivitGen, base: Adv, t: CreateTarget, seed: boolean): Adv {

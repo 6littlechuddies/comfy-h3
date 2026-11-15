@@ -10,6 +10,7 @@ import { h3Size } from "../lib/models";
 import { randomTopic, testAlert, useNotify } from "../lib/notify";
 import { droppedUrl, useTray } from "../lib/tray";
 import { useHandoffInto, usePrimaryAction } from "../App";
+import { modelOf, useSettings } from "../lib/settings";
 import { Btn, Icon, Label, Seg, Slot, TextIn, cx, DropSelect } from "../components/ui";
 import { PromptPieces } from "../components/PromptPieces";
 import { Workspace } from "../components/Workspace";
@@ -28,6 +29,9 @@ export default function BatchTab() {
   const file = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"" | "write" | "queue">("");
   const video = b.target === "video";
+  // Pictures: one way at a time, so the sidebar only shows what that way uses
+  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
+  const pickWay = (v: typeof way) => { setWay(v); try { localStorage.setItem("h3.batch.way", v); } catch { /* */ } if (v === "swap") useBatch.getState().set({ take: useBatch.getState().take === "face" || useBatch.getState().take === "person" ? useBatch.getState().take : "swap" }); };
 
   useHandoffInto("batch", (items) => items.forEach(({ media }) => useBatch.getState().add({ imitate: media })));
   const addFiles = async (fs: FileList | null) => {
@@ -89,14 +93,16 @@ export default function BatchTab() {
     <Workspace needs={video ? "video" : "edit"} tab="batch" title="Batch" sub="many at once, runs while you're away" bar={bar}
       drawer={<>
         <Seg label="Make" value={b.target} onChange={(v) => b.set({ target: v })} options={[{ value: "video", label: "Videos" }, { value: "image", label: "Pictures" }]} />
-        <WriterChoice />
-        <label className="flex flex-col gap-1.5"><span className="lbl">Star (optional)</span>
+        {!video && <Seg label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }]} />}
+        {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
+        {(video || way === "plan") && <WriterChoice />}
+        {(video || way === "plan") && <label className="flex flex-col gap-1.5"><span className="lbl">Star (optional)</span>
           <DropSelect value={b.characterId ?? ""} onChange={(e) => b.set({ characterId: e.target.value || null })} className="inset h-10 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none">
             <option value="">No character</option>
             {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </DropSelect>
           <span className="text-[12px] leading-relaxed text-dim">{b.characterId ? "Their reference sheet goes into every row, and the prompts name them in every cut so they stay the same person." : "Pick a saved character to put them in every row."}</span>
-        </label>
+        </label>}
         {video && (
           <>
             <div className="grid grid-cols-2 gap-2.5">
@@ -115,15 +121,18 @@ export default function BatchTab() {
             <p className="text-[12px] leading-relaxed text-dim">LoRAs and sampler settings come from the Animate tab.</p>
           </>
         )}
-        {!video && <RecreatePanel />}
-        {!video && <PhotoSet chars={chars} />}
-        {!video && <RecipePanel />}
-        {!video && <ContentPlan />}
-        {!video && <p className="text-[12px] leading-relaxed text-dim">A picture to copy + a star → the star in that pose and scene (Krea 2 Edit). Just words → made in Create's style with its LoRAs.</p>}
-        <PhoneAlerts />
+        {!video && way === "recreate" && <RecreatePanel />}
+        {!video && way === "swap" && <PhotoSet chars={chars} />}
+        {!video && way === "recipes" && <RecipePanel />}
+        {!video && way === "plan" && <ContentPlan />}
+        {!video && way === "plan" && <p className="text-[12px] leading-relaxed text-dim">Rows with just words are made in Create's style with its LoRAs.</p>}
+        <details className="border-t border-line pt-3 text-[13px]"><summary className="cursor-pointer text-muted hover:text-ink">Phone alerts</summary><div className="mt-2"><PhoneAlerts /></div></details>
       </>}>
       <div className="flex flex-col gap-2.5 pt-1">
-        {b.rows.map((r, i) => <RowCard key={r.id} r={r} n={i} video={video} />)}
+        {b.rows.map((r, i) => (!video && way === "recreate" && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : <RowCard key={r.id} r={r} n={i} video={video} />))}
+        {!video && way === "recreate" && !b.rows.some((r) => r.civit || r.imitate || r.idea.trim() || r.prompt.trim()) && (
+          <button onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }} className="hatch flex h-28 flex-col items-center justify-center gap-1 border border-dashed border-line text-[13.5px] text-muted hover:border-accent hover:text-ink">
+            <span className="font-semibold text-ink">Pick CivitAI posts to recreate</span><span className="text-[12px]">Their words and LoRAs, made with your Create settings</span></button>)}
         <button onClick={() => file.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); else addLink(e.dataTransfer); }}
           className="hatch flex h-20 items-center justify-center gap-2 border border-dashed border-line text-[13px] text-muted hover:border-accent hover:text-ink">
           <Icon name="up" size={16} /> Drop clips or pictures here — files, or straight from a Pinterest / web tab — one row each
@@ -167,6 +176,7 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
         <div className="flex items-center gap-2 text-[12px]">
           <span className={cx("micro", tone)}>{status}</span>
           {r.step && <span className="truncate text-accent">{r.step}</span>}
+          {r.note && !r.error && <span className="truncate text-muted" title={r.note}>{r.note}</span>}
           {(r.error || (problem && r.status !== "queued")) && <span className="truncate text-muted">{r.error ?? problem}</span>}
           {!!r.results?.length && <span className="ml-auto flex gap-1">{r.results.map((u, i) => <button key={u} onClick={() => openViewer(r.results!.map((x) => ({ url: x, kind: "image" as const, label: `Row ${n + 1}` })), i)} className="press h-12 w-9 overflow-hidden border border-line hover:border-accent"><img src={u} alt="" className="h-full w-full object-cover" /></button>)}</span>}
           {jobs.length > 0 && <span className="ml-auto flex gap-1">{jobs.map((j) => <span key={j.id} title={`${j.label}: ${j.status}`} className={cx("h-1.5 w-6", j.status === "done" ? "bg-good" : j.status === "running" ? "stripes" : j.status === "error" ? "bg-bad" : "bg-raised2")} />)}</span>}
@@ -190,8 +200,7 @@ function PhoneAlerts() {
   const [msg, setMsg] = useState<string | null>(null);
   const toast = useJobs((s) => s.toast);
   return (
-    <div className="flex flex-col gap-2 border-t border-line pt-4">
-      <Label>Phone alerts</Label>
+    <div className="flex flex-col gap-2">
       <p className="-mt-1 text-[12px] leading-relaxed text-muted">Install the free <b className="text-ink">ntfy</b> app, tap + and subscribe to the name below. Your phone buzzes when a batch finishes — even with this page closed.</p>
       <div className="flex gap-1.5">
         <input value={draft} onChange={(e) => setDraft(e.target.value.replace(/[^A-Za-z0-9_-]/g, ""))} placeholder="h3-yourname" aria-label="Alert name"
@@ -213,7 +222,8 @@ function PhoneAlerts() {
 function recreateLine(g: NonNullable<Row["civit"]>) {
   const loras = g.resources.filter((x) => x.kind === "lora").length;
   const model = { anima: "Anima", sdxl: "Illustrious", krea2: "Krea 2", qwen: "Krea 2" }[g.family as string] ?? "Create's model";
-  return [model, `${loras} LoRA${loras === 1 ? "" : "s"}`, g.sampler && `${g.sampler}${g.scheduler ? `/${g.scheduler}` : ""}`, g.steps && `${g.steps} steps`].filter(Boolean).join(" · ");
+  const post = (useBatch.getState().rec?.settings ?? "mine") === "post";
+  return [model, `${loras} LoRA${loras === 1 ? "" : "s"}`, post && g.sampler && `${g.sampler}${g.scheduler ? `/${g.scheduler}` : ""}`, post && g.steps && `${g.steps} steps`, !post && "your Create settings"].filter(Boolean).join(" · ");
 }
 
 /** Recreate CivitAI posts: pick several saved posts → each one made again with its own prompt, settings and LoRAs */
@@ -222,12 +232,26 @@ function RecreatePanel() {
   const rec = useBatch((s) => s.rec) ?? DEFAULT_REC;
   const chars = useCharacters(useShallow((s) => s.list.filter(isAdult)));
   const set = (p: Partial<RecreatePrefs>) => useBatch.getState().set({ rec: { ...rec, ...p } });
+  // what "My Create settings" means right now (realistic: Krea 2 and your checkpoint, shape, size, sampler, steps)
+  const cs = useSettings((st) => st.s.create);
+  const createLine = (() => {
+    const mi = modelOf(cs, "realistic");
+    const ck = cs.checkpoint?.[mi.model]?.split("/").pop()?.replace(/\.safetensors$/, "");
+    const SZ = { portrait: [1088, 1920], tall: [1152, 1728], square: [1440, 1440], wide: [1920, 1088] } as const;
+    const [w, h] = SZ[cs.shape ?? "portrait"] ?? SZ.portrait;
+    const k = cs.draft ? 0.72 : 1; const up = cs.upscale ?? 1;
+    return [ck || mi.label, `${Math.round(w * k / 16) * 16}×${Math.round(h * k / 16) * 16}${up > 1.01 ? ` → ×${up}` : ""}`, `${mi.adv.sampler}/${mi.adv.scheduler}`, `${mi.adv.steps} steps`, cs.balance !== false ? "LoRAs balanced" : "LoRAs as posted"].join(" · ");
+  })();
   const change = (k: keyof RecreatePrefs["change"], v: string) => set({ change: { ...rec.change, [k]: v } });
   return (
     <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-raised/40 p-3 text-[12.5px]">
       <b className="font-medium">Recreate CivitAI posts</b>
       <span className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">Tick saved posts → each is made again with its own prompt, settings and LoRAs (missing ones download first). The look stays as posted; the framing can rotate so the set is a mix of shots.</span>
       <Btn onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }}><Icon name="link" size={14} /> Pick posts from CivitAI</Btn>
+      <Seg label="Settings" value={rec.settings ?? "mine"} onChange={(v) => set({ settings: v })} options={[{ value: "mine", label: "My Create settings" }, { value: "post", label: "The post's" }]} />
+      <span className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">{(rec.settings ?? "mine") === "mine"
+        ? <>Only each post's words and LoRAs come over. Made with: <b className="font-medium text-muted">{createLine}</b>. Change these in 03 Create.</>
+        : "Each post's own sampler, steps, CFG and shape (its size picked for Krea 2). Posts made for other models often look worse this way."}</span>
       <Seg label="Framing" value={rec.frame} onChange={(v) => set({ frame: v })} options={[{ value: "mix", label: "Mix of shots" }, { value: "posted", label: "As posted" }]} />
       {rec.frame === "mix" && <div className="-mt-1 flex flex-wrap gap-1">
         {FRAMES.map((f) => { const on = rec.frames.includes(f.id); return (

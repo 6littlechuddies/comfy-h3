@@ -40,6 +40,8 @@ export interface Row {
   score?: number;
   /** Recreate: a CivitAI post made again with its own prompt (in `prompt`, editable), settings and LoRAs */
   civit?: import("./api").CivitGen;
+  /** a line under the row (e.g. which LoRAs were turned down) */
+  note?: string;
 }
 export interface BatchOpts {
   target: "video" | "image";
@@ -69,6 +71,9 @@ export interface RecreatePrefs {
   change: Partial<Record<"setting" | "outfit" | "lighting", string>>;
   /** the project (character) the results go to; "" = Free work */
   project: string;
+  /** "mine" (default): your Create settings (checkpoint, sampler, steps, shape, size, finish) — only the post's words and
+   *  LoRAs come over · "post": the post's own sampler / steps / CFG and shape */
+  settings?: "mine" | "post";
 }
 export type FrameId = "full" | "chest" | "face" | "selfie" | "knees";
 export const FRAMES: { id: FrameId; label: string; sentence: string; tags: string }[] = [
@@ -104,8 +109,12 @@ export async function recreatePrompt(prompt: string, rec: RecreatePrefs, frame: 
   }
   if (frame) {
     const f = FRAMES.find((x) => x.id === frame)!;
+    // the post's own shot words go, wherever they sit ("This is a close-up photograph of…" + "Full-body shot" contradicted itself)
+    const SHOT = /\b(?:extreme\s+)?close[- ]?up\b|\bfull[- ]body\b|\bupper[- ]body\b|\bcowboy shot\b|\bmedium (?:close-up |)shot\b|\bwide shot\b|\bhead(?:-and-|\s+and\s+)shoulders\b/gi;
+    ps = ps.map((x) => (x.cat === "camera" ? x : { ...x, text: x.text.replace(SHOT, "").replace(/\s{2,}/g, " ").replace(/\s+([,.])/g, "$1").replace(/\ba\s+(photograph|photo|portrait|shot)\b/gi, "a $1") }))
+      .filter((x) => x.text.replace(/[\s,.]/g, "").length > 0);
     // camera pieces out — except lens/look words that aren't framing (35mm, depth of field, bokeh)
-    ps = ps.filter((x) => x.cat !== "camera" || /\b(\d+mm|lens|depth of field|bokeh|blurry background|film)\b/i.test(x.text) && !/\b(close.?up|full body|upper body|cowboy|portrait|selfie|from above|from below|wide shot|medium shot)\b/i.test(x.text));
+    ps = ps.filter((x) => x.cat !== "camera" || /\b(\d+mm|lens|depth of field|bokeh|blurry background|film|looking at|eye contact)\b/i.test(x.text) && !/\b(close.?up|full body|upper body|cowboy|portrait|selfie|from above|from below|wide shot|medium shot)\b/i.test(x.text));
     ps.push({ id: pid(), cat: "camera", text: tags ? f.tags : f.sentence });
   }
   return fromPieces(ps, tags);
@@ -325,8 +334,8 @@ export async function queueAll(only?: string[]): Promise<number> {
       try {
         useBatch.getState().update(r.id, { step: "Getting its LoRAs…" });
         const { recreatePlan, exactPrompt } = await import("./civitUse");
-        const pl = await recreatePlan(r.civit, (m) => useBatch.getState().update(r.id, { step: m }));
         const rec = b.rec ?? DEFAULT_REC;
+        const pl = await recreatePlan(r.civit, (m) => useBatch.getState().update(r.id, { step: m }), rec.settings ?? "mine");
         const frames = rec.frame === "mix" && rec.frames.length ? rec.frames : null;
         // where the results go: this row's own pick, else the character this post became, else the batch's choice
         const project = r.charId ?? postCharacter(r.civit.id) ?? (rec.project || null);
@@ -337,13 +346,14 @@ export async function queueAll(only?: string[]): Promise<number> {
           const fl = frame ? FRAMES.find((x) => x.id === frame)!.label.toLowerCase() : "";
           const job = await useJobs.getState().run("batch", `Recreate ${b.rows.indexOf(r) + 1}${r.takes > 1 ? ` · take ${t + 1}` : ""}${fl ? ` · ${fl}` : ""}`, buildCreate({
             ...pl.adv, seed, ...modelArgs(st.create, pl.mi), positive: exactPrompt(words), negative: pl.negative, loras: pl.loras,
-            width: pl.width, height: pl.height, count: 1, cutout: false, prefix: "studio/batch/recreate",
-          }), `create:${pl.mi.model}:portrait:1`, { batchRow: r.id, kind: "make", civitId: r.civit.id, project, sent: { prompt: exactPrompt(words), words, negative: pl.negative, model: pl.mi.label, checkpoint: "official",
-            loras: pl.loras.map((l) => ({ name: l.name, strength: l.strength })), size: `${pl.width}×${pl.height}`, seed, steps: pl.adv.steps, cfg: pl.adv.cfg, sampler: pl.adv.sampler, scheduler: pl.adv.scheduler } });
+            width: pl.width, height: pl.height, count: 1, hires: pl.hires, cutout: false, prefix: "studio/batch/recreate",
+          }), `create:${pl.mi.model}:portrait:1${pl.up > 1.01 ? `:x${pl.up}` : ""}`, { batchRow: r.id, kind: "make", civitId: r.civit.id, civitThumb: r.civit.thumb || r.civit.url, project, sent: { prompt: exactPrompt(words), words, negative: pl.negative, model: pl.mi.label, checkpoint: pl.checkpoint,
+            loras: pl.loras.map((l) => ({ name: l.name, strength: l.strength })), size: `${pl.width}×${pl.height}${pl.hires ? ` → ${Math.round(pl.width * pl.up / 16) * 16}×${Math.round(pl.height * pl.up / 16) * 16}` : ""}`, seed, steps: pl.adv.steps, cfg: pl.adv.cfg, sampler: pl.adv.sampler, scheduler: pl.adv.scheduler } });
           rowIds.push(job.id); ids.push(job.id);
         }
         import("./civitUsed").then(({ noteUsed }) => noteUsed([r.civit!.id], "recreate", [project], r.takes)).catch(() => {});
-        useBatch.getState().update(r.id, { status: "queued", jobIds: rowIds, step: undefined, error: pl.failed.length ? `Without ${pl.failed.length} LoRA${pl.failed.length > 1 ? "s" : ""} it couldn't download: ${pl.failed.join("; ")}` : undefined });
+        useBatch.getState().update(r.id, { status: "queued", jobIds: rowIds, step: undefined, error: pl.failed.length ? `Without ${pl.failed.length} LoRA${pl.failed.length > 1 ? "s" : ""} it couldn't download: ${pl.failed.join("; ")}` : undefined,
+          note: pl.balanced.length ? `LoRAs balanced so they don't overcook the picture: ${pl.balanced.join(", ")}` : undefined });
       } catch (e) { useBatch.getState().update(r.id, { status: "error", step: undefined, error: (e as Error).message }); }
       continue;
     }

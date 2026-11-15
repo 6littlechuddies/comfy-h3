@@ -247,6 +247,9 @@ function FeedCard({ it, fav, acts, onOpen, delay, size, count = 1, onDeleteAll, 
         <Star on={fav} size={15} />
       </button>
       {o.kind === "video" && <span className="glass pointer-events-none absolute left-11 top-2.5 flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px]"><Icon name="play" size={10} /> video</span>}
+      {/* Recreate: the CivitAI post it was made from, small in the corner, to compare */}
+      {typeof j.meta?.civitThumb === "string" && <img src={j.meta.civitThumb} alt="The original post" title="The CivitAI post this recreates" loading="lazy"
+        className="pointer-events-none absolute bottom-2 right-2 z-10 w-[26%] max-w-[110px] rounded-md border-2 border-white/80 object-cover shadow-lg" />}
       {count > 1 && <span className="micro pointer-events-none absolute left-11 top-2.5 z-10 bg-black/70 px-1.5 py-0.5 text-white">×{count}</span>}
       <div className={cx("pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2 pb-2 pt-8 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100", sel.selecting && "hidden")}>
         <div className="pointer-events-auto flex flex-wrap items-center gap-1">
@@ -306,6 +309,9 @@ function Lightbox({ items, index, setIndex, acts }: { items: Item[]; index: numb
           <div className={cx("max-h-full max-w-full", it.o.filename.includes("cutout") && "checker")}>
             <MediaView m={{ url: viewUrl(it.o), kind: it.o.kind }} contain className="max-h-[calc(100vh-180px)] !h-auto !w-auto max-w-full" />
           </div>
+          {typeof it.j.meta?.civitThumb === "string" && <figure className="absolute bottom-3 left-24 z-10 m-0 w-[16%] max-w-[220px]">
+            <img src={it.j.meta.civitThumb} alt="The original post" className="w-full rounded-md border-2 border-white/80 shadow-xl" />
+            <figcaption className="micro mt-1 text-white/60">ORIGINAL POST</figcaption></figure>}
         </div>
         <button className={cx(nav, "left-6")} disabled={index === 0} onClick={() => setIndex(index - 1)} aria-label="Previous"><Icon name="back" /></button>
         <button className={cx(nav, "right-6")} disabled={index === items.length - 1} onClick={() => setIndex(index + 1)} aria-label="Next"><Icon name="arrow" /></button>
