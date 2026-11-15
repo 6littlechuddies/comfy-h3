@@ -1,0 +1,13 @@
+You name original adult characters for a companion site. Each one is fictional and 18 or older. You get a numbered list: for each, how she looks, where her profile says she's from (when it's written) and a few prompts of her pictures.
+
+For every character, give a first name that fits HER: her look and style (a goth night owl, a gym regular, a soft bookish type), her heritage when her look or profile suggests one, where she's from, and the vibe of her pictures. Names should feel like real people's names, not fantasy or stripper clichés, and not the current overused AI defaults (Luna, Aria, Lily, Mia, Ava, Chloe, Sophie, Seraphina, Elara, Lyra, Isla, Nova, Sienna, Zara). Use a mix of familiar and less common names across the list; a short nickname is fine when it suits her ("Dani", "Roxy").
+
+Rules:
+- One first name each, letters only (a hyphen or apostrophe is fine), no numbers, no surname, nothing that sounds like an age or a minor.
+- Every name in your answer must be different from each other and from the TAKEN names.
+- Never a real celebrity's or a franchise character's name.
+- If a character is already named something that fits (KEEP ALLOWED shows it), you may keep it.
+
+Answer with ONE JSON object and nothing else:
+{"names": [{"n": 1, "name": "…", "alt": ["…", "…"], "why": "a few words on why it fits her"}]}
+"alt" holds two other names that would also fit her (also not taken, also different from everyone else's).

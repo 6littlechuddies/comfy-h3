@@ -3072,10 +3072,10 @@ STAGES = {"look": "Look block writer", "krea": "Krea 2 frame builder", "context"
           "describe": "Character description (Krea 2)", "tags": "Plain words → anime tags", "chat": "Studio assistant",
           "plan": "Plan a video writer (Animate + Plan a video)", "site": "Site profile writer (Your site)",
           "changes": "Picture changes (Create with pictures)", "remix": "Remix merger (Create)", "read": "Picture → prompt (Create)", "match": "Face match check (training set)", "likeness": "Carry a likeness into a prompt (Edit)",
-          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)"}
+          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)"}
 BUILTIN_FILE = {"krea": "studio_krea.txt", "context": "studio_context.txt", "compiler": "studio_compiler.txt", "look": "studio_look.txt", "tweak": "studio_tweak.txt",
                 "describe": "studio_describe.txt", "tags": "studio_tags.txt", "chat": "studio_chat.txt", "plan": "studio_plan.txt", "site": "studio_site.txt",
-                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt"}
+                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt"}
 TEMPLATES = {
     "context": "{seconds} second {mode}. {description}\nCharacters: {characters}",
     "compiler": "We are doing {MODE}. {seconds} seconds, {aspect}.\nReferences: {references}\n\n{blueprint}",
@@ -3094,6 +3094,7 @@ TEMPLATES = {
     "likeness": "SCENE PROMPT:\n{scene}\n\nNEW PERSON:\n{person}\n\nOUTFIT: {outfit}\nMODEL: {model}",
     "editplan": "PICTURES:\n{pictures}\n\nEARLIER IN THIS CHAT:\n{history}\n\nREQUEST: {request}\nMODEL: {model}",
     "sort": "CHARACTER: {character}\nSETS SO FAR: {existing}\n\nPICTURES:\n{pictures}",
+    "name": "TAKEN: {taken}\n\nCHARACTERS:\n{characters}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }
 PARAMS = {"temperature": 0.6, "top_p": 0.9, "top_k": 40, "repeat_penalty": 1.05, "max_tokens": 8192}
@@ -3121,8 +3122,8 @@ def _save_packs(d: dict):
 
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
-            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {})), "template": TEMPLATES[stage],
-            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan")}
+            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {})), "template": TEMPLATES[stage],
+            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name")}
 
 
 def _pack_text(p: dict) -> str:

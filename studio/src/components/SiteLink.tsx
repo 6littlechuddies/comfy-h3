@@ -172,6 +172,96 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
     </div>, document.body);
 }
 
+// ------------------------------------------------------------------ bulk names: a first name for each, from their look
+type NameIdea = { id: string; name: string; alt: string[]; why: string; on: boolean };
+const autoNamed = (c: Character) => c.name.includes("·") || /\b(hair|bob|braid|ponytail|bangs|top|tank|dress|outfit)\b/i.test(c.name);
+const okName = (n: string) => /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,23}$/.test(n.trim()) && !/\b(teen|kid|child|loli|minor|young|baby)\b/i.test(n);
+
+async function suggestNames(chars: Character[], avoid: string[] = []): Promise<NameIdea[]> {
+  const chosen = new Set(chars.map((c) => c.id));
+  const taken = useCharacters.getState().list.filter((x) => !chosen.has(x.id) && !autoNamed(x)).map((x) => x.name.trim()).filter(Boolean);
+  const out: NameIdea[] = [];
+  for (let i = 0; i < chars.length; i += 12) {
+    const part = chars.slice(i, i + 12);
+    const lines = part.map((c, k) => {
+      const site = c.site ?? {};
+      return [`#${k + 1}:`, stripAges(describe(c)), c.block && `Look: ${stripAges(c.block).slice(0, 400)}`, c.frame?.prompt && `Her picture's prompt: ${stripAges(c.frame.prompt).slice(0, 400)}`,
+        site.direction && `Owner says: ${site.direction}`, site.backstory && `Profile: ${stripAges(site.backstory).slice(0, 300)}`, !autoNamed(c) && `KEEP ALLOWED: ${c.name}`].filter(Boolean).join(" ");
+    });
+    const used = [...taken, ...avoid, ...out.flatMap((x) => [x.name, ...x.alt])];
+    const raw = await runWriter("name", { taken: used.join(", ") || "(none)", characters: lines.join("\n") }, { tab: "characters", label: `Naming ${part.length} character${part.length === 1 ? "" : "s"}` });
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("The writer didn't answer in the expected format — try again");
+    const d = JSON.parse(m[0]) as { names?: { n: number; name: string; alt?: string[]; why?: string }[] };
+    const seen = new Set(used.map((x) => x.toLowerCase()));
+    part.forEach((c, k) => {
+      const r = d.names?.find((x) => Number(x.n) === k + 1);
+      // the first suggestion that's a clean first name nobody else has; the writer's other picks become the alternatives
+      const all = [r?.name, ...(r?.alt ?? [])].map((x) => String(x ?? "").trim()).filter((x) => okName(x) && !seen.has(x.toLowerCase()));
+      const name = all[0] ?? "";
+      if (name) seen.add(name.toLowerCase());
+      out.push({ id: c.id, name, alt: all.slice(1, 3), why: String(r?.why ?? ""), on: !!name && name !== c.name });
+    });
+  }
+  return out;
+}
+
+function BulkNames({ chars, onClose }: { chars: Character[]; onClose: () => void }) {
+  const save = useCharacters((s) => s.save);
+  const toast = useJobs((s) => s.toast);
+  const [ideas, setIdeas] = useState<NameIdea[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const run = (avoid: string[] = []) => { setIdeas(null); setErr(null); suggestNames(chars, avoid).then(setIdeas).catch((e) => setErr((e as Error).message)); };
+  useEffect(() => { run(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const put = (id: string, p: Partial<NameIdea>) => setIdeas((l) => l && l.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const picked = (ideas ?? []).filter((x) => x.on && okName(x.name));
+  const dupes = new Set(picked.map((x) => x.name.toLowerCase()).filter((n, i, a) => a.indexOf(n) !== i));
+  const apply = () => {
+    let n = 0;
+    for (const x of picked) {
+      if (dupes.has(x.name.toLowerCase())) continue;
+      const cur = useCharacters.getState().list.find((c) => c.id === x.id);
+      if (!cur || cur.name === x.name.trim()) continue;
+      save({ ...cur, name: x.name.trim() }); n++;
+    }
+    toast(`Renamed ${n} — their pictures stay theirs under the old names too${n ? ". Already on your site? Send again to update the name" : ""}`, "good");
+    onClose();
+  };
+  return createPortal(
+    <div className="fade-in fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6" onMouseDown={onClose}>
+      <div className="flex max-h-full w-full max-w-[860px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+          <b className="text-[14px]">Name them · {chars.length}</b>
+          <span className="text-[12px] text-muted">From each one's look, picture prompt and profile — all different from each other and your other characters.</span>
+          <button aria-label="Close" className="ml-auto text-muted hover:text-ink" onClick={onClose}><Icon name="x" size={16} /></button>
+        </div>
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-3">
+          {err && <p className="text-[13px] text-bad">{err}</p>}
+          {!ideas && !err && <p className="text-[13px] text-muted"><span className="pulse">●</span> Thinking of names…</p>}
+          {ideas?.map((x) => {
+            const c = chars.find((y) => y.id === x.id)!;
+            return (
+              <div key={x.id} className={cx("flex items-center gap-3 border px-2 py-2", x.on ? "border-line" : "border-line/40 opacity-60")}>
+                <input type="checkbox" checked={x.on} onChange={(e) => put(x.id, { on: e.target.checked })} aria-label={`Rename ${c.name}`} />
+                <img src={viewUrl(coverOf(c)!)} alt="" className="h-16 w-12 shrink-0 border border-line object-cover" />
+                <div className="flex w-56 min-w-0 shrink-0 flex-col"><span className="truncate text-[12px] text-muted" title={c.name}>{c.name}</span>
+                  {x.why && <span className="line-clamp-2 text-[11px] text-dim">{x.why}</span>}</div>
+                <Icon name="chev" size={12} className="-rotate-90 shrink-0 text-dim" />
+                <input value={x.name} onChange={(e) => put(x.id, { name: e.target.value, on: true })} className={cx("h-9 w-40 border bg-raised px-2 text-[14px] font-semibold", !okName(x.name) || dupes.has(x.name.toLowerCase()) ? "border-bad" : "border-line")} />
+                <div className="flex flex-wrap gap-1">{x.alt.map((a) => <button key={a} onClick={() => put(x.id, { name: a, alt: [x.name, ...x.alt.filter((y) => y !== a)].filter(okName).slice(0, 2), on: true })} className="press tag-btn !h-7 !px-2.5 !text-[12px]">{a}</button>)}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 border-t border-line px-4 py-3">
+          {dupes.size > 0 && <span className="text-[12px] text-bad">Two of them have the same name</span>}
+          <Btn className="ml-auto" onClick={() => run((ideas ?? []).flatMap((x) => [x.name, ...x.alt]))} disabled={!ideas} why="Thinking…" title="New names for all of them (not these ones again)">Other names</Btn>
+          <Btn kind="primary" onClick={apply} disabled={!picked.length || dupes.size > 0} why={dupes.size ? "Two of them have the same name" : "Nothing ticked"}>Rename {picked.length}</Btn>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 export function SiteLink() {
   const open = useSite((s) => s.open);
   if (!open) return null;
@@ -268,6 +358,7 @@ function Characters({ connected }: { connected: boolean }) {
   const mark = (id: string, t: string | null) => setBusy((b) => { const n = { ...b }; if (t == null) delete n[id]; else n[id] = t; return n; });
   const chosen = list.filter((c) => sel.has(c.id));
   const [loops, setLoops] = useState(false);
+  const [naming, setNaming] = useState(false);
   const writeAll = async () => {
     for (const c of chosen) {
       mark(c.id, "Writing profile…");
@@ -304,11 +395,14 @@ function Characters({ connected }: { connected: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several to do them together.</p>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
+        {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
+        <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Sort their pictures into sets, fill the blanks in their profile from their pictures, use her newest loop as the hover loop if none is picked, and send as drafts"><Icon name="sparkle" size={14} /> Sort, fill &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
+      {naming && <BulkNames chars={chosen} onClose={() => setNaming(false)} />}
       {loops && <BulkLoops chars={chosen} onClose={() => setLoops(false)} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {list.map((c) => {
