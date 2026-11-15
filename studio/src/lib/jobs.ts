@@ -272,7 +272,8 @@ export function friendlyError(msg: string): string {
     [/timed out/i, "It took too long and was stopped — usually the GPU was busy or full. Try again."],
     [/Connection|ECONNRESET|fetch failed|Failed to fetch/i, "Lost the connection to the rental for a moment — try again."],
   ];
-  for (const [re, plain] of rules) if (re.test(m)) return m.length > 0 && plain !== m ? `${plain} (${m.slice(0, 120)})` : plain;
+  if (rules.some(([, plain]) => m.startsWith(plain))) return m; // already in plain words
+  for (const [re, plain] of rules) if (re.test(m)) return m.length > 0 && plain !== m ? `${plain} (${m.slice(0, /missing:/.test(m) ? 300 : 120)})` : plain;
   return m;
 }
 

@@ -147,9 +147,28 @@ const RECREATE_SIZES = {
 } as const;
 export async function recreatePlan(g: CivitGen, onStep?: (msg: string) => void) {
   const t = createTargetOf(g);
-  const { picks, failed } = await ensureLoras(lorasFor(g, targetFamily(t)), onStep);
   const c = useSettings.getState().s.create;
   const mi = modelOf(c, undefined, t);
+  // the model this post was made with has to be downloaded on this rental (a preset can leave it waiting)
+  const { useDownloads } = await import("./downloads");
+  const grp = useDownloads.getState().groups.find((x) => x.id === mi.group);
+  if (grp && grp.state !== "done") {
+    const what = mi.style === "anime" ? `an anime model (${mi.label})` : mi.label;
+    throw new Error(grp.state === "later" || grp.state === "skipped"
+      ? `This post was made with ${what}, which isn't downloaded on this rental (your download preset left it waiting). Status menu → ${grp.label} → NOW, or remove this row.`
+      : `This post needs ${mi.label}, which is still downloading (${grp.pct ?? 0}%). Queue it again when it's in.`);
+  }
+  const want = lorasFor(g, targetFamily(t));
+  let { picks, failed } = await ensureLoras(want, onStep);
+  // a LoRA your library remembers may not be on this rental's disk yet (the library re-downloads after the first models):
+  // leave those out instead of failing the whole picture
+  const { listLoras, forgetObjectInfo } = await import("./api");
+  forgetObjectInfo();
+  const onDisk = new Set(await listLoras());
+  if (onDisk.size) {
+    const gone = picks.filter((l) => !onDisk.has(l.name));
+    if (gone.length) { picks = picks.filter((l) => onDisk.has(l.name)); failed = [...failed, ...gone.map((l) => `${l.name.split("/").pop()} (not on this rental's disk yet — your LoRA library may still be downloading)`)]; }
+  }
   const adv = copySettings(g, mi.adv, t, false);
   const [gw, gh] = (g.size || `${g.width}x${g.height}`).split("x").map(Number);
   const r = gw && gh ? gw / gh : 0.75;

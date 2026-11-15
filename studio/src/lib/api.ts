@@ -58,8 +58,12 @@ export async function queuePrompt(graph: ApiGraph, front = false): Promise<strin
   const b = await r.json().catch(() => ({}));
   if (!r.ok || !b.prompt_id) {
     const ne = b?.node_errors as Record<string, NodeError> | undefined;
-    const first = ne && Object.values(ne)[0];
-    const detail = first ? `${first.class_type}: ${first.errors.map((e) => `${e.message} ${e.details}`).join("; ")}` : b?.error?.message;
+    // every missing file by name ("LoraLoaderModelOnly lora_name 'civitai/x.safetensors'") — the first node alone often isn't it
+    const missing = ne ? Object.values(ne).flatMap((n) => n.errors.filter((e) => /not in list|not found/i.test(`${e.message} ${e.details}`))
+      .map((e) => { const x = (e as NodeError["errors"][number] & { extra_info?: { input_name?: string; received_value?: unknown } }).extra_info; return `${n.class_type} ${x?.input_name ?? ""} “${x?.received_value ?? e.details}”`.replace(/\s+/g, " "); })) : [];
+    const first = ne && Object.values(ne).find((n) => n.errors?.length);
+    const detail = missing.length ? `Value not in list — missing: ${missing.slice(0, 3).join("; ")}`
+      : first ? `${first.class_type}: ${first.errors.map((e) => `${e.message} ${e.details}`).join("; ")}` : b?.error?.message;
     throw new PromptError(detail || `ComfyUI refused the job (${r.status})`, ne);
   }
   return b.prompt_id;
