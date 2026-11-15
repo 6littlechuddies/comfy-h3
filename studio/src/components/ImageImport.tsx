@@ -18,13 +18,15 @@ type Mode = "collections" | "link" | "file";
 /** what you were looking at when you closed it — opening it again brings you back there */
 let lastView: { mode: Mode; gen: CivitGen | null; link: string } | null = null;
 let collMem: { cur: string; items: CollectionItem[]; next: string | null; scroll: number } | null = null;
-export const useImport = create<{ open: boolean; link: string; mode: Mode; file: InputFile | null }>(() => ({ open: false, link: "", mode: "link", file: null }));
+export const useImport = create<{ open: boolean; link: string; mode: Mode; file: InputFile | null; recreate?: boolean }>(() => ({ open: false, link: "", mode: "link", file: null }));
+/** Batch → Recreate CivitAI posts: the collections, already in picking mode */
+export const openRecreatePicker = () => { usePickPurpose.setState({ p: null }); useImport.setState({ open: true, link: "", file: null, mode: "collections", recreate: true }); };
 /** pick a CivitAI picture for a character: the picture's panel then shows "Use for the new character" / "Use as X's picture" */
 export const pickFromCivitai = (p: PickPurpose) => { usePickPurpose.setState({ p }); openImageImport("", lastView?.mode === "link" ? "link" : "collections", true); };
 export const openImageImport = (link = "", mode?: Mode, picking = false) => (picking || usePickPurpose.setState({ p: null }), useImport.setState({ open: true, link, file: null, mode: mode ?? (link ? (COLLECTION_LINK.test(link) ? "collections" : "link") : lastView?.mode === "link" ? "link" : "collections") }));
 /** "How was this made?" for one of your files */
 export const openFileMeta = (file: InputFile) => useImport.setState({ open: true, link: "", mode: "file", file });
-const close = () => useImport.setState({ open: false });
+const close = () => useImport.setState({ open: false, recreate: false });
 const pref = (k: string, d: string) => { try { return localStorage.getItem(`h3.lorabrowser.${k}`) ?? d; } catch { return d; } };
 const setPref = (k: string, v: string) => { try { localStorage.setItem(`h3.lorabrowser.${k}`, v); } catch { /* */ } };
 
@@ -180,7 +182,7 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
   const [wf, setWf] = useState<Record<number, boolean | null>>({});
   const [paste, setPaste] = useState("");
   // pick several → Batch (each one becomes a row; Swap in puts your character in all of them)
-  const [picking, setPicking] = useState(false);
+  const [picking, setPicking] = useState(() => !!useImport.getState().recreate);
   const [sel, setSel] = useState<number[]>([]);
   const [sending, setSending] = useState("");
   const toBatch = async () => {
@@ -205,6 +207,18 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
     b.set({ target: "image", ...(b.take ? {} : { take: "swap" }) });
     setSending(""); setSel([]); setPicking(false);
     useJobs.getState().toast(`${ok} picture${ok === 1 ? "" : "s"} added to Batch — pick your character there and press Queue.`, "good");
+    close();
+    useSettings.getState().setTab("batch");
+  };
+  // each ticked post made again in Batch with its own prompt, settings and LoRAs
+  const toRecreate = async () => {
+    const ids = items.filter((i) => sel.includes(i.id) && !i.video).map((i) => i.id);
+    const [{ addRecreateRows }, { useSettings }, { useJobs }] = await Promise.all([import("../lib/batch"), import("../lib/settings"), import("../lib/jobs")]);
+    const { added, skipped } = await addRecreateRows(ids, 2, setSending);
+    setSending("");
+    if (!added) { useJobs.getState().toast("None of those had a prompt CivitAI would give — open one to check.", "bad"); return; }
+    setSel([]); setPicking(false);
+    useJobs.getState().toast(`${added} post${added === 1 ? "" : "s"} in Batch, ×2 each${skipped ? ` (${skipped} skipped: no prompt or a video)` : ""} — check the prompts, then press Queue.`, "good");
     close();
     useSettings.getState().setTab("batch");
   };
@@ -258,7 +272,7 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
         </form>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-line px-4 py-2 text-[12.5px] text-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-4 py-2 text-[12.5px] text-muted [&_button]:whitespace-nowrap">
           <div className="flex gap-1" role="group" aria-label="Show">
             {([["all", "All"], ["prompt", "With a prompt"], ["workflow", "With a workflow"]] as const).map(([v, l]) => (
               <button key={v} onClick={() => { setShow(v); setPref("collectionOnly", v); }} aria-pressed={show === v} title={v === "workflow" ? "Made in ComfyUI — the whole workflow comes along (open one → How it was made)" : undefined}
@@ -266,10 +280,11 @@ function Collections({ initial, onPick, reveal }: { initial: string; onPick: (it
             ))}
           </div>
           {checking && <span className="text-[11.5px] text-dim">checking which have a workflow…</span>}
-          <button onClick={() => { setPicking((v) => !v); setSel([]); }} className={cx("press border px-2 py-1 text-[12px]", picking ? "border-accent text-accent" : "border-line text-muted hover:text-ink")} title="Tick several pictures and swap your character into all of them in Batch">{picking ? "Cancel picking" : "Pick several → Batch"}</button>
+          <button onClick={() => { setPicking((v) => !v); setSel([]); }} className={cx("press border px-2 py-1 text-[12px]", picking ? "border-accent text-accent" : "border-line text-muted hover:text-ink")} title="Tick several pictures: recreate them all, or swap your character into them, in Batch">{picking ? "Cancel picking" : "Pick several → Batch"}</button>
           {picking && <>
             <button className="text-[12px] text-muted hover:text-ink" onClick={() => setSel(shown.filter((i) => !i.video).map((i) => i.id))}>All {shown.filter((i) => !i.video).length}</button>
-            <button disabled={!sel.length || !!sending} onClick={toBatch} className="press btn-primary px-3 py-1 text-[12px] font-bold disabled:opacity-50">{sending || `Add ${sel.length} to Batch`}</button>
+            <button disabled={!sel.length || !!sending} onClick={toRecreate} className="press btn-primary px-3 py-1 text-[12px] font-bold disabled:opacity-50" title="Each ticked post made again with its own prompt, settings and LoRAs (Batch → Pictures)">{sending || `Recreate ${sel.length}`}</button>
+            <button disabled={!sel.length || !!sending} onClick={toBatch} className="press border border-accent px-3 py-1 text-[12px] font-semibold text-accent hover:bg-accent/10 disabled:opacity-50" title="Each ticked picture becomes a row to swap your character into">{`Swap ${sel.length} in Batch`}</button>
             <button disabled={!sel.length} onClick={async () => { const { copyText } = await import("../lib/copy"); await copyText(sel.map((id) => `https://civitai.com/images/${id}`).join("\n")); const { useJobs } = await import("../lib/jobs"); useJobs.getState().toast(`${sel.length} link${sel.length === 1 ? "" : "s"} copied`, "good"); }}
               className="press border border-line px-2 py-1 text-[12px] text-muted hover:text-ink disabled:opacity-40" title="Copy the links of the ticked pictures (to share them, or to send them to Claude)">Copy links</button>
             <button disabled={!sel.length || !!sending} onClick={() => downloadWorkflows(sel.map((id) => `https://civitai.com/images/${id}`), setSending).catch((er) => alert((er as Error).message))}

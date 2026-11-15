@@ -55,10 +55,11 @@ export default function BatchTab() {
   const queue = async () => {
     if (!totalJobs) return;
     setBusy("queue");
+    const swapsToo = b.target === "image" && (useBatch.getState().take ?? "swap") === "swap" && b.rows.some((r) => r.status !== "queued" && r.imitate?.kind === "image" && !rowProblem(r));
     try {
       const n = await queueAll();
       const alert = useNotify.getState().topic;
-      if (b.target === "image" && (useBatch.getState().take ?? "swap") === "swap") { toast(`Swapping into ${n} picture${n > 1 ? "s" : ""}, one after another — keep this page open until it's done (progress on the left).`, "good"); return; }
+      if (swapsToo) { toast(`Swapping into ${n} picture${n > 1 ? "s" : ""}, one after another — keep this page open until it's done (progress on the left).`, "good"); return; }
       toast(`Queued ${n} job${n > 1 ? "s" : ""} on the instance — ${alert ? "your phone gets an alert when they're all done. You can close this page." : "they keep running with this page closed."}`, "good");
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(""); }
   };
@@ -113,6 +114,7 @@ export default function BatchTab() {
             <p className="text-[12px] leading-relaxed text-dim">LoRAs and sampler settings come from the Animate tab.</p>
           </>
         )}
+        {!video && <RecreatePanel />}
         {!video && <PhotoSet chars={chars} />}
         {!video && <RecipePanel />}
         {!video && <ContentPlan />}
@@ -143,15 +145,21 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
   return (
     <div className={cx("card grid grid-cols-[36px_150px_1fr_auto] gap-3 border p-3", r.status === "error" ? "border-bad/50" : "border-line")}>
       <div className="flex flex-col items-center gap-1 pt-1"><span className="micro text-dim">#{String(n + 1).padStart(2, "0")}</span></div>
-      <Slot className="h-[150px]" value={r.imitate} onChange={(m) => update(r.id, { imitate: m, prompt: m === r.imitate ? r.prompt : "", status: "new" })} accept={["image", "video"]} label={video ? "Clip or picture to imitate" : "Picture to copy"} />
+      {r.civit ? (
+        <button onClick={() => openViewer([{ url: r.civit!.url, kind: "image" as const, label: `CivitAI ${r.civit!.id}` }], 0)} className="press relative h-[150px] overflow-hidden border border-line bg-raised2 hover:border-accent" title="The post being recreated">
+          <img src={r.civit.thumb || r.civit.url} alt="" className="h-full w-full object-cover" />
+          <span className="micro absolute bottom-1 left-1 bg-black/75 px-1 text-accent">CIVITAI</span>
+        </button>
+      ) : <Slot className="h-[150px]" value={r.imitate} onChange={(m) => update(r.id, { imitate: m, prompt: m === r.imitate ? r.prompt : "", status: "new" })} accept={["image", "video"]} label={video ? "Clip or picture to imitate" : "Picture to copy"} />}
       <div className="flex min-w-0 flex-col gap-2">
+        {r.civit && <span className="text-[11.5px] text-muted">Recreate <a href={r.civit.page} target="_blank" rel="noreferrer" className="underline hover:text-ink">post {r.civit.id}</a> · {recreateLine(r.civit)}</span>}
         {(r.charId || r.toSet || r.inspo) && <span className="text-[11.5px] text-muted">{r.charId ? useCharacters.getState().list.find((x) => x.id === r.charId)?.name ?? "?" : ""}{r.toSet ? ` → “${r.toSet.title}” ${r.toSet.tier} set` : ""}{r.faceFix ? " · face pass" : ""}{r.inspo ? " · from a saved scene" : ""}{r.expression ? ` · ${r.expression.split(",")[0]}` : ""}</span>}
-        <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
+        {!r.civit && <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
           placeholder={video ? (r.imitate ? "Anything to change? e.g. on a beach at sunset (optional)" : "The idea, e.g. she twirls in the rain and laughs") : (r.imitate ? (swap ? "Which person if there are several (“the woman on the left”), or a change — optional" : "What to change (optional)") : "Describe the picture")}
-          className="inset h-9 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none disabled:opacity-60" />
-        {(video || (!r.imitate && (r.prompt.trim() || r.status === "writing"))) && (
+          className="inset h-9 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none disabled:opacity-60" />}
+        {(video || r.civit || (!r.imitate && (r.prompt.trim() || r.status === "writing"))) && (
           <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
-            placeholder={r.status === "writing" ? (writerOutside() ? "Waiting for your Grok answer…" : "The writer is on it…") : !video ? "The Krea 2 prompt" : "The H3 prompt — press Write prompts to have it written from the clip/picture and idea, or type your own"}
+            placeholder={r.status === "writing" ? (writerOutside() ? "Waiting for your Grok answer…" : "The writer is on it…") : r.civit ? "Its prompt — change any of it, or leave it as posted" : !video ? "The Krea 2 prompt" : "The H3 prompt — press Write prompts to have it written from the clip/picture and idea, or type your own"}
             className={cx("inset min-h-[92px] flex-1 resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70", r.status === "writing" && "shimmer")} />
         )}
         <div className="flex items-center gap-2 text-[12px]">
@@ -166,7 +174,7 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
         <button aria-label={`Remove row ${n + 1}`} onClick={() => remove(r.id)} className="text-muted hover:text-bad"><Icon name="x" size={15} /></button>
         <label className="flex flex-col items-end gap-1"><span className="micro text-dim">TAKES</span>
           <DropSelect value={r.takes} disabled={locked} onChange={(e) => update(r.id, { takes: Number(e.target.value) })} className="inset h-8 border px-1.5 text-[13px]">
-            {[1, 2, 3, 4].map((k) => <option key={k} value={k}>×{k}</option>)}
+            {(r.civit ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4]).map((k) => <option key={k} value={k}>×{k}</option>)}
           </DropSelect></label>
         {r.status === "queued" && !r.step && <button onClick={() => update(r.id, { status: r.prompt ? "ready" : "new", jobIds: [], results: undefined })} className="mt-auto text-[12px] text-muted hover:text-ink">Run again</button>}
       </div>
@@ -195,6 +203,26 @@ function PhoneAlerts() {
       {msg && <p className="text-[12px] text-muted">{msg}</p>}
       <label className="flex cursor-pointer items-center gap-2 text-[13px]"><input type="checkbox" checked={every} disabled={!topic} onChange={(e) => set({ every: e.target.checked })} />Also alert me for every Animate video</label>
       <p className="text-[11.5px] leading-relaxed text-dim">Anyone who knows the name can read the alerts, so make it hard to guess. Alerts only say a job finished — no pictures.</p>
+    </div>
+  );
+}
+
+/** "Krea 2 · 2 LoRAs · euler/simple · 8 steps" */
+function recreateLine(g: NonNullable<Row["civit"]>) {
+  const loras = g.resources.filter((x) => x.kind === "lora").length;
+  const model = { anima: "Anima", sdxl: "Illustrious", krea2: "Krea 2", qwen: "Krea 2" }[g.family as string] ?? "Create's model";
+  return [model, `${loras} LoRA${loras === 1 ? "" : "s"}`, g.sampler && `${g.sampler}${g.scheduler ? `/${g.scheduler}` : ""}`, g.steps && `${g.steps} steps`].filter(Boolean).join(" · ");
+}
+
+/** Recreate CivitAI posts: pick several saved posts → each one made again with its own prompt, settings and LoRAs */
+function RecreatePanel() {
+  const n = useBatch((s) => s.rows.filter((r) => r.civit && r.status !== "queued").length);
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised/40 p-3 text-[12.5px]">
+      <b className="font-medium">Recreate CivitAI posts</b>
+      <span className="-mt-1 text-[11.5px] leading-relaxed text-dim">Tick saved posts in your collections → each one is made again with its own prompt, sampler settings and LoRAs (missing LoRAs download first), like Whole prompt → Create, but all at once. Change any row's prompt before queueing.</span>
+      <Btn onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }}><Icon name="link" size={14} /> Pick posts from CivitAI</Btn>
+      {n > 0 && <span className="text-[11.5px] text-muted">{n} post{n === 1 ? "" : "s"} waiting below — set takes per row, then Queue.</span>}
     </div>
   );
 }

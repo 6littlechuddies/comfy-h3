@@ -38,6 +38,8 @@ export interface Row {
   step?: string;
   results?: string[];
   score?: number;
+  /** Recreate: a CivitAI post made again with its own prompt (in `prompt`, editable), settings and LoRAs */
+  civit?: import("./api").CivitGen;
 }
 export interface BatchOpts {
   target: "video" | "image";
@@ -178,6 +180,7 @@ export function rowProblem(r: Row): string | undefined {
     if (!r.prompt.trim()) return r.status === "writing" ? "Writing…" : "Needs a prompt — press Write prompts or type one";
     if (!character(r) && !r.imitate) return "Pick a character or add something to imitate";
   } else {
+    if (r.civit) return r.prompt.trim() ? undefined : "Its prompt is empty — type one";
     if (!r.idea.trim() && !r.prompt.trim() && !r.inspo && !(r.imitate && (character(r) || b.stars?.length))) return "Describe it, or add a picture to copy plus a character";
   }
   return undefined;
@@ -256,6 +259,25 @@ export async function queueAll(only?: string[]): Promise<number> {
   }
   for (const r of ready) {
     const rowIds: string[] = [];
+    // Recreate: a CivitAI post again, as posted — its prompt, settings and its own LoRAs, a new seed per take
+    if (b.target === "image" && r.civit) {
+      try {
+        useBatch.getState().update(r.id, { step: "Getting its LoRAs…" });
+        const { recreatePlan, exactPrompt } = await import("./civitUse");
+        const pl = await recreatePlan(r.civit, (m) => useBatch.getState().update(r.id, { step: m }));
+        for (let t = 0; t < r.takes; t++) {
+          const seed = t === 0 && pl.seed ? pl.seed : newSeed();
+          const job = await useJobs.getState().run("batch", `Recreate ${b.rows.indexOf(r) + 1}${r.takes > 1 ? ` · take ${t + 1}` : ""} · ${pl.mi.short}`, buildCreate({
+            ...pl.adv, seed, ...modelArgs(st.create, pl.mi), positive: exactPrompt(r.prompt), negative: pl.negative, loras: pl.loras,
+            width: pl.width, height: pl.height, count: 1, cutout: false, prefix: "studio/batch/recreate",
+          }), `create:${pl.mi.model}:portrait:1`, { batchRow: r.id, kind: "make", civitId: r.civit.id, sent: { prompt: exactPrompt(r.prompt), words: r.prompt, negative: pl.negative, model: pl.mi.label, checkpoint: "official",
+            loras: pl.loras.map((l) => ({ name: l.name, strength: l.strength })), size: `${pl.width}×${pl.height}`, seed, steps: pl.adv.steps, cfg: pl.adv.cfg, sampler: pl.adv.sampler, scheduler: pl.adv.scheduler } });
+          rowIds.push(job.id); ids.push(job.id);
+        }
+        useBatch.getState().update(r.id, { status: "queued", jobIds: rowIds, step: undefined, error: pl.failed.length ? `Without ${pl.failed.length} LoRA${pl.failed.length > 1 ? "s" : ""} it couldn't download: ${pl.failed.join("; ")}` : undefined });
+      } catch (e) { useBatch.getState().update(r.id, { status: "error", step: undefined, error: (e as Error).message }); }
+      continue;
+    }
     try {
       const { c, pics, videos } = await refsFor(r);
       for (let t = 0; t < r.takes; t++) {
@@ -336,4 +358,26 @@ export async function queueAll(only?: string[]): Promise<number> {
   if (swaps.length) (await import("./batchSwap")).startSwaps(swaps);
   if (ids.length) await watchJobs(ids, `Batch done: ${ids.length} ${b.target === "video" ? "video" : "picture"}${ids.length > 1 ? "s" : ""}`);
   return ids.length + swaps.length;
+}
+
+/** CivitAI posts → Recreate rows (Batch → Pictures): each post's prompt, settings and LoRAs, made again in bulk */
+export async function addRecreateRows(ids: (number | string)[], takes = 2, onStep?: (t: string) => void): Promise<{ added: number; skipped: number }> {
+  const { civitImage } = await import("./api");
+  const { cleanPrompt } = await import("./civitUse");
+  let added = 0, skipped = 0;
+  for (const [i, id] of ids.entries()) {
+    onStep?.(`Reading ${i + 1} of ${ids.length}…`);
+    try {
+      const g = await civitImage(String(id));
+      const prompt = cleanPrompt(g.prompt || g.workflow?.prompt || "");
+      if (g.video || !prompt) { skipped++; continue; }
+      useBatch.getState().add({ civit: g, prompt, takes, status: "ready" });
+      added++;
+    } catch { skipped++; }
+  }
+  const b = useBatch.getState();
+  b.set({ target: "image" });
+  const empty = b.rows.filter((r) => !r.imitate && !r.civit && !r.idea.trim() && !r.prompt.trim());
+  if (added && empty.length) useBatch.setState((s) => ({ rows: s.rows.filter((r) => !empty.includes(r)) }));
+  return { added, skipped };
 }

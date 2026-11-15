@@ -139,6 +139,33 @@ export async function genToCreate(g: CivitGen, onStep?: (msg: string) => void): 
   });
   return { failed, target: t };
 }
+/** Batch → Recreate: one CivitAI post as a ready Create job — its exact prompt, negative, sampler settings, its shape at
+ *  the model's own size, and only its own LoRAs (downloaded if needed). Create's settings are left as they are. */
+const RECREATE_SIZES = {
+  anime: { portrait: [832, 1216], tall: [832, 1248], square: [1024, 1024], wide: [1216, 832] },
+  realistic: { portrait: [1088, 1920], tall: [1152, 1728], square: [1440, 1440], wide: [1920, 1088] },
+} as const;
+export async function recreatePlan(g: CivitGen, onStep?: (msg: string) => void) {
+  const t = createTargetOf(g);
+  const { picks, failed } = await ensureLoras(lorasFor(g, targetFamily(t)), onStep);
+  const c = useSettings.getState().s.create;
+  const mi = modelOf(c, undefined, t);
+  const adv = copySettings(g, mi.adv, t, false);
+  const [gw, gh] = (g.size || `${g.width}x${g.height}`).split("x").map(Number);
+  const r = gw && gh ? gw / gh : 0.75;
+  const shape = r < 0.62 ? "portrait" : r < 0.85 ? "tall" : r <= 1.2 ? "square" : "wide";
+  const [w0, h0] = RECREATE_SIZES[mi.style][shape];
+  // Create's Draft size (~1 MP, twice as fast) carries over, as in the rest of Batch
+  const draft = mi.style === "realistic" && !!c.draft;
+  const r16 = (n: number) => Math.round(n / 16) * 16;
+  const [width, height] = draft ? [r16(w0 * 0.72), r16(h0 * 0.72)] : [w0, h0];
+  return { target: t, mi, adv, loras: picks, failed, width, height, seed: seedOk(g.seed) ? g.seed! : null, negative: g.negative ? cleanPrompt(g.negative) : c.negative };
+}
+/** the exact prompt as Create's "Exact prompt" sends it: <lora:…> tags out, and people said to be adults */
+export function exactPrompt(p: string): string {
+  const q = cleanPrompt(p);
+  return /\b(\d?girls?|\d?boys?|wom[ae]n|m[ae]n|female|male|person|people)\b/i.test(q) && !/\badult\b/i.test(q) ? `${q}, adult` : q;
+}
 /** a CivitAI image's sampler / scheduler / steps / CFG (/ seed) onto a model's settings, within what that model likes */
 function copySettings(g: CivitGen, base: Adv, t: CreateTarget, seed: boolean): Adv {
   const adv: Adv = { ...base };
