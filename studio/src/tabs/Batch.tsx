@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { picturesToWrite, queueAll, rowProblem, useBatch, writePicturePrompts, writePrompts, type Row } from "../lib/batch";
+import { DEFAULT_REC, FRAMES, picturesToWrite, postCharacter, queueAll, rowProblem, useBatch, writePicturePrompts, writePrompts, type RecreatePrefs, type Row } from "../lib/batch";
 import { writerOutside } from "../lib/outside";
 import { WriterChoice } from "../components/WriterChoice";
 import { isAdult, useCharacters } from "../lib/characters";
@@ -10,7 +10,8 @@ import { h3Size } from "../lib/models";
 import { randomTopic, testAlert, useNotify } from "../lib/notify";
 import { droppedUrl, useTray } from "../lib/tray";
 import { useHandoffInto, usePrimaryAction } from "../App";
-import { Btn, Icon, Label, Seg, Slot, cx, DropSelect } from "../components/ui";
+import { Btn, Icon, Label, Seg, Slot, TextIn, cx, DropSelect } from "../components/ui";
+import { PromptPieces } from "../components/PromptPieces";
 import { Workspace } from "../components/Workspace";
 import { Feed } from "../components/Feed";
 import { openViewer } from "../components/Viewer";
@@ -157,7 +158,8 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
         {!r.civit && <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
           placeholder={video ? (r.imitate ? "Anything to change? e.g. on a beach at sunset (optional)" : "The idea, e.g. she twirls in the rain and laughs") : (r.imitate ? (swap ? "Which person if there are several (“the woman on the left”), or a change — optional" : "What to change (optional)") : "Describe the picture")}
           className="inset h-9 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none disabled:opacity-60" />}
-        {(video || r.civit || (!r.imitate && (r.prompt.trim() || r.status === "writing"))) && (
+        {r.civit && <RecreateRow r={r} locked={locked} />}
+        {(video || (!r.civit && !r.imitate && (r.prompt.trim() || r.status === "writing"))) && (
           <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
             placeholder={r.status === "writing" ? (writerOutside() ? "Waiting for your Grok answer…" : "The writer is on it…") : r.civit ? "Its prompt — change any of it, or leave it as posted" : !video ? "The Krea 2 prompt" : "The H3 prompt — press Write prompts to have it written from the clip/picture and idea, or type your own"}
             className={cx("inset min-h-[92px] flex-1 resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70", r.status === "writing" && "shimmer")} />
@@ -217,12 +219,75 @@ function recreateLine(g: NonNullable<Row["civit"]>) {
 /** Recreate CivitAI posts: pick several saved posts → each one made again with its own prompt, settings and LoRAs */
 function RecreatePanel() {
   const n = useBatch((s) => s.rows.filter((r) => r.civit && r.status !== "queued").length);
+  const rec = useBatch((s) => s.rec) ?? DEFAULT_REC;
+  const chars = useCharacters(useShallow((s) => s.list.filter(isAdult)));
+  const set = (p: Partial<RecreatePrefs>) => useBatch.getState().set({ rec: { ...rec, ...p } });
+  const change = (k: keyof RecreatePrefs["change"], v: string) => set({ change: { ...rec.change, [k]: v } });
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised/40 p-3 text-[12.5px]">
+    <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-raised/40 p-3 text-[12.5px]">
       <b className="font-medium">Recreate CivitAI posts</b>
-      <span className="-mt-1 text-[11.5px] leading-relaxed text-dim">Tick saved posts in your collections → each one is made again with its own prompt, sampler settings and LoRAs (missing LoRAs download first), like Whole prompt → Create, but all at once. Change any row's prompt before queueing.</span>
+      <span className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">Tick saved posts → each is made again with its own prompt, settings and LoRAs (missing ones download first). The look stays as posted; the framing can rotate so the set is a mix of shots.</span>
       <Btn onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }}><Icon name="link" size={14} /> Pick posts from CivitAI</Btn>
+      <Seg label="Framing" value={rec.frame} onChange={(v) => set({ frame: v })} options={[{ value: "mix", label: "Mix of shots" }, { value: "posted", label: "As posted" }]} />
+      {rec.frame === "mix" && <div className="-mt-1 flex flex-wrap gap-1">
+        {FRAMES.map((f) => { const on = rec.frames.includes(f.id); return (
+          <button key={f.id} aria-pressed={on} onClick={() => set({ frames: on ? rec.frames.filter((x) => x !== f.id) : [...rec.frames, f.id] })} title={f.sentence}
+            className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", on && "on")}>{f.label}</button>); })}
+      </div>}
+      {rec.frame === "mix" && <span className="-mt-1 text-[11.5px] text-dim">Each take gets the next shot in turn, across all posts. Only the framing words change; pose, look and outfit stay as posted unless you type otherwise.</span>}
+      <span className="lbl mt-1">Change in every post (optional)</span>
+      <TextIn value={rec.change.setting ?? ""} onChange={(v) => change("setting", v)} placeholder="Background, e.g. a sunlit bedroom with white sheets" />
+      <TextIn value={rec.change.outfit ?? ""} onChange={(v) => change("outfit", v)} placeholder="Outfit, e.g. an oversized grey hoodie" />
+      <TextIn value={rec.change.lighting ?? ""} onChange={(v) => change("lighting", v)} placeholder="Light, e.g. soft window light" />
+      <label className="flex flex-col gap-1.5"><span className="lbl">Results go to</span>
+        <DropSelect value={rec.project} onChange={(e) => set({ project: e.target.value })} className="inset h-9 border px-2 text-[13px]">
+          <option value="">Free work</option>
+          {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </DropSelect>
+        <span className="text-[11.5px] text-dim">A post you've made a character from goes to that character by itself.</span>
+      </label>
       {n > 0 && <span className="text-[11.5px] text-muted">{n} post{n === 1 ? "" : "s"} waiting below — set takes per row, then Queue.</span>}
+    </div>
+  );
+}
+
+/** one post's prompt, as pieces (Who · Looks · Outfit · Pose · Setting · Light · Camera — click one, change it in words) or
+ *  as text; where its results go; and New character from it */
+function RecreateRow({ r, locked }: { r: Row; locked: boolean }) {
+  const { update } = useBatch();
+  const [view, setView] = useState<"pieces" | "text">(() => { try { return (localStorage.getItem("h3.batch.recView") as "pieces" | "text") || "pieces"; } catch { return "pieces"; } });
+  const chars = useCharacters(useShallow((s) => s.list.filter(isAdult)));
+  const linked = postCharacter(r.civit!.id);
+  const toast = useJobs((s) => s.toast);
+  const pick = (v: "pieces" | "text") => { setView(v); try { localStorage.setItem("h3.batch.recView", v); } catch { /* */ } };
+  const newChar = async () => {
+    try {
+      const [{ genMedia }, { useNewFromPicture }, { useSettings }] = await Promise.all([import("../lib/civitUse"), import("./Characters"), import("../lib/settings")]);
+      const m = await genMedia(r.civit!);
+      useCharacters.getState().select(null);
+      useNewFromPicture.setState({ pic: m, gen: r.civit! });
+      useSettings.getState().setTab("characters");
+      toast("Name them and press Read the picture. Pictures recreated from this post move into their project.", "good");
+    } catch (e) { toast((e as Error).message, "bad"); }
+  };
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
+        <span className="flex gap-0.5">{(["pieces", "text"] as const).map((v) => <button key={v} onClick={() => pick(v)} aria-pressed={view === v} className={cx("press border px-1.5 py-0.5", view === v ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}>{v === "pieces" ? "Pieces" : "Text"}</button>)}</span>
+        <span className="text-dim">{view === "pieces" ? "click a piece (the background, say) → change it in plain words" : ""}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-muted">Goes to
+          <DropSelect value={r.charId ?? linked ?? ""} disabled={locked} onChange={(e) => update(r.id, { charId: e.target.value || undefined })} className="inset h-7 border px-1.5 text-[12px]">
+            <option value="">{useBatch.getState().rec?.project ? "the batch's pick" : "Free work"}</option>
+            {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </DropSelect>
+          {!linked && <button onClick={newChar} className="text-accent hover:underline" title="A new character (own project) from this post's picture — its LoRAs come along, and every picture recreated from it moves there">New character from it</button>}
+        </span>
+      </div>
+      {view === "pieces" && !locked
+        ? <PromptPieces value={r.prompt} onChange={(v) => update(r.id, { prompt: v, status: v.trim() ? "ready" : "new" })} tab="batch" />
+        : <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
+            placeholder="Its prompt — change any of it, or leave it as posted"
+            className="inset min-h-[92px] resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70" />}
     </div>
   );
 }

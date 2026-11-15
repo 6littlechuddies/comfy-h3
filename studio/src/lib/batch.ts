@@ -58,6 +58,57 @@ export interface BatchOpts {
   setTitle?: string;
   tier?: "free" | "premium";
   faceFix?: boolean;
+  /** Recreate (CivitAI posts): see RecreatePrefs */
+  rec?: RecreatePrefs;
+}
+/** Recreate: how the posts are made again. The look stays as posted; the framing can rotate through a mix (so a set
+ *  isn't all one shot), and a change typed once (a background, an outfit, the light) goes into every post. */
+export interface RecreatePrefs {
+  frame: "posted" | "mix";
+  frames: FrameId[];
+  change: Partial<Record<"setting" | "outfit" | "lighting", string>>;
+  /** the project (character) the results go to; "" = Free work */
+  project: string;
+}
+export type FrameId = "full" | "chest" | "face" | "selfie" | "knees";
+export const FRAMES: { id: FrameId; label: string; sentence: string; tags: string }[] = [
+  { id: "full", label: "Full body", sentence: "Full-body shot, the whole person in frame from head to feet, camera at chest height.", tags: "full body, wide shot" },
+  { id: "chest", label: "Chest up", sentence: "Medium close-up from the chest up, camera at eye level.", tags: "upper body, portrait" },
+  { id: "face", label: "Face close-up", sentence: "Close-up of the face and shoulders.", tags: "close-up, face focus, portrait" },
+  { id: "selfie", label: "Selfie from above", sentence: "A selfie taken at arm's length from slightly above, looking up into the camera.", tags: "selfie, from above, looking at viewer" },
+  { id: "knees", label: "Knees up", sentence: "Three-quarter shot from the knees up.", tags: "cowboy shot" },
+];
+const REC_KEY = "h3.batch.recreate";
+export const DEFAULT_REC: RecreatePrefs = { frame: "mix", frames: ["full", "chest", "selfie", "face"], change: {}, project: "" };
+export function loadRec(): RecreatePrefs { try { return { ...DEFAULT_REC, ...JSON.parse(localStorage.getItem(REC_KEY) || "{}") }; } catch { return DEFAULT_REC; } }
+export function saveRec(r: RecreatePrefs) { try { localStorage.setItem(REC_KEY, JSON.stringify(r)); } catch { /* private mode */ } }
+/** which character each CivitAI post became (New character from it) — its later recreations go straight there */
+const LINK_KEY = "h3.batch.postChar";
+export function postCharacter(civitId: number): string | null { try { return (JSON.parse(localStorage.getItem(LINK_KEY) || "{}") as Record<string, string>)[String(civitId)] ?? null; } catch { return null; } }
+export function linkPostCharacter(civitId: number, charId: string) {
+  try { const m = JSON.parse(localStorage.getItem(LINK_KEY) || "{}"); m[String(civitId)] = charId; localStorage.setItem(LINK_KEY, JSON.stringify(m)); } catch { /* */ }
+}
+/** a post's prompt for one take: the framing swapped for this take's (when mixing) and your changes put in place of
+ *  the matching pieces — everything else (the look, outfit, pose) word for word */
+export async function recreatePrompt(prompt: string, rec: RecreatePrefs, frame: FrameId | null): Promise<string> {
+  const { toPieces, fromPieces, isTagPrompt, pid } = await import("./tweak");
+  const tags = isTagPrompt(prompt);
+  let ps = toPieces(prompt);
+  for (const cat of ["setting", "outfit", "lighting"] as const) {
+    const want = rec.change[cat]?.trim();
+    if (!want) continue;
+    const at = ps.findIndex((x) => x.cat === cat);
+    ps = ps.filter((x) => x.cat !== cat);
+    const piece = { id: pid(), cat, text: tags ? want : want.replace(/\.?$/, ".") };
+    ps.splice(at < 0 ? ps.length : Math.min(at, ps.length), 0, piece);
+  }
+  if (frame) {
+    const f = FRAMES.find((x) => x.id === frame)!;
+    // camera pieces out — except lens/look words that aren't framing (35mm, depth of field, bokeh)
+    ps = ps.filter((x) => x.cat !== "camera" || /\b(\d+mm|lens|depth of field|bokeh|blurry background|film)\b/i.test(x.text) && !/\b(close.?up|full body|upper body|cowboy|portrait|selfie|from above|from below|wide shot|medium shot)\b/i.test(x.text));
+    ps.push({ id: pid(), cat: "camera", text: tags ? f.tags : f.sentence });
+  }
+  return fromPieces(ps, tags);
 }
 interface BatchState extends BatchOpts {
   rows: Row[];
@@ -73,7 +124,8 @@ export const newRow = (p: Partial<Row> = {}): Row => ({ id: `b${Date.now().toStr
 export const useBatch = create<BatchState>((set) => ({
   target: (() => { try { return localStorage.getItem("h3.batch.target") === "video" ? "video" : "image"; } catch { return "image"; } })(), characterId: null, seconds: 8, aspect: "9:16", mp: 0.6, useClipSound: true,
   rows: [newRow()],
-  set: (p) => { if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ } set(p); },
+  rec: loadRec(),
+  set: (p) => { if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ } if (p.rec) saveRec(p.rec); set(p); },
   add: (p) => set((s) => ({ rows: [...s.rows, newRow(p)] })),
   update: (id, p) => set((s) => ({ rows: s.rows.map((r) => (r.id === id ? { ...r, ...p } : r)) })),
   remove: (id) => set((s) => ({ rows: s.rows.filter((r) => r.id !== id) })),
@@ -242,6 +294,7 @@ export async function planExactRows(o: { charIds: string[]; items: { url: string
   return rows.length;
 }
 
+let recTurn = 0;
 export async function queueAll(only?: string[]): Promise<number> {
   // rows from saved scenes (or with their own expression) need their prompt written first
   if (useBatch.getState().target === "image" && picturesToWrite().some((r) => r.inspo || r.expression)) await writePicturePrompts();
@@ -265,12 +318,19 @@ export async function queueAll(only?: string[]): Promise<number> {
         useBatch.getState().update(r.id, { step: "Getting its LoRAs…" });
         const { recreatePlan, exactPrompt } = await import("./civitUse");
         const pl = await recreatePlan(r.civit, (m) => useBatch.getState().update(r.id, { step: m }));
+        const rec = b.rec ?? DEFAULT_REC;
+        const frames = rec.frame === "mix" && rec.frames.length ? rec.frames : null;
+        // where the results go: this row's own pick, else the character this post became, else the batch's choice
+        const project = r.charId ?? postCharacter(r.civit.id) ?? (rec.project || null);
         for (let t = 0; t < r.takes; t++) {
           const seed = t === 0 && pl.seed ? pl.seed : newSeed();
-          const job = await useJobs.getState().run("batch", `Recreate ${b.rows.indexOf(r) + 1}${r.takes > 1 ? ` · take ${t + 1}` : ""} · ${pl.mi.short}`, buildCreate({
-            ...pl.adv, seed, ...modelArgs(st.create, pl.mi), positive: exactPrompt(r.prompt), negative: pl.negative, loras: pl.loras,
+          const frame = frames ? frames[(recTurn++) % frames.length] : null;
+          const words = await recreatePrompt(r.prompt, rec, frame);
+          const fl = frame ? FRAMES.find((x) => x.id === frame)!.label.toLowerCase() : "";
+          const job = await useJobs.getState().run("batch", `Recreate ${b.rows.indexOf(r) + 1}${r.takes > 1 ? ` · take ${t + 1}` : ""}${fl ? ` · ${fl}` : ""}`, buildCreate({
+            ...pl.adv, seed, ...modelArgs(st.create, pl.mi), positive: exactPrompt(words), negative: pl.negative, loras: pl.loras,
             width: pl.width, height: pl.height, count: 1, cutout: false, prefix: "studio/batch/recreate",
-          }), `create:${pl.mi.model}:portrait:1`, { batchRow: r.id, kind: "make", civitId: r.civit.id, sent: { prompt: exactPrompt(r.prompt), words: r.prompt, negative: pl.negative, model: pl.mi.label, checkpoint: "official",
+          }), `create:${pl.mi.model}:portrait:1`, { batchRow: r.id, kind: "make", civitId: r.civit.id, project, sent: { prompt: exactPrompt(words), words, negative: pl.negative, model: pl.mi.label, checkpoint: "official",
             loras: pl.loras.map((l) => ({ name: l.name, strength: l.strength })), size: `${pl.width}×${pl.height}`, seed, steps: pl.adv.steps, cfg: pl.adv.cfg, sampler: pl.adv.sampler, scheduler: pl.adv.scheduler } });
           rowIds.push(job.id); ids.push(job.id);
         }
@@ -380,4 +440,13 @@ export async function addRecreateRows(ids: (number | string)[], takes = 2, onSte
   const empty = b.rows.filter((r) => !r.imitate && !r.civit && !r.idea.trim() && !r.prompt.trim());
   if (added && empty.length) useBatch.setState((s) => ({ rows: s.rows.filter((r) => !empty.includes(r)) }));
   return { added, skipped };
+}
+
+/** a post became a character: every result recreated from it moves into their project, and later ones go there too */
+export async function postToCharacter(civitId: number, charId: string): Promise<number> {
+  linkPostCharacter(civitId, charId);
+  const { moveResults } = await import("./move");
+  const items = useJobs.getState().jobs.filter((j) => j.meta?.civitId === civitId)
+    .flatMap((j) => j.outputs.filter((o) => o.type === "output").map((o) => ({ jobId: j.id, filename: o.filename, subfolder: o.subfolder })));
+  return items.length ? moveResults(items, charId) : 0;
 }

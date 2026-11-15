@@ -397,6 +397,9 @@ function FromPicture() {
     useCharacters.getState().save(c);
     await useCharacters.getState().setView(c.id, "front", { filename: pic!.name, subfolder: "", type: "input" }, { yours: true });
     useCharacters.getState().select(c.id);
+    // pictures recreated from this post (Batch → Recreate) move into their project, and later recreations go there too
+    const postId = gen?.page?.includes("civitai") ? gen.id : null;
+    if (postId) { const k = await (await import("../lib/batch")).postToCharacter(postId, c.id); if (k) loraNote += ` ${k} picture${k > 1 ? "s" : ""} recreated from this post moved into ${c.name}'s project.`; }
     toast(isAdult(c) ? `${c.name} is in, with your picture as their look.${loraNote} Next: Open sheet maker → Make full sheet.` : `${c.name} is in. Their age couldn't be read from the picture — type it in Looks → Age (18 or older) to start using them.`, isAdult(c) ? "good" : "info", "characters");
     setPic(null); setGen(null); setName(""); setNeedAge(null); setAge("");
   };
