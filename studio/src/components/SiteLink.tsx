@@ -21,7 +21,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
+const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -37,6 +37,13 @@ async function doItAll(c: Character, connected: boolean, step: (t: string) => vo
   const { sortIntoSets, fillProfile } = await import("../lib/siteAuto");
   const sorted = await sortIntoSets(c, { onStep: step }).catch((e) => { if (/No pictures/.test((e as Error).message)) return null; throw e; });
   await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: step });
+  // no hover loop picked yet: her newest loop (Video board / Animate), so the card moves on the site
+  const now = useCharacters.getState().list.find((x) => x.id === c.id)!;
+  if (!now.site?.loopFile) {
+    step("Looking for her hover loop…");
+    const best = (await loopCandidates(now).catch(() => [])).find((x) => x.loop);
+    if (best) useCharacters.getState().save({ ...now, site: { ...now.site, loopFile: best.file } });
+  }
   if (!connected) return `${sorted ? `${sorted.sets} sets, ` : ""}profile filled — connect your site to send`;
   step("Sending…");
   const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, step);
@@ -74,6 +81,95 @@ async function sendOne(c: Character, onStep?: (t: string) => void): Promise<{ ok
   const sentKeys = ok ? [...new Set([...(cur.site?.sentKeys ?? []), ...(cur.site?.sets ?? []).flatMap((x) => x.items.map((it) => `${it.subfolder}/${it.filename}`))])] : cur.site?.sentKeys;
   useCharacters.getState().save({ ...cur, site: { ...cur.site, sent: { at: Date.now(), ok, note, hash: fp(cur) }, ...(sentKeys ? { sentKeys } : {}) } });
   return { ok, note };
+}
+
+const isVideo = (f: FileRef) => /\.(mp4|webm|mov)$/i.test(f.filename);
+type LoopPick = { file: FileRef; loop: boolean; at: number; label?: string };
+/** her videos that could be the hover loop: Video board / Animate loops first (they start and end on her picture), then
+ *  her other videos; newest first. From this browser's results and everything of hers on the rental. */
+export async function loopCandidates(c: Character): Promise<LoopPick[]> {
+  const out = new Map<string, LoopPick>();
+  const looks = (label?: string, mode?: unknown) => mode === "loop" || /\bloop\b/i.test(label ?? "");
+  for (const j of useJobs.getState().jobs) {
+    if (j.status !== "done" || (j.meta?.project !== c.id && !(c.name && j.label.startsWith(`${c.name} ·`)))) continue;
+    const mode = (j.meta?.opts as { mode?: string } | undefined)?.mode;
+    for (const o of j.outputs) if (o.type === "output" && isVideo(o)) out.set(`${o.subfolder}/${o.filename}`, { file: { filename: o.filename, subfolder: o.subfolder, type: o.type }, loop: looks(j.label, mode), at: j.endedAt ?? j.queuedAt, label: j.label });
+  }
+  try {
+    const { charPictures } = await import("../lib/siteAuto");
+    for (const p of await charPictures(c)) {
+      const k = `${p.file.subfolder}/${p.file.filename}`;
+      if (!isVideo(p.file) || out.has(k)) continue;
+      out.set(k, { file: p.file, loop: looks(p.label), at: 0, label: p.label });
+    }
+  } catch { /* the rental's list is optional */ }
+  return [...out.values()].sort((a, b) => Number(b.loop) - Number(a.loop) || b.at - a.at);
+}
+
+/** hover loops for many characters at once: each one's loop candidates in a row, click to choose; "Newest loop for all" */
+function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void }) {
+  const save = useCharacters((s) => s.save);
+  const toast = useJobs((s) => s.toast);
+  const live = useCharacters((s) => s.list);
+  const [cands, setCands] = useState<Record<string, LoopPick[]>>({});
+  useEffect(() => { chars.forEach((c) => loopCandidates(c).then((l) => setCands((m) => ({ ...m, [c.id]: l }))).catch(() => setCands((m) => ({ ...m, [c.id]: [] })))); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (id: string, f: FileRef | undefined) => { const cur = useCharacters.getState().list.find((x) => x.id === id); if (cur) save({ ...cur, site: { ...cur.site, loopFile: f ? { filename: f.filename, subfolder: f.subfolder, type: f.type } : undefined } }); };
+  const autoAll = (onlyEmpty: boolean) => {
+    let n = 0;
+    for (const c of chars) {
+      const cur = useCharacters.getState().list.find((x) => x.id === c.id);
+      const first = cands[c.id]?.find((x) => x.loop) ?? cands[c.id]?.[0];
+      if (!cur || !first || (onlyEmpty && cur.site?.loopFile)) continue;
+      choose(c.id, first.file); n++;
+    }
+    toast(n ? `Hover loop set for ${n} — check them, then Send as drafts` : "Nothing to set — no loops found for the ones without one", n ? "good" : "info");
+  };
+  return createPortal(
+    <div className="fade-in fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6" onMouseDown={onClose}>
+      <div className="flex max-h-full w-full max-w-[1200px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+          <b className="text-[14px]">Hover loops · {chars.length} character{chars.length === 1 ? "" : "s"}</b>
+          <span className="text-[12px] text-muted">Loops from Video board / Animate come first. Hover to play, click to use. The site wants it to start on her full-body cover with small, calm motion.</span>
+          <div className="ml-auto flex gap-2">
+            <Btn onClick={() => autoAll(true)} title="Her newest loop, only for characters without a hover loop yet">Newest loop where empty</Btn>
+            <Btn kind="primary" onClick={() => autoAll(false)} title="Her newest loop for every one of them (replaces the ones you picked)">Newest loop for all</Btn>
+            <button aria-label="Close" className="ml-2 text-muted hover:text-ink" onClick={onClose}><Icon name="x" size={16} /></button>
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
+          {chars.map((c0) => {
+            const c = live.find((x) => x.id === c0.id) ?? c0;
+            const cur = c.site?.loopFile;
+            const list = cands[c.id];
+            return (
+              <div key={c.id} className="flex items-stretch gap-3 border-b border-line/60 pb-3">
+                <div className="flex w-28 shrink-0 flex-col gap-1">
+                  <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="aspect-[3/4] w-full border border-line object-cover" />
+                  <span className="truncate text-[12.5px] font-semibold">{c.name}</span>
+                  <span className={cx("text-[11px]", cur ? "text-good" : "text-dim")}>{cur ? "Loop set" : "No loop"}</span>
+                  {cur && <button className="self-start text-[11px] text-muted hover:text-bad" onClick={() => choose(c.id, undefined)}>Clear</button>}
+                </div>
+                <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">
+                  {!list ? <span className="self-center text-[12px] text-muted">Finding her videos…</span>
+                    : !list.length ? <span className="self-center text-[12px] text-muted">No videos of {c.name} yet — make loops for her on the Video board (05 Animate).</span>
+                    : list.slice(0, 12).map((x) => {
+                      const on = !!cur && cur.filename === x.file.filename && (cur.subfolder || "") === (x.file.subfolder || "");
+                      return (
+                        <button key={`${x.file.subfolder}/${x.file.filename}`} onClick={() => choose(c.id, x.file)} title={x.label ?? x.file.filename}
+                          className={cx("press relative aspect-[3/4] h-44 shrink-0 overflow-hidden border-2 bg-black", on ? "border-accent" : "border-transparent hover:border-muted")}>
+                          <video src={viewUrl(x.file)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" />
+                          <span className={cx("micro absolute left-1 top-1 px-1", x.loop ? "bg-accent text-accentink" : "bg-black/70 text-white")}>{x.loop ? "LOOP" : "VIDEO"}</span>
+                          {on && <span className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center bg-accent text-accentink"><Icon name="check" size={13} /></span>}
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>, document.body);
 }
 
 export function SiteLink() {
@@ -171,6 +267,7 @@ function Characters({ connected }: { connected: boolean }) {
   const [busy, setBusy] = useState<Record<string, string>>({});
   const mark = (id: string, t: string | null) => setBusy((b) => { const n = { ...b }; if (t == null) delete n[id]; else n[id] = t; return n; });
   const chosen = list.filter((c) => sel.has(c.id));
+  const [loops, setLoops] = useState(false);
   const writeAll = async () => {
     for (const c of chosen) {
       mark(c.id, "Writing profile…");
@@ -207,10 +304,12 @@ function Characters({ connected }: { connected: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several to do them together.</p>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
+        <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
-        <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Sort their pictures into sets, fill the blanks in their profile from their pictures, and send as drafts"><Icon name="sparkle" size={14} /> Sort, fill &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Sort their pictures into sets, fill the blanks in their profile from their pictures, use her newest loop as the hover loop if none is picked, and send as drafts"><Icon name="sparkle" size={14} /> Sort, fill &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
+      {loops && <BulkLoops chars={chosen} onClose={() => setLoops(false)} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {list.map((c) => {
           const st = status(c);
@@ -220,6 +319,9 @@ function Characters({ connected }: { connected: boolean }) {
             <div key={c.id} className={cx("group relative flex flex-col overflow-hidden border transition-colors", on ? "border-accent" : "border-line hover:border-muted")}>
               <button onClick={() => go(c.id)} className="relative aspect-[3/4] overflow-hidden bg-raised" aria-label={`Open ${c.name}`}>
                 <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                {/* her hover loop, played on hover the way the site's card does */}
+                {c.site?.loopFile && <video src={viewUrl(c.site.loopFile)} muted loop playsInline preload="none" onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.play().catch(() => {}); }} onMouseLeave={(e) => { e.currentTarget.style.opacity = "0"; e.currentTarget.pause(); }} className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity" />}
+                {c.site?.loopFile && <span className="micro pointer-events-none absolute right-2 top-2 bg-black/70 px-1 text-white">LOOP</span>}
                 {busy[c.id] && <span className="absolute inset-x-0 bottom-0 bg-black/80 px-2 py-1.5 text-[11.5px] text-ink"><span className="pulse">●</span> {busy[c.id]}</span>}
               </button>
               <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center border border-line bg-black/70" title="Select">
@@ -228,7 +330,7 @@ function Characters({ connected }: { connected: boolean }) {
               </label>
               <div className="flex flex-col gap-0.5 px-2.5 py-2">
                 <span className="truncate text-[13.5px] font-semibold">{c.name}</span>
-                <span className="text-[11.5px] text-muted">{hasProfile(c) ? "Profile ready" : "No profile yet"} · {sets.length} folder{sets.length === 1 ? "" : "s"}</span>
+                <span className="text-[11.5px] text-muted">{hasProfile(c) ? "Profile ready" : "No profile yet"} · {sets.length} folder{sets.length === 1 ? "" : "s"}{c.site?.loopFile ? " · loop" : ""}</span>
                 <span className={cx("text-[11.5px]", STATUS[st][1])}>{STATUS[st][0]}</span>
               </div>
             </div>
@@ -299,6 +401,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
+        <TextIn label="How she texts · typing style, sent to the site as voice notes" value={site.voice ?? ""} onChange={(v) => up({ voice: v })} placeholder="all lowercase, no full stops, 'lmao' a lot, one emoji max" />
         <TextIn label="Tags" value={(site.tags ?? []).join(", ")} onChange={(v) => up({ tags: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="fitness, playful, gym" />
         <TextArea label="Backstory" rows={3} value={site.backstory ?? ""} onChange={(v) => up({ backstory: v })} />
         <TextArea label="Chat persona · private, the site's chat model reads it" rows={6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />

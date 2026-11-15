@@ -334,7 +334,9 @@ function Lightbox({ items, index, setIndex, acts }: { items: Item[]; index: numb
 
 /** the prompt and settings a result was made with — and a button to use them again */
 function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; done: () => void }) {
-  const sent = it.j.meta?.sent as SentInfo | undefined;
+  // video boards (and older jobs) keep only some of it — words and character, no LoRAs or prompt: shown as far as it goes
+  const raw = it.j.meta?.sent as Partial<SentInfo> | undefined;
+  const sent = raw && (raw.prompt || raw.words) ? { ...raw, prompt: raw.prompt ?? raw.words ?? "", loras: Array.isArray(raw.loras) ? raw.loras : [] } as SentInfo : undefined;
   const snap = it.j.meta?.snapshot as { section?: string; settings?: Record<string, unknown> } | undefined;
   const toast = useJobs((s) => s.toast);
   const copy = (t: string) => copyText(t);

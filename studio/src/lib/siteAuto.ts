@@ -92,7 +92,57 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
 const json = (raw: string) => { const m = raw.match(/\{[\s\S]*\}/); if (!m) throw new Error("The writer didn't answer in the expected format — try again"); return JSON.parse(m[0]); };
 
 // ------------------------------------------------------------------ 1. the whole profile
-const FIELDS = ["bio", "greeting", "backstory", "personality", "persona"] as const;
+const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice"] as const;
+
+// The writer kept giving everyone the same hometown (Seattle / "the Pacific Northwest" / "the west coast"). Each profile now
+// gets a few places drawn at random from all over — places other characters already use left out — to pick from, plus a
+// couple of typing styles and inner details to choose from. It picks what fits her pictures; the rest is ignored.
+const PLACES = [
+  "Tucson, Arizona", "Savannah, Georgia", "Duluth, Minnesota", "El Paso, Texas", "New Orleans", "Pittsburgh", "Albuquerque", "Detroit", "Miami (Little Havana)",
+  "Nashville", "Baltimore", "Boise, Idaho", "Las Vegas", "Chicago's South Side", "rural Kentucky", "Queens, New York", "Salt Lake City", "Honolulu",
+  "Anchorage", "Charleston, South Carolina", "Kansas City", "Milwaukee", "San Antonio", "Atlanta", "Oklahoma City", "Providence, Rhode Island",
+  "Montreal", "Toronto", "Winnipeg", "Halifax", "Mexico City", "Guadalajara", "San Juan, Puerto Rico", "Havana", "Bogota", "Medellin", "Buenos Aires",
+  "Sao Paulo", "Rio de Janeiro", "Santiago, Chile", "Lima", "Manchester", "Glasgow", "Dublin", "Cardiff", "Lyon", "Marseille", "Barcelona", "Seville",
+  "Lisbon", "Naples", "Milan", "Berlin", "Hamburg", "Vienna", "Prague", "Krakow", "Budapest", "Bucharest", "Kyiv", "Riga", "Stockholm", "Copenhagen",
+  "Amsterdam", "Athens", "Istanbul", "Tel Aviv", "Beirut", "Dubai", "Cairo", "Casablanca", "Lagos", "Nairobi", "Cape Town", "Johannesburg", "Mumbai",
+  "Bangalore", "Kolkata", "Colombo", "Bangkok", "Chiang Mai", "Ho Chi Minh City", "Manila", "Cebu", "Jakarta", "Bali", "Kuala Lumpur", "Singapore",
+  "Seoul", "Busan", "Osaka", "Tokyo (Shimokitazawa)", "Sapporo", "Taipei", "Hong Kong", "Shanghai", "Melbourne", "Perth", "Brisbane", "Auckland",
+  "a military family that moved every two years", "a truck-stop town in Nevada", "a ski town in Colorado", "a farm outside Des Moines", "a Gulf Coast oil town",
+];
+const TYPING = [
+  "all lowercase, barely any punctuation, 'lol' and 'lmao' used as commas",
+  "proper grammar and full stops, dry one-liners, almost never uses emoji",
+  "stretches words when she's excited ('stoppp', 'sooo'), one emoji at most",
+  "sends short bursts of two or three messages instead of one long one",
+  "trails off with '...' and a lot of 'hmm', thinks out loud",
+  "CAPS for emphasis on single words, otherwise calm",
+  "old-school emoticons like :) and :P instead of emoji",
+  "chatty and long, run-on sentences, tangents in brackets",
+  "terse and teasing, answers questions with questions",
+  "drops in words from her first language (only if she grew up with one)",
+  "lots of emoji, but always the same three favourites",
+  "British/Australian spelling and slang (only if she's from there)",
+  "types like she talks, 'ok so', 'wait', 'literally'",
+  "formal and polite at first, gets messier the more comfortable she gets",
+];
+const INNER = [
+  "a contradiction (tough outside, sentimental about one specific thing)", "a small thing she's oddly good at", "a pet peeve she brings up",
+  "a comfort habit at 2am", "a goal she's embarrassed to say out loud", "a very specific taste (a band, a snack, a show) she'll defend",
+  "how she shows she likes someone", "what makes her go quiet", "a running joke she starts with people", "a thing she collects",
+];
+const pick = <T,>(a: T[], n: number) => [...a].sort(() => Math.random() - 0.5).slice(0, n);
+/** hometowns that are worn out (or already used by your other characters) — kept out of new profiles */
+const STALE = /\b(seattle|portland|tacoma|olympia|spokane|bellingham|pacific northwest|pnw|west coast|oregon|washington state|puget sound)\b/i;
+
+/** the random starting points for one profile: places (not ones your other characters use), typing styles, inner details */
+function sparkNote(othersText: string): string {
+  const free = PLACES.filter((p) => !othersText.toLowerCase().includes(p.split(/[,(]/)[0].trim().toLowerCase()));
+  return [
+    `PLACES to choose her background from (pick the one that fits her look and pictures best, or another specific place that fits better — never the Pacific Northwest, Seattle, Portland or "the west coast"; where she grew up and where she lives now can differ): ${pick(free, 5).join(" | ")}`,
+    `TYPING STYLES to consider for how she texts (use one only if it fits who she is — otherwise write her own): ${pick(TYPING, 3).join(" | ")}`,
+    `INNER DETAILS to give her (choose two, make them specific to her): ${pick(INNER, 4).join(" | ")}`,
+  ].join("\n");
+}
 
 /** fill the profile from their look + their pictures' prompts + set titles; what you already wrote stays unless `all` */
 export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void } = {}) {
@@ -111,6 +161,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     stripAges(describe(c)), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
+    sparkNote(others.join(" ")),
     others.length && `OTHER CHARACTERS ON THE SITE (make this one clearly different from them — another hometown, job, voice and story):\n${others.join("\n")}`,
     filled.length && `ALREADY FILLED (keep exactly):\n${filled.map((k) => `${k}: ${site[k]}`).join("\n")}${!o.all && site.tags?.length ? `\ntags: ${site.tags.join(", ")}` : ""}`,
   ].filter(Boolean).join("\n\n");
@@ -128,7 +179,15 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   o.onStep?.("Writing the profile…");
   const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: notes + (images?.length ? `\n\nPICTURES ATTACHED: ${images.length} photos of ${c.name} (the first is their reference look). Read them closely — style, setting, mood, clothes, the vibe of their photo feed — and let the profile match what fans will see.` : "") },
     { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) });
-  const d = json(raw) as Record<string, unknown>;
+  let d = json(raw) as Record<string, unknown>;
+  // still the Pacific Northwest (and the owner didn't ask for it): written once more with that said plainly
+  const stale = (x: Record<string, unknown>) => FIELDS.some((k) => typeof x[k] === "string" && STALE.test(x[k] as string) && !STALE.test(site.direction ?? "") && !(filled as readonly string[]).includes(k));
+  if (stale(d)) {
+    o.onStep?.("Writing the profile again (another hometown)…");
+    const again = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: `${notes}\n\nNOT the Pacific Northwest: no Seattle, Portland, Oregon, Washington state or "west coast" anywhere. Use one of the PLACES above.` },
+      { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) }).catch(() => "");
+    try { const d2 = json(again) as Record<string, unknown>; if (!stale(d2)) d = d2; } catch { /* keep the first */ }
+  }
   const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string).trim() : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
   const s0 = cur.site ?? {};
