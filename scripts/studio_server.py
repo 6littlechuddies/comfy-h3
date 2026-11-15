@@ -3409,8 +3409,9 @@ def split_sheet(path: str, n: int) -> list[tuple[int, int, int, int]]:
     import numpy as np
     im = Image.open(path).convert("RGB"); a = np.asarray(im).astype(np.int16)
     h, w, _ = a.shape
-    border = np.concatenate([a[:4].reshape(-1, 3), a[-4:].reshape(-1, 3), a[:, :4].reshape(-1, 3), a[:, -4:].reshape(-1, 3)])
-    bg = np.median(border, axis=0)
+    # the background row by row (from the left and right edges), so a top-to-bottom studio gradient still reads as background
+    edges = np.concatenate([a[:, :6], a[:, -6:]], axis=1)       # h × 12 × 3
+    bg = np.median(edges, axis=1)[:, None, :]                   # h × 1 × 3
     diff = np.abs(a - bg).max(axis=2) > 28                     # pixel isn't background
     col = diff.mean(axis=0) > 0.012                             # column has some figure in it
     k = max(3, w // 200); col = np.convolve(col.astype(float), np.ones(k) / k, mode="same") > 0.3  # smooth tiny holes
@@ -3447,7 +3448,11 @@ async def sheet_split(req):
     sub = f.get("subfolder", "") or "studio/characters"
     stem = os.path.splitext(f.get("filename", "sheet"))[0]
     out = []
+    tight = set(int(x) for x in (d.get("tight") or []))  # panels to cut to head and shoulders (the face close-up)
     for i, b in enumerate(boxes):
+        if i in tight:
+            x0, y0, x1, y1 = b
+            b = (x0, y0, x1, y0 + max(64, round((y1 - y0) * 0.55)))
         crop = im.crop(b)
         # make each view a tidy 2:3 portrait on the sheet's background colour
         cw, ch = crop.size; tw = max(cw, round(ch * 2 / 3)); th = max(ch, round(tw * 3 / 2))

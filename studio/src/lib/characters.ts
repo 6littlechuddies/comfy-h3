@@ -335,7 +335,8 @@ useJobs.subscribe((s, prev) => {
     // a whole turnaround sheet: cut it into the separate angles too
     if (j.meta.view === "sheet" && !j.meta.single) {
       const order = (j.meta.order as View[]) ?? ["front", "left", "back", "threeq"];
-      splitSheet(out, order.length).then(async (parts) => {
+      // the face panel is cut to head and shoulders, so it works as her face close-up
+      splitSheet(out, order.length, order.flatMap((v, i) => (v === "face" ? [i] : []))).then(async (parts) => {
         const keepFront = !!useCharacters.getState().list.find((c) => c.id === id)?.views.front;
         for (let i = 0; i < parts.length; i++) {
           if (order[i] === "front" && keepFront) continue; // your own front picture stays the main one

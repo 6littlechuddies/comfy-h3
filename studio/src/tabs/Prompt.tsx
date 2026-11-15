@@ -295,22 +295,46 @@ const FEW: View[] = ["front", "face"];
 const ALL: View[] = ["front", "face", "threeq", "left", "right", "back", "smile", "angry", "surprised"];
 const viewName = (v: View) => VIEWS.find((x) => x.id === v)?.label.toLowerCase() ?? v;
 /** the references with this character's pictures added in front (they become <Picture 1>, <Picture 2>…); H3 takes 9 at most */
-export async function withCharacter(c: Character, refs: Ref[], every = charEvery()): Promise<Ref[]> {
+type CharMode = "sheet" | "all" | "few";
+/** which of her pictures go in: her one-picture reference sheet + face close-up (best for H3 — two pictures, the face kept
+ *  big), every angle, or front + face. "Sheet" falls back to every angle when she has no sheet yet. */
+export async function withCharacter(c: Character, refs: Ref[], mode: CharMode = charMode()): Promise<Ref[]> {
   if (refs.some((r) => r.charId === c.id)) return refs;
   const room = 9 - refs.filter((r) => r.media.kind === "image").length;
-  const views = (every ? ALL : FEW).filter((v) => c.views[v]).slice(0, Math.max(0, room));
+  const pick: View[] = mode === "sheet" && c.views.sheet ? (["sheet", c.views.face ? "face" : "front"] as View[]) : mode === "few" ? FEW : ALL;
+  const views = pick.filter((v) => c.views[v]).slice(0, Math.max(0, room));
   if (!views.length) throw new Error("H3 takes at most 9 pictures — remove one first");
   const st = useCharacters.getState();
   const media = await Promise.all(views.map((v) => st.asMedia(c.id, v)));
-  const add = media.flatMap((m, i) => (m ? [{ ...makeRef(m), label: `${c.name} — ${views[i] === "front" ? "full body" : viewName(views[i])}`, charId: c.id }] : []));
+  const name = (v: View) => v === "front" ? "full body" : v === "sheet" ? "reference sheet" : v === "face" ? "face close-up" : viewName(v);
+  const add = media.flatMap((m, i) => (m ? [{ ...makeRef(m), label: `${c.name} — ${name(views[i])}`, charId: c.id }] : []));
   const firstOther = refs.findIndex((r) => !r.charId);
   const next = [...refs];
   next.splice(firstOther < 0 ? next.length : firstOther, 0, ...add);
-  const total = (every ? ALL : FEW).filter((v) => c.views[v]).length;
+  const total = pick.filter((v) => c.views[v]).length;
   if (add.length < total) useJobs.getState().toast(`Added ${add.length} of ${c.name}'s ${total} pictures — H3 takes 9 pictures at most`, "info");
   return next;
 }
-const charEvery = () => { try { return localStorage.getItem("h3.charviews") !== "few"; } catch { return true; } };
+const charMode = (): CharMode => { try { const v = localStorage.getItem("h3.charviews"); return v === "few" ? "few" : v === "all" ? "all" : "sheet"; } catch { return "sheet"; } };
+
+/** "<Picture 1> is a character reference sheet of Mia… <Picture 2> is her face close-up. The woman in the video is Mia…" —
+ *  put in front of the prompt when a character's pictures are references and the prompt doesn't name their tags yet */
+export function identityLine(refs: Ref[], list: Character[], prompt: string): string {
+  const tags = tagsFor(refs);
+  const lines: string[] = [];
+  for (const c of list) {
+    const mine = refs.filter((r) => r.charId === c.id && r.media.kind === "image");
+    if (!mine.length || mine.some((r) => prompt.includes(tags[r.id]))) continue;
+    const who = /^m/i.test(c.gender ?? "") ? "man" : "woman";
+    const sheet = mine.find((r) => / — reference sheet$/.test(r.label));
+    const face = mine.find((r) => / — face close-up$/.test(r.label));
+    const rest = mine.filter((r) => r !== sheet && r !== face).map((r) => tags[r.id]);
+    const parts = [sheet && `${tags[sheet.id]} is a character reference sheet of ${c.name}, one ${who} shown from several angles.`, face && `${tags[face.id]} is ${c.name}'s face close-up.`,
+      rest.length && `${rest.join(", ")} ${rest.length > 1 ? "are all" : "is"} ${c.name}.`].filter(Boolean);
+    lines.push(`${parts.join(" ")} The ${who} in the video is ${c.name}: the same face, hair, outfit and body as in these pictures, in every frame.`);
+  }
+  return lines.join(" ");
+}
 
 /** pick a saved character: its pictures go in as references, named and described for the writer.
  *  "Every angle" sends the whole reference sheet (front, face, sides, back…) instead of just the front and face. */
@@ -318,8 +342,8 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
   const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && c.views.front);
   const toast = useJobs((s) => s.toast);
   const [adding, setAdding] = useState<string | null>(null);
-  const [every, setEvery] = useState(() => { try { return localStorage.getItem("h3.charviews") !== "few"; } catch { return true; } });
-  const pickEvery = (v: boolean) => { setEvery(v); try { localStorage.setItem("h3.charviews", v ? "all" : "few"); } catch { /* */ } };
+  const [every, setEvery] = useState<CharMode>(charMode);
+  const pickEvery = (v: CharMode) => { setEvery(v); try { localStorage.setItem("h3.charviews", v); } catch { /* */ } };
   const [shown, setShown] = useState(() => { try { return localStorage.getItem("h3.charpicker") !== "closed"; } catch { return true; } });
   const show = (v: boolean) => { setShown(v); try { localStorage.setItem("h3.charpicker", v ? "open" : "closed"); } catch { /* */ } };
   const has = (id: string) => refs.some((r) => r.charId === id);
@@ -341,14 +365,14 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between"><button onClick={() => show(false)} className="text-[12.5px] text-muted hover:text-ink">▾ Characters</button>
-        <span className="flex gap-1 text-[11.5px]">{[[true, "Every angle"], [false, "Front + face"]].map(([v, l]) => (
-          <button key={String(v)} onClick={() => pickEvery(v as boolean)} className={cx("press rounded-sm px-1.5 py-0.5", every === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink")}>{l as string}</button>))}</span></div>
+        <span className="flex gap-1 text-[11.5px]">{([["sheet", "Sheet + face", "Her one-picture reference sheet and her face close-up — best for H3 (falls back to every angle if she has no sheet)"], ["all", "Every angle", "Every angle as its own picture (up to 9)"], ["few", "Front + face", "Full body and face only"]] as const).map(([v, l, t]) => (
+          <button key={v} title={t} onClick={() => pickEvery(v)} className={cx("press rounded-sm px-1.5 py-0.5", every === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink")}>{l}</button>))}</span></div>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {list.map((c) => {
           const on = has(c.id);
           const pic = coverOf(c)!;
           return (
-            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every ? "every angle of the sheet" : "full body + face"}`}
+            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every === "sheet" ? (c.views.sheet ? "reference sheet + face" : "every angle (no sheet yet)") : every === "all" ? "every angle of the sheet" : "full body + face"}`}
               className={cx("press group relative flex w-[72px] shrink-0 flex-col items-stretch gap-1 rounded-sm border p-1 text-left transition-colors", on ? "border-accent bg-accent/10" : "border-line hover:border-muted")}>
               <span className="checker block h-[78px] overflow-hidden rounded-[2px]"><img src={viewUrl(pic)} alt="" className="h-full w-full object-cover" /></span>
               <span className="truncate px-0.5 text-[11.5px]">{adding === c.id ? "Adding…" : c.name}</span>

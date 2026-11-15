@@ -102,10 +102,13 @@ const SHEET_FACES = {
 
 export const FACE_PROMPT = "Close-up portrait of the exact same character from image 1: head and shoulders, facing the camera, neutral expression. Keep exactly the same face, hair, eyes, skin and outfit. Sharp, highly detailed.";
 
-/** the one-picture turnaround sheet: six views of the one character on a clean white background, for consistency in AI image and video work */
-export const SHEET_PROMPT = "Create a professional character turnaround reference sheet for the same single character, designed for AI image/video production consistency. Show the character in these six clearly separated views on one clean white background: full-body front view, full-body front-facing neutral pose, full-body 3/4/profile view, full-body back view, detailed front facial close-up, and detailed side-profile facial close-up. Keep the exact same character identity, face, facial proportions, hairstyle, body proportions, skin appearance, clothing, accessories, and overall appearance consistent across every view. Arrange all views cleanly with enough spacing between them. No text overlay.";
-/** the sheet's canvas (landscape, about 2 megapixels) */
-export const SHEET_CANVAS = { width: 1920, height: 1088 };
+/** the one-picture turnaround sheet, in the industry layout: five panels on a flat mid-grey studio background —
+ *  full body (front three-quarter), full body (back three-quarter), side profile bust, front bust, three-quarter bust */
+export const SHEET_PROMPT = "Character reference sheet of this exact same single person, keeping her face, hair, skin tone, body proportions, outfit and accessories exactly the same in every panel. One wide image, five panels side by side with clear empty space between them, on a plain flat mid-grey studio background, no text, no labels, no borders, no frames. Panel 1 (left): full body, standing straight, front three-quarter view, arms relaxed at the sides, the whole body visible from head to shoes. Panel 2: full body, back three-quarter view, same standing pose, head turned slightly away, showing the back of the hair and outfit. Panel 3: close side profile facing left, head and chest, neutral expression. Panel 4: straight-on front view, head to waist, looking directly at the camera, neutral relaxed expression, eyes level. Panel 5: three-quarter front view facing right, head to waist, neutral expression. Even soft studio lighting from the front, no harsh shadows, the same lighting in every panel, sharp focus, high detail on face, hair and fabric, consistent scale, a clean turnaround for 3D and animation reference.";
+/** the panels, left to right, as her views (the sheet is cut into them) */
+export const SHEET_ORDER = ["front", "back", "left", "face", "threeq"] as const;
+/** the sheet's canvas: wide (about 2.6:1, like a turnaround strip), about 2 megapixels */
+export const SHEET_CANVAS = { width: 2304, height: 896 };
 
 /** the sheet as ONE Krea 2 Edit picture: a blank white landscape canvas as picture 1, the character's front picture as the subject.
  *  Krea 2 Edit keeps the face, outfit and art style of a drawing too, so it serves anime characters as well. */
@@ -113,11 +116,11 @@ export function sheetGraph(c: Character, frontName: string, seed = newSeed()) {
   const e = useSettings.getState().s.edit;
   const anime = sheetStyle(c) === "anime";
   const style = anime ? " Keep exactly the same art style, line art, shading and colours as the character picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
-  const intro = "The first picture is a blank white canvas; the second picture is the character. ";
+  const intro = "The first picture is a blank canvas; the second picture is the person. ";
   const unet = c.sheet?.ckpt?.krea || undefined;
   const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
   return buildEdit({ ...editArgs(e, "krea"), loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
-    blank: SHEET_CANVAS, instruction: `${intro}${SHEET_PROMPT} These are six views of ONE single person, not six different people.${style}`, negative: "", resolution: 1440,
+    blank: SHEET_CANVAS, instruction: `${intro}${SHEET_PROMPT} These are five views of ONE single person, not five different people.${style}`, negative: "", resolution: 1440,
     prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
 }
 
@@ -126,7 +129,8 @@ export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "whit
   const front = await useCharacters.getState().asMedia(c.id, "front");
   if (!front) throw new Error("Add their front picture first (drop one in, or make it)");
   const run = useJobs.getState().run;
-  await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", single: true });
+  // cut into her angles too (side, back, face, three-quarter), so "Every angle" and the sheet + face pair both have them
+  await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", order: [...SHEET_ORDER] });
   await run("characters", `${c.name}: cut-out`, buildCutout(front.name, `studio/characters/${c.id}_cutout`), "characters:cutout", { charId: c.id, view: "cutout" });
 }
 

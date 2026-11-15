@@ -28,7 +28,7 @@ import { useSpeed } from "../lib/speed";
 import { h3ErosOn } from "../lib/models";
 import { stopMessage } from "../lib/adult";
 import { useCharacters } from "../lib/characters";
-import { CharacterPicker, charactersIn, withCharacter, WriterSetup } from "./Prompt";
+import { CharacterPicker, charactersIn, identityLine, withCharacter, WriterSetup } from "./Prompt";
 import { copyText } from "../lib/copy";
 
 /** "she dances in the rain and waves at the end" (plain words) vs a written H3 timeline */
@@ -246,7 +246,10 @@ export default function AnimateTab() {
     setBusy(true);
     setTimeout(() => setBusy(false), 600); // keep the button free: you can line up more while it plans
     try {
-      const prompt = await planFirst();
+      // a character among the references: who's who said first ("<Picture 1> is her reference sheet… the woman in the video is her")
+      const planned = await planFirst();
+      const id = ref ? identityLine(refs, useCharacters.getState().list, planned) : "";
+      const prompt = id ? `${id}\n${planned}` : planned;
       // a video made from a saved plan: counted on it
       import("../lib/plans").then(({ planOfText, updatePlan }) => { const pl = planOfText(prompt); if (pl) updatePlan(pl.id, { made: (pl.made ?? 0) + takes }); }).catch(() => {});
       const optsP = (seed: number, turbo: boolean, over: Partial<AnimateOpts> = {}) => opts(seed, turbo, { prompt, ...over });

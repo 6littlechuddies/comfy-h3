@@ -320,8 +320,8 @@ export async function uploadLoraWithToast(file: File): Promise<UploadedLora | nu
 }
 
 /** cut a turnaround sheet into its separate figures (left to right) */
-export async function splitSheet(from: FileRef, n = 4): Promise<FileRef[]> {
-  return (await j<{ parts: FileRef[] }>(await fetch("/studio-api/sheet/split", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, n }) }))).parts;
+export async function splitSheet(from: FileRef, n = 4, tight: number[] = []): Promise<FileRef[]> {
+  return (await j<{ parts: FileRef[] }>(await fetch("/studio-api/sheet/split", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, n, tight }) }))).parts;
 }
 
 // ------------------------------------------------------------------ CivitAI key (pasted in the Studio, kept with your settings)
