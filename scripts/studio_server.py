@@ -4827,6 +4827,14 @@ def _plain(v):
     return v
 
 
+# The site refuses a persona that sets how long her messages are ("keep it brief", "short replies", "match their
+# length"): length comes from her texting style on its side. Sentences like that are taken out before sending.
+_LENGTH_RULE = re.compile(r"\b(keep (it|things|messages|replies|your (replies|messages|answers))? ?(brief|short|concise)|brief(ly)?\b.{0,20}\b(repl|message|answer|text)|short (replies|messages|answers|texts)|(one|two|1|2|a few|1-2|one or two|one to (two|three)) (short )?(sentences?|lines?)( (max|at most|long))?|match (their|his|the other person's|the user's) (length|energy and length)|mirror (their|the user's) (length|message length)|(reply|replies|messages?|answers?|texts?) (are|stay|should be|kept) (short|brief|concise)|never (write|send) (long|walls of text)|no (long|walls of) (messages|paragraphs|text)|under \d+ words|concise)\b", re.I)
+def _no_length(text: str) -> str:
+    if not text or not _LENGTH_RULE.search(text): return text or ""
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return " ".join(x for x in parts if not _LENGTH_RULE.search(x)).strip()
+
 def _site_err(res) -> str:
     """the site's error in words: {"error": {"code", "message", "problems": [{field, message}]}} → "field: message · …" """
     if isinstance(res, dict):
@@ -5006,7 +5014,7 @@ async def _site_push(job: dict, d: dict):
                 "tags": site.get("tags") or [],
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
                             "greeting": site.get("greeting", ""), "appearance": appearance, "description": c.get("block") or ""},
-                "persona_prompt": site.get("persona", ""), "voice_notes": site.get("voice", ""),
+                "persona_prompt": _no_length(site.get("persona", "")), "voice_notes": site.get("voice", ""),
                 "provenance": {"ai_generated": True, "generator": gen, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
             }
             job["step"] = "character"
@@ -5044,7 +5052,8 @@ async def _site_push(job: dict, d: dict):
                 body = {"set_key": st_["set_key"], "title": title, "description": st_.get("description", ""), "tier": st_.get("tier", "free"),
                         # no price = the site decides (its own pricing rules)
                         "price_suggestion": st_.get("price") if st_.get("tier") == "premium" and st_.get("price") else None,
-                        "cover": items[0]["media_id"] if items else None, "items": items}
+                        # the set's cover has to be a picture ("cover: Must be a picture."): its first picture, never a video
+                        "cover": next((x["media_id"] for x in items if x["kind"] == "image"), None), "items": items}
                 job["step"] = f"set {st_.get('title') or st_['set_key']}"
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/sets/{quote(st_['set_key'])}", _plain(body))
                 if code not in (200, 201): raise RuntimeError(f"the site refused the set “{title}” ({code}): {_site_err(res)}")

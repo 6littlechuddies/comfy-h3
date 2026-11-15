@@ -5,15 +5,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { viewUrl, type FileRef } from "../lib/api";
-import { coverOf, describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo, type SiteSet, type View } from "../lib/characters";
+import { coverOf, DEFAULT_AGE, describe, isAdult, useCharacters, VIEWS, type Character, type SiteInfo, type SiteSet, type View } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { runWriter } from "../lib/writer";
 import { hasAge, stripAges } from "../lib/siteAuto";
 import { Btn, Icon, Slot, TextArea, TextIn, cx } from "./ui";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/copy";
+import { isFav, toggleFav, useFavs } from "../lib/favs";
+
+const StarIcon = ({ on, size = 15 }: { on: boolean; size?: number }) =>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={on ? "#F0A845" : "none"} stroke={on ? "#F0A845" : "currentColor"} strokeWidth="2" aria-hidden><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" /></svg>;
 
 const useSite = create<{ open: boolean; charId: string | null; folder: number | null }>(() => ({ open: false, charId: null, folder: null }));
+/** what each character is doing right now (writing, sending…) — kept when you close Your site, shown as a chip until done */
+const useSiteBusy = create<{ busy: Record<string, string>; total: number; done: number }>(() => ({ busy: {}, total: 0, done: 0 }));
+const mark = (id: string, t: string | null) => useSiteBusy.setState((s) => { const n = { ...s.busy }; if (t == null) delete n[id]; else n[id] = t; return { busy: n }; });
 export const openSiteLink = (charId?: string) => useSite.setState({ open: true, charId: charId ?? null, folder: null });
 const go = (charId: string | null, folder: number | null = null) => useSite.setState({ charId, folder });
 
@@ -32,10 +39,16 @@ async function writeProfile(c: Character, all = false) {
   return fillProfile(c, { all });
 }
 
-/** everything for one character: sort their pictures into sets, fill the blanks in their profile, send as a draft */
+/** a believable adult age when she still has the default one: 21–30, mostly early twenties */
+const randomAge = () => 21 + Math.floor(Math.random() ** 1.6 * 10);
+
+/** everything for one character, in order: (named already by the batch) an age, her profile, her hover loop, sent as a
+ *  draft. Her pictures aren't sorted into sets here — for now sets are made by hand in her folders. */
 async function doItAll(c: Character, connected: boolean, step: (t: string) => void): Promise<string> {
-  const { sortIntoSets, fillProfile } = await import("../lib/siteAuto");
-  const sorted = await sortIntoSets(c, { onStep: step }).catch((e) => { if (/No pictures/.test((e as Error).message)) return null; throw e; });
+  const { fillProfile } = await import("../lib/siteAuto");
+  const now0 = useCharacters.getState().list.find((x) => x.id === c.id)!;
+  if (!(Number(now0.age) >= 21) || Number(now0.age) === DEFAULT_AGE) useCharacters.getState().save({ ...now0, age: randomAge() });
+  step("Writing her profile…");
   await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: step });
   // no hover loop picked yet: her newest loop (Video board / Animate), so the card moves on the site
   const now = useCharacters.getState().list.find((x) => x.id === c.id)!;
@@ -44,11 +57,11 @@ async function doItAll(c: Character, connected: boolean, step: (t: string) => vo
     const best = (await loopCandidates(now).catch(() => [])).find((x) => x.loop);
     if (best) useCharacters.getState().save({ ...now, site: { ...now.site, loopFile: best.file } });
   }
-  if (!connected) return `${sorted ? `${sorted.sets} sets, ` : ""}profile filled — connect your site to send`;
+  if (!connected) return "named and written — connect your site to send";
   step("Sending…");
   const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, step);
   if (!r.ok) throw new Error(r.note);
-  return `${sorted ? `${sorted.sets} sets · ` : ""}sent as a draft (${r.note})`;
+  return `sent as a draft (${r.note})`;
 }
 
 /** after their cover photo changes: when they're already on your site (sent before), send the update as a draft again, in
@@ -112,13 +125,17 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
   const toast = useJobs((s) => s.toast);
   const live = useCharacters((s) => s.list);
   const [cands, setCands] = useState<Record<string, LoopPick[]>>({});
+  const favs = useFavs((s) => s.set);
+  // your ★ ones first, then loops, then the rest (newest first within each)
+  const ordered = (l: LoopPick[] | undefined) => l && [...l].sort((a, b) => Number(isFav(favs, b.file)) - Number(isFav(favs, a.file)));
   useEffect(() => { chars.forEach((c) => loopCandidates(c).then((l) => setCands((m) => ({ ...m, [c.id]: l }))).catch(() => setCands((m) => ({ ...m, [c.id]: [] })))); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const choose = (id: string, f: FileRef | undefined) => { const cur = useCharacters.getState().list.find((x) => x.id === id); if (cur) save({ ...cur, site: { ...cur.site, loopFile: f ? { filename: f.filename, subfolder: f.subfolder, type: f.type } : undefined } }); };
   const autoAll = (onlyEmpty: boolean) => {
     let n = 0;
     for (const c of chars) {
       const cur = useCharacters.getState().list.find((x) => x.id === c.id);
-      const first = cands[c.id]?.find((x) => x.loop) ?? cands[c.id]?.[0];
+      const l = cands[c.id] ?? [];
+      const first = l.find((x) => isFav(favs, x.file) && x.loop) ?? l.find((x) => isFav(favs, x.file)) ?? l.find((x) => x.loop) ?? l[0];
       if (!cur || !first || (onlyEmpty && cur.site?.loopFile)) continue;
       choose(c.id, first.file); n++;
     }
@@ -129,7 +146,7 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
       <div className="flex max-h-full w-full max-w-[1200px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
           <b className="text-[14px]">Hover loops · {chars.length} character{chars.length === 1 ? "" : "s"}</b>
-          <span className="text-[12px] text-muted">Loops from Video board / Animate come first. Hover to play, click to use. The site wants it to start on her full-body cover with small, calm motion.</span>
+          <span className="text-[12px] text-muted">Your ★ favourites come first, then loops from Video board / Animate. Hover to play, click to use. The site wants it to start on her full-body cover with small, calm motion.</span>
           <div className="ml-auto flex gap-2">
             <Btn onClick={() => autoAll(true)} title="Her newest loop, only for characters without a hover loop yet">Newest loop where empty</Btn>
             <Btn kind="primary" onClick={() => autoAll(false)} title="Her newest loop for every one of them (replaces the ones you picked)">Newest loop for all</Btn>
@@ -140,7 +157,7 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
           {chars.map((c0) => {
             const c = live.find((x) => x.id === c0.id) ?? c0;
             const cur = c.site?.loopFile;
-            const list = cands[c.id];
+            const list = ordered(cands[c.id]);
             return (
               <div key={c.id} className="flex items-stretch gap-3 border-b border-line/60 pb-3">
                 <div className="flex w-28 shrink-0 flex-col gap-1">
@@ -156,10 +173,16 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
                       const on = !!cur && cur.filename === x.file.filename && (cur.subfolder || "") === (x.file.subfolder || "");
                       return (
                         <button key={`${x.file.subfolder}/${x.file.filename}`} onClick={() => choose(c.id, x.file)} title={x.label ?? x.file.filename}
-                          className={cx("press relative aspect-[3/4] h-44 shrink-0 overflow-hidden border-2 bg-black", on ? "border-accent" : "border-transparent hover:border-muted")}>
+                          className={cx("group/tile press relative aspect-[3/4] h-44 shrink-0 overflow-hidden border-2 bg-black", on ? "border-accent" : isFav(favs, x.file) ? "border-[#F0A845]/60" : "border-transparent hover:border-muted")}>
                           <video src={viewUrl(x.file)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" />
                           <span className={cx("micro absolute left-1 top-1 px-1", x.loop ? "bg-accent text-accentink" : "bg-black/70 text-white")}>{x.loop ? "LOOP" : "VIDEO"}</span>
                           {on && <span className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center bg-accent text-accentink"><Icon name="check" size={13} /></span>}
+                          {/* ★ your favourites (click the star to change it) */}
+                          <span role="button" tabIndex={0} aria-label={isFav(favs, x.file) ? "Remove from favourites" : "Add to favourites"} title={isFav(favs, x.file) ? "Favourite — click to remove" : "Add to favourites"}
+                            onClick={(e) => { e.stopPropagation(); toggleFav(x.file); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleFav(x.file); } }}
+                            className={cx("absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center bg-black/70", isFav(favs, x.file) ? "text-[#F0A845]" : "text-white/70 opacity-0 hover:text-white group-hover/tile:opacity-100")}>
+                            <StarIcon on={isFav(favs, x.file)} />
+                          </span>
                         </button>
                       );
                     })}
@@ -264,7 +287,21 @@ function BulkNames({ chars, onClose }: { chars: Character[]; onClose: () => void
 
 export function SiteLink() {
   const open = useSite((s) => s.open);
-  if (!open) return null;
+  const busy = useSiteBusy((s) => s.busy);
+  const names = useCharacters((s) => s.list);
+  const ids = Object.keys(busy);
+  // closed while it's still working: a chip that says what it's doing, click to look
+  if (!open) {
+    if (!ids.length) return null;
+    const active = ids.find((id) => !/^Waiting/.test(busy[id])) ?? ids[0];
+    const who = names.find((c) => c.id === active)?.name ?? "";
+    return createPortal(
+      <button onClick={() => openSiteLink()} title="Your site is still working — click to see"
+        className="press fixed bottom-4 left-1/2 z-[56] flex max-w-[90vw] -translate-x-1/2 items-center gap-2 border border-accent bg-panel px-3.5 py-2 text-[12.5px] shadow-xl">
+        <span className="pulse text-accent">●</span><b>Your site</b><span className="truncate text-muted">{who}: {busy[active]}</span>
+        {ids.length > 1 && <span className="shrink-0 text-dim">· {ids.length - 1} more waiting</span>}
+      </button>, document.body);
+  }
   return createPortal(<Shell />, document.body);
 }
 
@@ -354,8 +391,11 @@ function Characters({ connected }: { connected: boolean }) {
   const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && c.views.front);
   const toast = useJobs((s) => s.toast);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState<Record<string, string>>({});
-  const mark = (id: string, t: string | null) => setBusy((b) => { const n = { ...b }; if (t == null) delete n[id]; else n[id] = t; return n; });
+  const busy = useSiteBusy((s) => s.busy);
+  // drag across the tick boxes to tick (or untick) many at once
+  const drag = useRef<boolean | null>(null);
+  useEffect(() => { const up = () => { drag.current = null; }; window.addEventListener("mouseup", up); return () => window.removeEventListener("mouseup", up); }, []);
+  const tick = (id: string, v: boolean) => setSel((s) => { const n = new Set(s); v ? n.add(id) : n.delete(id); return n; });
   const chosen = list.filter((c) => sel.has(c.id));
   const [loops, setLoops] = useState(false);
   const [naming, setNaming] = useState(false);
@@ -369,7 +409,23 @@ function Characters({ connected }: { connected: boolean }) {
   };
   const allInOne = async () => {
     let ok = 0;
-    for (const c of chosen) {
+    const ids = chosen.map((c) => c.id);
+    ids.forEach((id) => mark(id, "Waiting…"));
+    // 1. names for every one still named after her look, all at once (so they're all different), used as suggested
+    const unnamed = chosen.filter(autoNamed);
+    if (unnamed.length) {
+      unnamed.forEach((c) => mark(c.id, "Thinking of a name…"));
+      try {
+        for (const x of await suggestNames(unnamed)) {
+          const cur = useCharacters.getState().list.find((c) => c.id === x.id);
+          if (cur && x.name) useCharacters.getState().save({ ...cur, name: x.name });
+        }
+      } catch (e) { toast(`Names: ${(e as Error).message} — kept the old ones`, "bad"); }
+      unnamed.forEach((c) => mark(c.id, "Waiting…"));
+    }
+    for (const id of ids) {
+      const c = useCharacters.getState().list.find((x) => x.id === id);
+      if (!c) { mark(id, null); continue; }
       mark(c.id, "Starting…");
       try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t)); ok++; toast(`${c.name}: ${note}`, "good"); }
       catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
@@ -393,13 +449,13 @@ function Characters({ connected }: { connected: boolean }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several to do them together.</p>
+        <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several (drag across the boxes) to do them together.</p>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
-        <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Sort their pictures into sets, fill the blanks in their profile from their pictures, use her newest loop as the hover loop if none is picked, and send as drafts"><Icon name="sparkle" size={14} /> Sort, fill &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
       {naming && <BulkNames chars={chosen} onClose={() => setNaming(false)} />}
@@ -410,7 +466,7 @@ function Characters({ connected }: { connected: boolean }) {
           const sets = c.site?.sets ?? [];
           const on = sel.has(c.id);
           return (
-            <div key={c.id} className={cx("group relative flex flex-col overflow-hidden border transition-colors", on ? "border-accent" : "border-line hover:border-muted")}>
+            <div key={c.id} onMouseEnter={() => { if (drag.current != null) tick(c.id, drag.current); }} className={cx("group relative flex flex-col overflow-hidden border transition-colors", on ? "border-accent" : "border-line hover:border-muted")}>
               <button onClick={() => go(c.id)} className="relative aspect-[3/4] overflow-hidden bg-raised" aria-label={`Open ${c.name}`}>
                 <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
                 {/* her hover loop, played on hover the way the site's card does */}
@@ -418,10 +474,12 @@ function Characters({ connected }: { connected: boolean }) {
                 {c.site?.loopFile && <span className="micro pointer-events-none absolute right-2 top-2 bg-black/70 px-1 text-white">LOOP</span>}
                 {busy[c.id] && <span className="absolute inset-x-0 bottom-0 bg-black/80 px-2 py-1.5 text-[11.5px] text-ink"><span className="pulse">●</span> {busy[c.id]}</span>}
               </button>
-              <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center border border-line bg-black/70" title="Select">
-                <input type="checkbox" className="sr-only" checked={on} onChange={() => setSel((s) => { const n = new Set(s); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n; })} />
-                {on && <Icon name="check" size={13} className="text-accent" />}
-              </label>
+              {/* a big tick area: press and drag across the cards to tick (or untick) a row at once */}
+              <button role="checkbox" aria-checked={on} aria-label={`Select ${c.name}`} title="Select — press and drag across others to select them too"
+                onMouseDown={(e) => { e.preventDefault(); drag.current = !on; tick(c.id, !on); }} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); tick(c.id, !on); } }}
+                className="absolute left-0 top-0 z-10 flex h-12 w-12 cursor-pointer items-start justify-start p-2">
+                <span className={cx("flex h-7 w-7 items-center justify-center border", on ? "border-accent bg-accent text-accentink" : "border-line bg-black/70 text-transparent group-hover:text-white/60")}><Icon name="check" size={14} /></span>
+              </button>
               <div className="flex flex-col gap-0.5 px-2.5 py-2">
                 <span className="truncate text-[13.5px] font-semibold">{c.name}</span>
                 <span className="text-[11.5px] text-muted">{hasProfile(c) ? "Profile ready" : "No profile yet"} · {sets.length} folder{sets.length === 1 ? "" : "s"}{c.site?.loopFile ? " · loop" : ""}</span>

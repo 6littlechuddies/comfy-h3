@@ -134,6 +134,10 @@ const pick = <T,>(a: T[], n: number) => [...a].sort(() => Math.random() - 0.5).s
 /** hometowns that are worn out (or already used by your other characters) — kept out of new profiles */
 const STALE = /\b(seattle|portland|tacoma|olympia|spokane|bellingham|pacific northwest|pnw|west coast|oregon|washington state|puget sound)\b/i;
 
+const LENGTH_RULE = /\b(keep (it|things|messages|replies|your (replies|messages|answers))? ?(brief|short|concise)|short (replies|messages|answers|texts)|(one|two|1|2|a few|1-2|one or two|one to (two|three)) (short )?(sentences?|lines?)( (max|at most|long))?|match (their|his|the other person's|the user's) (length|energy and length)|(reply|replies|messages?|answers?|texts?) (are|stay|should be|kept) (short|brief|concise)|under \d+ words|concise)\b/i;
+/** sentences that set how long her messages are — the site refuses them in a persona */
+export const stripLength = (t: string) => (LENGTH_RULE.test(t) ? t.split(/(?<=[.!?])\s+/).filter((x) => !LENGTH_RULE.test(x)).join(" ").trim() : t);
+
 /** the random starting points for one profile: places (not ones your other characters use), typing styles, inner details */
 function sparkNote(othersText: string): string {
   const free = PLACES.filter((p) => !othersText.toLowerCase().includes(p.split(/[,(]/)[0].trim().toLowerCase()));
@@ -145,7 +149,7 @@ function sparkNote(othersText: string): string {
 }
 
 /** fill the profile from their look + their pictures' prompts + set titles; what you already wrote stays unless `all` */
-export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void } = {}) {
+export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void; again?: boolean } = {}): Promise<{ pictures: number; filled: number }> {
   o.onStep?.("Reading their pictures…");
   const pics = (await charPictures(c)).slice(-60);
   const prompts = (await pool(pics, 6, (p) => promptOf(p.file, false))).filter(Boolean);
@@ -179,10 +183,11 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   o.onStep?.("Writing the profile…");
   const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: notes + (images?.length ? `\n\nPICTURES ATTACHED: ${images.length} photos of ${c.name} (the first is their reference look). Read them closely — style, setting, mood, clothes, the vibe of their photo feed — and let the profile match what fans will see.` : "") },
     { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) });
-  let d = json(raw) as Record<string, unknown>;
+  let d: Record<string, unknown>;
+  try { d = json(raw) as Record<string, unknown>; } catch (e) { if (o.again) throw e; d = {}; } // cut off / not JSON: written again below
   // still the Pacific Northwest (and the owner didn't ask for it): written once more with that said plainly
   const stale = (x: Record<string, unknown>) => FIELDS.some((k) => typeof x[k] === "string" && STALE.test(x[k] as string) && !STALE.test(site.direction ?? "") && !(filled as readonly string[]).includes(k));
-  if (stale(d)) {
+  if (Object.keys(d).length && stale(d)) {
     o.onStep?.("Writing the profile again (another hometown)…");
     const again = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: `${notes}\n\nNOT the Pacific Northwest: no Seattle, Portland, Oregon, Washington state or "west coast" anywhere. Use one of the PLACES above.` },
       { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) }).catch(() => "");
@@ -195,8 +200,17 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   for (const k of FIELDS) if (o.all || !(s0[k] ?? "").trim()) next[k] = str(k) || s0[k];
   // the site refuses any stated age (it sets the age itself): taken out of everything, whoever wrote it
   for (const k of FIELDS) if (next[k]) next[k] = stripAges(next[k]!);
+  // …and a persona that sets her message length ("keep it brief"): the site sets length from her texting style
+  if (next.persona) next.persona = stripLength(next.persona);
   if (o.all || !s0.tags?.length) next.tags = Array.isArray(d.tags) ? (d.tags as unknown[]).map(String).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10) : s0.tags;
   useCharacters.getState().save({ ...cur, site: next });
+  // the site won't take her without a bio and a persona: an answer that missed them (cut off, or not JSON) is written once more
+  const missing = (["bio", "persona", "greeting"] as const).filter((k) => !(next[k] ?? "").trim());
+  if (missing.length) {
+    if (o.again) throw new Error(`The writer left her ${missing.join(", ")} empty twice — write it in her profile, or try again`);
+    o.onStep?.(`Writing again (the ${missing.join(", ")} came back empty)…`);
+    return fillProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { ...o, all: false, again: true });
+  }
   return { pictures: uniq.length, filled: FIELDS.filter((k) => next[k] !== s0[k]).length };
 }
 
