@@ -495,6 +495,38 @@ SMALL_SKIP = {"video", "writer_xl", "autoprompter", "eros"}
 DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend").split(",") if x.strip()}
 
 
+# Presets: what this rental is for. Its groups come first (in this order) and every other group waits as "Later" — one
+# press on Download now (or opening a tab that needs it) still brings any of them in. Chosen in the Studio (the start
+# screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
+# "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
+PRESETS = {
+    "real":       {"label": "Realistic pictures",          "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
+    "anime":      {"label": "Anime pictures",              "groups": ["anime", "animeref", "writer", "sam"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "video", "sam", "qwen", "smooth", "writer_xl", "qwen_full"]},
+    "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth", "writer_xl"]},
+    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "animeref", "writer", "video", "sam", "smooth", "writer_xl"]},
+    "all":        {"label": "Everything",                  "groups": []},
+}
+
+
+def preset_id() -> str:
+    p = str(switches().get("preset") or os.environ.get("H3_PRESET", "")).strip().lower()
+    return p if p in PRESETS and p != "all" else ""
+
+
+def preset_groups() -> list[str]:
+    p = preset_id()
+    return PRESETS[p]["groups"] if p else []
+
+
+def by_preset(groups: list) -> list:
+    """the preset's groups first, in its order (its first one opens the Studio), then your LoRAs, then the rest"""
+    want = preset_groups()
+    if not want: return groups
+    first = [g for x in want for g in groups if g["id"] == x]
+    return first[:1] + [g for g in groups if g["id"] == "library"] + first[1:] + [g for g in groups if g not in first and g["id"] != "library"]
+
+
 # Smart start: your last rentals' usage log (kept on your drive) says which model groups you actually load. Groups you
 # use come first, most used first — the smallest one you use regularly opens the Studio — and groups no job of yours
 # has loaded wait as "Later" (one press on "Download now", or opening the tab that needs it, brings one in). It needs
@@ -542,6 +574,11 @@ def queue_order(groups, nxt=()) -> list:
     """the download order: the first group, then what you asked for next, then the rest in order (models.txt, or by use
     on a smart start) — on a small card the groups it can't run go last, unless your usage log shows you do run them"""
     rest = [g for g in groups[1:] if g["id"] not in nxt]
+    want = preset_groups()
+    if want:  # a preset (even one changed mid-rental): its groups lead, in its order
+        # your LoRAs right after the first group (as without a preset), then the preset's groups, then the rest
+        rest = sorted(rest, key=lambda g: -1 if g["id"] == "library" else want.index(g["id"]) if g["id"] in want else len(want))
+        return groups[:1] + [g for x in nxt for g in groups if g["id"] == x] + rest
     small = {x for x in SMALL_SKIP if START["uses"].get(x, 0) <= 0}
     if SMALL_GPU: rest = [g for g in rest if g["id"] not in small] + [g for g in rest if g["id"] in small]
     return groups[:1] + [g for x in nxt for g in groups if g["id"] == x] + rest
@@ -557,7 +594,10 @@ DISK_RESERVE = int(float(os.environ.get("DISK_RESERVE_GB", "15")) * 2**30)
 def later_ids(groups) -> set[str]:
     d = switches()
     small = SMALL_SKIP if SMALL_GPU and os.environ.get("H3_SMALL_LATER") == "1" else set()
-    ids = (SKIP | DEFAULT_LATER | small | START["unused"] | set(d.get("later") or [])) - set(d.get("now") or [])
+    want = preset_groups()
+    # with a preset, what it doesn't list waits (instead of the smart start's guess); without one, as before
+    outside = {g["id"] for g in groups if g["id"] not in want and g["id"] != "library"} if want else START["unused"]
+    ids = (SKIP | DEFAULT_LATER | small | outside | set(d.get("later") or [])) - set(d.get("now") or [])
     vram = GPU.get("vram_mb", 0)
     ids |= {g for g, need in BIG_ONLY.items() if 0 < vram < need}
     if groups: ids.discard(groups[0]["id"])
@@ -636,6 +676,7 @@ def write(groups, rate_now=0.0, rate_avg=0.0, note=""):
                            "pct": 100 if g["state"] == "done" else (min(99, int(gd * 100 / gt)) if gt else 0), "left_s": left})
     s = {"active": any(g["state"] in ("waiting", "downloading", "checking") for g in groups),
          "first": groups[0]["id"] if groups else None,
+         "preset": preset_id() or "all", "presets": [{"id": k, "label": v["label"], "groups": v["groups"]} for k, v in PRESETS.items()],
          "groups": out_groups, "total_mb": total // 1048576, "done_mb": done // 1048576, "gpu": {**GPU, "images_only": SMALL_GPU},
          "pct": int(done * 100 / total) if total else (100 if all(g["state"] in ("done", "later") for g in groups) else 0),
          "mbps": round(rate_now), "avg_mbps": round(rate_avg),
@@ -676,7 +717,11 @@ def main() -> int:
     write(groups, note="checking model files")
     with cf.ThreadPoolExecutor(16) as ex:
         list(ex.map(resolve, [f for g in groups for f in g["files"]]))
-    prof = start_profile(groups)
+    prof = {} if preset_id() else start_profile(groups)
+    if preset_id():
+        groups[:] = by_preset(groups)
+        log(f"preset “{PRESETS[preset_id()]['label']}”: " + ", ".join(g["id"] for g in groups if g["id"] in preset_groups())
+            + " first · the rest waits as Later (Download now brings any of them in)")
     if prof:
         groups[:] = by_use(groups, prof)
         if START["unused"]:
@@ -714,6 +759,7 @@ def main() -> int:
             g["why"] = (f"not enough disk — needs {nd / 2**30:.0f} GB, only {lf / 2**30:.0f} GB free after the {DISK_RESERVE / 2**30:.0f} GB kept for your results. "
                         "Rent with a bigger disk, or press Later on a group you don't use (Storage page shows which)" if g["id"] in full
                         else f"needs a {BIG_ONLY[g['id']] // 1000 + 4} GB+ card" if g["id"] in BIG_ONLY and 0 < vram < BIG_ONLY[g["id"]]
+                        else f"not in your “{PRESETS[preset_id()]['label']}” preset — press Download now if you want it" if preset_id() and g["id"] not in preset_groups() and g["id"] not in DEFAULT_LATER
                         else f"not used on your last {START['rentals']} rentals — press Download now if you want it" if g["id"] in START["unused"] else None) if g["later"] else None
             if g["id"] in full and g["id"] not in NOSPACE_LOGGED: NOSPACE_LOGGED.add(g["id"]); log(f"{g['label']}: waiting — not enough disk")
     def check_groups(final=False):

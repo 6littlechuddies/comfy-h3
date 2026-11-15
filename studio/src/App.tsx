@@ -45,7 +45,7 @@ import { SelfCheck, openSelfCheck } from "./components/SelfCheck";
 import { SiteLink, openSiteLink } from "./components/SiteLink";
 import { LibraryPick } from "./components/LibraryPick";
 import { Viewer, openViewer, type ViewItem } from "./components/Viewer";
-import { setLater, useDownloads, type Group } from "./lib/downloads";
+import { setLater, setPreset, useDownloads, type Group } from "./lib/downloads";
 import { getHttpsLink } from "./lib/api";
 import { isFav, useFavs } from "./lib/favs";
 
@@ -449,6 +449,28 @@ function LaterSwitch({ g }: { g: Group }) {
   );
 }
 
+/** what this rental is for: Realistic pictures / Anime / + video… — its models first, the rest wait (one press brings any in) */
+function PresetPick() {
+  const presets = useDownloads((s) => s.presets);
+  const cur = useDownloads((s) => s.preset) ?? "all";
+  const toast = useJobs((s) => s.toast);
+  if (!presets?.length) return null;
+  const pick = async (id: string) => {
+    if (id === cur) return;
+    try { await setPreset(id); toast(id === "all" ? "Downloading everything again" : `Set up for ${presets.find((p) => p.id === id)?.label.toLowerCase()} — its models come first, the rest wait (Download now brings any of them in). Kept for your next rentals.`, "good"); }
+    catch (e) { toast((e as Error).message, "bad"); }
+  };
+  return (
+    <div className="mb-2.5 flex flex-col gap-1">
+      <span className="text-[11.5px] text-muted">This rental is for</span>
+      <div className="flex flex-wrap gap-1">
+        {presets.map((p) => <button key={p.id} onClick={() => pick(p.id)} aria-pressed={cur === p.id} title={p.groups.length ? `Downloads first: ${p.groups.join(", ")} — the rest waits as Later` : "Every model group (smart order)"}
+          className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", cur === p.id && "on")}>{p.label}</button>)}
+      </div>
+    </div>
+  );
+}
+
 function DownloadGroups() {
   const groups = useDownloads((s) => s.groups);
   const active = useDownloads((s) => s.active);
@@ -457,13 +479,14 @@ function DownloadGroups() {
   return (
     <div className="mb-3">
       <p className="lbl mb-1.5 flex items-center">Models{active && <span className="micro ml-auto text-dim">{mbps} MB/S</span>}</p>
+      <PresetPick />
       <div className="flex flex-col gap-1.5">
         {groups.map((g) => (
           <div key={g.id} className="flex items-center gap-2.5 text-[12.5px]">
             <span className={cx("h-2 w-2 shrink-0 rounded-full", g.state === "done" ? "bg-good" : g.state === "error" ? "bg-bad" : g.state === "downloading" ? "bg-accent pulse" : "bg-dim")} />
             <span className="w-40 shrink-0 truncate text-ink">{g.label}</span>
             <div className="h-1 flex-1 bg-raised2"><div className={cx("h-full", g.state === "done" ? "bg-good" : "stripes")} style={{ width: `${g.state === "done" ? 100 : g.pct}%` }} /></div>
-            <span className={cx("micro w-16 shrink-0 text-right", g.why || g.state === "error" ? "text-hot" : "text-dim")} title={g.why ?? g.error ?? undefined}>{g.state === "done" ? "READY" : g.why ? (/disk/.test(g.why) ? "NO ROOM" : "BIG CARD") : g.state === "skipped" || g.state === "later" ? "LATER" : g.state === "error" ? "FAILED" : g.state === "downloading" ? `${g.pct}%` : "IN LINE"}</span>
+            <span className={cx("micro w-16 shrink-0 text-right", g.why || g.state === "error" ? "text-hot" : "text-dim")} title={g.why ?? g.error ?? undefined}>{g.state === "done" ? "READY" : g.why ? (/disk/.test(g.why) ? "NO ROOM" : /card/.test(g.why) ? "BIG CARD" : "LATER") : g.state === "skipped" || g.state === "later" ? "LATER" : g.state === "error" ? "FAILED" : g.state === "downloading" ? `${g.pct}%` : "IN LINE"}</span>
             <LaterSwitch g={g} />
           </div>
         )).flatMap((row, i) => { const g = groups[i]; return g.state === "error" && g.error ? [row, <p key={`${g.id}-why`} className="-mt-1 ml-[18px] text-[11px] leading-snug text-hot/90">{g.error.split(" — ").slice(1).join(" — ") || g.error}</p>] : [row]; })}

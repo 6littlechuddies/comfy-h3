@@ -41,7 +41,9 @@ export const kreaBoostInstalled = () => boostNode;
 
 export type GroupId = "anime" | "image" | "edit" | "writer" | "video" | string;
 export interface Group { id: GroupId; label: string; state: "checking" | "waiting" | "downloading" | "done" | "error" | "skipped" | "later"; pct: number; left_s: number; total_mb: number; done_mb: number; error?: string | null; can_later?: boolean; /** why it waits: no disk room, or the card is too small */ why?: string | null }
-interface Downloads { /** the Studio is running on your own PC (not a rental) */ local?: boolean; known: boolean; active: boolean; groups: Group[]; mbps: number; pct: number; left_s: number; gpu?: { name?: string; vram_mb?: number; images_only?: boolean } }
+export interface Preset { id: string; label: string; groups: string[] }
+interface Downloads { /** what this rental is for (download preset) and the choices */ preset?: string; presets?: Preset[];
+  /** the Studio is running on your own PC (not a rental) */ local?: boolean; known: boolean; active: boolean; groups: Group[]; mbps: number; pct: number; left_s: number; gpu?: { name?: string; vram_mb?: number; images_only?: boolean } }
 
 export const useDownloads = create<Downloads>(() => ({ known: false, active: false, groups: [], mbps: 0, pct: 100, left_s: 0 }));
 
@@ -53,7 +55,7 @@ async function poll() {
     if (r.ok) {
       const d = await r.json();
       const before = useDownloads.getState().groups;
-      useDownloads.setState({ known: true, active: !!d.active, groups: d.groups ?? [], mbps: d.mbps ?? 0, pct: d.pct ?? 0, left_s: d.left_s ?? -1, gpu: d.gpu, local: !!d.local });
+      useDownloads.setState({ known: true, active: !!d.active, groups: d.groups ?? [], mbps: d.mbps ?? 0, pct: d.pct ?? 0, left_s: d.left_s ?? -1, gpu: d.gpu, local: !!d.local, preset: d.preset, presets: d.presets });
       // on your own PC there's no local prompt writer: prompts come from your Grok tab unless you've picked something else
       if (d.local) { try { if (!localStorage.getItem("h3.writer")) localStorage.setItem("h3.writer", "outside"); } catch { /* */ } }
       syncKreaTE(d.groups ?? []);
@@ -77,6 +79,15 @@ export async function setLater(id: GroupId, later: boolean | "next"): Promise<vo
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || "That didn't work — try again in a moment");
   clearTimeout(timer); timer = setTimeout(poll, 2500); // show the change as soon as the downloader picks it up
+}
+
+/** what this rental is for: its model groups download first, the rest wait as Later (kept for your next rentals) */
+export async function setPreset(id: string): Promise<void> {
+  const r = await fetch("/studio-api/downloads/preset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preset: id }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "That didn't work — try again in a moment");
+  useDownloads.setState({ preset: id });
+  clearTimeout(timer); timer = setTimeout(poll, 2500);
 }
 
 /** the model groups an Edit engine needs: Krea 2 Edit also uses the Krea 2 model, text encoder and VAE */

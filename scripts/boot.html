@@ -77,6 +77,13 @@
   .file span:last-child { text-align: right; color: var(--dim); }
   .groups { margin-top: 22px; display: grid; gap: 7px; }
   .groups:empty { display: none; }
+  .presets { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .presets:empty { display: none; }
+  .presets .q { font: 500 12px/1.4 var(--sans, inherit); color: var(--muted); width: 100%; }
+  .presets button { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: none;
+    border: 1px solid var(--line, #333); padding: 7px 9px; cursor: pointer; }
+  .presets button:hover { color: var(--ink); border-color: var(--muted); } .presets button.on { color: var(--acid); border-color: var(--acid); }
+  .presets button:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; } .presets button[disabled] { opacity: .5; cursor: wait; }
   .grp { display: grid; grid-template-columns: 14px 1fr 160px 70px 128px; gap: 10px; align-items: center; font-size: 13px; }
   .grp .acts { justify-self: end; display: flex; gap: 6px; }
   .grp .act { font: 500 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
@@ -144,6 +151,7 @@
     <li data-k="ready"><span class="micro">05</span>Ready</li>
   </ol>
 
+  <div class="presets" id="presets"></div>
   <div class="groups" id="groups"></div>
 
   <section class="imp" id="imp" aria-live="polite">
@@ -234,11 +242,30 @@
     } catch { alert("Couldn't reach the machine — try again in a moment."); }
     setTimeout(() => { delete pending[g]; }, 4000);  // the downloader picks it up within a few seconds
   });
+  let presetBusy = false;
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("#presets button[data-p]");
+    if (!b || presetBusy) return;
+    presetBusy = true; b.disabled = true;
+    try {
+      const r = await fetch("/studio-api/downloads/preset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preset: b.dataset.p }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "That didn't work — try again in a moment."); }
+    } catch { alert("Couldn't reach the machine — try again in a moment."); }
+    setTimeout(() => { presetBusy = false; }, 3000);
+  });
+  function renderPresets(dl) {
+    const el = $("presets");
+    if (!dl || !Array.isArray(dl.presets) || !dl.presets.length) { el.innerHTML = ""; return; }
+    const cur = dl.preset || "all";
+    el.innerHTML = `<span class="q">What's this rental for? Its models download first; the rest wait until you need them (kept for next time).</span>`
+      + dl.presets.map((p) => `<button data-p="${p.id}" class="${p.id === cur ? "on" : ""}"${presetBusy ? " disabled" : ""} title="${p.groups.length ? `First: ${p.groups.join(", ")}` : "Every model group"}">${p.label}</button>`).join("");
+  }
   function renderGroups(dl) {
+    renderPresets(dl);
     const el = $("groups");
     if (!dl || !Array.isArray(dl.groups) || !dl.groups.length) { el.innerHTML = ""; return; }
     el.innerHTML = dl.groups.map((g, i) => {
-      const st = g.state === "done" ? "Ready" : g.why ? (/disk/.test(g.why) ? "No room" : "Big card") : g.state === "later" || g.state === "skipped" ? "Later" : g.state === "error" ? "Failed" : g.state === "downloading" ? `${g.pct}%` : g.state === "checking" ? "Checking" : "In line";
+      const st = g.state === "done" ? "Ready" : g.why ? (/disk/.test(g.why) ? "No room" : /card/.test(g.why) ? "Big card" : "Later") : g.state === "later" || g.state === "skipped" ? "Later" : g.state === "error" ? "Failed" : g.state === "downloading" ? `${g.pct}%` : g.state === "checking" ? "Checking" : "In line";
       const w = g.state === "done" ? 100 : g.pct || 0;
       const busy = pending[g.id] ? " disabled" : "";
       const btn = (what, label, cls, title) => `<button class="act${cls}" data-g="${g.id}" data-do="${what}"${busy} title="${title}">${label}</button>`;

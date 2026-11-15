@@ -282,9 +282,10 @@ function ClassicEdit() {
           <p className="-mt-2 text-[12px] leading-relaxed text-dim">{info.label} redraws Picture 1 from your description, keeping its layout. Low = touch-up, high = mostly new. Paint an area to redraw only that part. To copy a pose from another picture, switch to Krea 2.</p>
         </>}
         {mask && (
-          <div className="card flex items-center gap-3 rounded-xl border border-line p-2.5">
-            <img src={mask.url} alt="Painted area" className="h-12 w-12 rounded border border-line object-contain" title="White = the part that will change" />
-            <div className="flex-1 text-[13px]">Only the {mask.from === "words" ? "selected" : "painted"} area changes<div className="flex gap-3 text-xs"><button className="text-accent hover:underline" onClick={() => setPainting(true)}>repaint</button><button className="text-muted hover:text-ink" onClick={() => setMask(null)}>clear</button></div></div>
+          <div className="card flex flex-col gap-2 rounded-xl border border-line p-2.5">
+            {/* picture 1 with what SAM found (or what you painted) shaded orange — the part that will change */}
+            {pics[0] ? <MaskPreview pic={pics[0].url} mask={mask.url} /> : <img src={mask.url} alt="Painted area" className="h-12 w-12 rounded border border-line object-contain" title="White = the part that will change" />}
+            <div className="flex-1 text-[13px]">Only the <span className="text-[#ff8a1f]">orange</span> {mask.from === "words" ? "selected" : "painted"} area changes<div className="flex gap-3 text-xs"><button className="text-accent hover:underline" onClick={() => setPainting(true)}>repaint</button><button className="text-muted hover:text-ink" onClick={() => setMask(null)}>clear</button></div></div>
           </div>
         )}
         {mask && <Slider label="Painted edge softness" min={2} max={40} value={soft} show={`${soft}px`} onChange={setSoft} />}
@@ -362,4 +363,20 @@ async function editWithPlace(pics: Media[], place: Media, words: string) {
   useSettings.getState().set("edit", { chat: true });
   useJobs.getState().toast("Three pictures go to Edit chat (Qwen takes all three) — follow it there.", "info", "edit");
   ec.send(text).catch(() => {});
+}
+
+/** a picture with its mask shaded orange (white in the mask = shaded), like SAM's own previews; click to see it big */
+export function MaskPreview({ pic, mask, className }: { pic: string; mask: string; className?: string }) {
+  const [big, setBig] = useState(false);
+  const layer = (cls: string) => (
+    <span className={cx("relative block", cls)}>
+      <img src={pic} alt="" className="block h-full w-full object-contain" />
+      <span aria-hidden className="pointer-events-none absolute inset-0" style={{ background: "rgba(255,122,24,.6)", mixBlendMode: "normal",
+        WebkitMaskImage: `url(${mask})`, maskImage: `url(${mask})`, WebkitMaskSize: "100% 100%", maskSize: "100% 100%", maskMode: "luminance" } as React.CSSProperties} />
+    </span>
+  );
+  return <>
+    <button onClick={() => setBig(true)} title="The orange part is what will change — click to see it bigger" className={cx("press self-start overflow-hidden rounded border border-line", className)}>{layer("h-44")}</button>
+    {big && <div className="fade-in fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-6" onMouseDown={() => setBig(false)}>{layer("max-h-full h-[85vh]")}</div>}
+  </>;
 }

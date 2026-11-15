@@ -4546,6 +4546,30 @@ async def downloads_later(req):
     return web.json_response({"ok": True, "changed": sorted(touched), "later": later, "next": nxt})
 
 
+async def downloads_preset(req):
+    """{preset} — what this rental is for (realistic / anime / + video…): its model groups come first and the rest wait as
+    Later; kept for your next rentals. Your own Later / Download now presses start over so the preset decides."""
+    d = await req.json()
+    pid = str(d.get("preset") or "all").strip().lower()
+    if not re.fullmatch(r"[a-z_]{2,20}", pid): return web.json_response({"error": "No such preset"}, status=400)
+    try: cur = json.load(open(LATER_FILE))
+    except (OSError, ValueError): cur = {}
+    out = {k: v for k, v in cur.items() if k not in ("later", "now", "next")}
+    out["preset"] = pid
+    os.makedirs(STATE, exist_ok=True)
+    tmp = LATER_FILE + ".tmp"
+    with open(tmp, "w") as f: json.dump(out, f)
+    os.replace(tmp, LATER_FILE)
+    alive = False
+    try: os.kill(int(open(os.path.join(H3_RUN, "downloader.pid")).read().strip()), 0); alive = True
+    except (OSError, ValueError): pass
+    if not alive and os.path.exists("/opt/h3/downloader.py"):
+        env = {**os.environ, "COMFY_DIR": COMFY_DIR, "H3_RUN": H3_RUN, "SPEED_CHECK_SECONDS": "999999"}
+        subprocess.Popen(["python", "/opt/h3/downloader.py", "/opt/h3/models.txt"], env=env, start_new_session=True,
+                         stdout=open("/var/log/downloader.log", "a"), stderr=subprocess.STDOUT)
+    return web.json_response({"ok": True, "preset": pid})
+
+
 # ------------------------------------------------------------------ voice: speech → text on this rental (Whisper)
 WHISPER_ID = os.environ.get("STUDIO_WHISPER", "openai/whisper-large-v3-turbo")
 WHISPER = {"pipe": None, "used": 0.0, "lock": None}
@@ -5528,6 +5552,7 @@ def main():
         web.post("/studio-api/last-frame", last_frame),
         web.post("/studio-api/media-meta", media_meta), web.post("/studio-api/workflow/save", workflow_save),
         web.post("/studio-api/downloads/later", downloads_later),
+        web.post("/studio-api/downloads/preset", downloads_preset),
         web.get("/studio-api/models", my_models), web.post("/studio-api/models/forget", forget_model),
         web.post("/studio-api/transcribe", transcribe),
         web.get("/studio-api/characters/export", characters_export), web.post("/studio-api/characters/import", characters_import),
