@@ -207,6 +207,7 @@ export default function App() {
       <LibraryPick />
       <AnonFrame />
       <SaveEndChip />
+      <DriveWarn />
       <PictureMenuHost />
       <SelectionBar />
       <RecipeEditorHost />
@@ -941,6 +942,24 @@ function SaveEndChip() {
   if (!watching) return null;
   return createPortal(<div className="fixed bottom-14 left-1/2 z-[95] flex -translate-x-1/2 items-center gap-2 border border-accent bg-panel px-4 py-2 text-[13px] shadow-xl">
     <span className="pulse text-accent">●</span>{st?.state === "ending" ? "Saved — the rental is shutting down. You can close this tab." : "Saving everything to your drive… (you can close this tab — it finishes and shuts down by itself)"}</div>, document.body);
+}
+
+/** a full drive (or a backup that keeps failing) stays on screen until it's fixed: nothing new is being saved */
+function DriveWarn() {
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    const check = () => fetch("/studio-api/proton").then((r) => r.json()).then((d) => setErr(d?.on && d.state === "error" ? String(d.error || "") : "")).catch(() => {});
+    check(); const t = setInterval(check, 120_000); return () => clearInterval(t);
+  }, []);
+  if (!err) return null;
+  const full = /quota|full/i.test(err);
+  return createPortal(
+    <div className="fixed inset-x-0 bottom-0 z-[94] flex items-center gap-3 border-t border-bad bg-[#2a0d0b] px-4 py-2 text-[12.5px]">
+      <span className="font-bold text-bad">{full ? "YOUR GOOGLE DRIVE IS FULL" : "BACKUP TO YOUR DRIVE FAILED"}</span>
+      <span className="min-w-0 flex-1 truncate text-ink/80" title={err}>{full ? "Nothing new is being saved — characters, names and profiles made on this rental are only here. Free space (Storage → empty the drive's trash, prune exports, delete old results) or add storage, then ⋯ → Send to drive now." : err}</span>
+      <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => import("./components/Storage").then((m) => m.openStorage()).catch(() => {})}>Storage</button>
+      <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => fetch("/studio-api/proton?force=1", { method: "POST" }).then(() => useJobs.getState().toast("Trying the drive again…", "info"))}>Try again</button>
+    </div>, document.body);
 }
 
 /** the frame round the window while anonymous mode is on */
