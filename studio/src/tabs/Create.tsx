@@ -354,7 +354,7 @@ export default function CreateTab() {
         <FaceFix on={!!c.faceFix} strength={c.faceStrength ?? 0.45} onChange={(p) => set({ ...(p.on != null ? { faceFix: p.on } : {}), ...(p.strength != null ? { faceStrength: p.strength } : {}) })} />
         <TextArea label="Negative prompt · never show" help="negative" rows={2} value={c.negative} onChange={(v) => set({ negative: v })} />
         <button className="-mt-2 self-start text-[12px] text-muted hover:text-ink" title="The words that keep coming back in the negatives of your results (and the CivitAI posts you recreated) — used here, and kept as your default"
-          onClick={() => import("../lib/negatives").then(({ commonNegatives }) => { const r = commonNegatives(); if (!r.text) return useJobs.getState().toast("Not enough negatives in your results yet to find common ones", "info"); set({ negative: r.text }); useJobs.getState().toast(`Your common negatives, from ${r.from} results — kept as the default from now on`, "good"); })}>
+          onClick={() => import("../lib/negatives").then(({ commonNegativesAll }) => commonNegativesAll()).then((r) => { if (!r.text) return useJobs.getState().toast("Not enough negatives in your results yet to find common ones", "info"); set({ negative: r.text }); useJobs.getState().toast(`Your common negatives, from ${r.from} results — kept as the default from now on`, "good"); })}>
           Use my most common negatives</button>
         {cardsN > 1 && !anime && (
           <Seg label={`Several cards (${cardsN})`} value={c.splitCards !== false ? "split" : "one"} onChange={(v) => set({ splitCards: v === "split" })}

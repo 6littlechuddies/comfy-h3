@@ -3026,6 +3026,41 @@ async def _proton_loop():
         await asyncio.sleep(PROTON_EVERY)
 
 
+END = {"state": "", "error": "", "at": 0.0}
+
+
+async def _save_and_end(end: bool):
+    """everything to your drive (characters, settings, results, LoRA list) from the rental's fast connection — then, only if
+    that worked and you asked, the rental is destroyed so billing stops. A phone alert says how it went."""
+    END.update(state="saving", error="", at=time.time())
+    try:
+        await proton_sync(full=True, force=True)
+        if PROTON.get("state") == "error": raise RuntimeError(PROTON.get("error") or "the save failed")
+        if not end:
+            END.update(state="saved"); await push("H3 Studio: saved to your drive", "Characters, settings and results are on your drive."); return
+        END.update(state="ending")
+        await push("H3 Studio: saved — shutting the rental down", "Everything is on your drive. The rental is being destroyed now, so billing stops.")
+        cid = os.environ.get("CONTAINER_ID")
+        if not cid: END.update(state="saved", error="No CONTAINER_ID here, so the rental can't shut itself down — stop it on vast.ai"); return
+        await asyncio.sleep(3)
+        cmd = ["vastai", "destroy", "instance", cid, "-y"] + (["--api-key", os.environ["CONTAINER_API_KEY"]] if os.environ.get("CONTAINER_API_KEY") else [])
+        await asyncio.to_thread(subprocess.run, cmd)
+    except Exception as e:  # noqa: BLE001
+        END.update(state="failed", error=str(e)[:500])
+        await push("H3 Studio: saving to your drive FAILED", f"The rental was NOT shut down. {str(e)[:300]}")
+
+
+async def save_end(req):
+    """POST {end: bool} → save everything to your drive (and destroy the rental after). GET → how it's going"""
+    if req.method == "POST":
+        if not _proton_on(): return web.json_response({"error": "No drive is set up in the Vast template (GDRIVE_TOKEN), so there's nowhere to save to"}, status=400)
+        if END["state"] in ("saving", "ending"): return web.json_response({"ok": True, **END})
+        d = await req.json() if req.can_read_body else {}
+        _spawn(_save_and_end(bool(d.get("end"))))
+        return web.json_response({"ok": True})
+    return web.json_response({**END, "sync": {k: PROTON.get(k) for k in ("state", "error", "running", "last_ok")}})
+
+
 async def proton_status(req):
     if req.method == "POST":
         if not _proton_on(): return web.json_response({"error": "Backups aren't set up — add GDRIVE_TOKEN (Google Drive) or PROTON_USER + PROTON_PASSWORD (Proton Drive) to the Vast template"}, status=400)
@@ -3564,17 +3599,17 @@ async def usage_post(req):
     for e in ev[:300]:
         if not isinstance(e, dict): continue
         k = e.get("k"); n = re.sub(r"[\x00-\x1f]+", " ", str(e.get("n") or "")).strip()[:90]
-        if k not in ("f", "m") or not n: continue
-        c = me[k].setdefault(n, [0, now]); c[0] += max(1, min(50, int(e.get("c") or 1))); c[1] = now
+        if k not in ("f", "m", "n") or not n: continue
+        c = me.setdefault(k, {}).setdefault(n, [0, now]); c[0] += max(1, min(50, int(e.get("c") or 1))); c[1] = now
     _state_write("usage", u); USAGE["dirty"] = True
     return web.json_response({"ok": True})
 
 
 def _usage_report() -> dict:
     u = _usage_load(); rentals = u["rentals"]
-    feats: dict[str, list] = {}; files: dict[str, list] = {}
+    feats: dict[str, list] = {}; files: dict[str, list] = {}; negs: dict[str, list] = {}
     for rid, e in rentals.items():
-        for k, dst in (("f", feats), ("m", files)):
+        for k, dst in (("f", feats), ("m", files), ("n", negs)):
             for n, (c, last) in (e.get(k) or {}).items():
                 t = dst.setdefault(n, [0, 0.0, 0]); t[0] += c; t[1] = max(t[1], last); t[2] += 1
     groups = []
@@ -3591,7 +3626,10 @@ def _usage_report() -> dict:
     since = min((e.get("start") or time.time() for e in rentals.values()), default=time.time())
     return {"on": USAGE_ON, "rentals": len(rentals), "since": since, "this_rental": RENTAL_ID, "groups": groups,
             "features": sorted(({"name": n, "uses": v[0], "last": v[1], "rentals": v[2]} for n, v in feats.items()), key=lambda x: -x["uses"]),
-            "files": sorted(({"name": n, "uses": v[0], "last": v[1]} for n, v in files.items()), key=lambda x: -x["uses"])}
+            "files": sorted(({"name": n, "uses": v[0], "last": v[1]} for n, v in files.items()), key=lambda x: -x["uses"]),
+            # negative-prompt words: how many jobs had each ("#jobs" = how many jobs had a negative at all)
+            "negatives": sorted(({"word": n, "uses": v[0]} for n, v in negs.items() if n != "#jobs"), key=lambda x: -x["uses"])[:80],
+            "negative_jobs": (negs.get("#jobs") or [0])[0]}
 
 
 async def usage_get(req):
@@ -3608,6 +3646,9 @@ def _usage_text() -> list[str]:
     out.append("  Features (jobs, buttons, shortcuts — most used first):")
     for f in r["features"][:120]:
         out.append(f"    {f['uses']:>5}  {f['name']}  (last {day(f['last'])}, {f['rentals']} rental(s))")
+    out.append(f"  Negative prompt words ({r['negative_jobs']} jobs had a negative — words in the most of them first):")
+    for n in r["negatives"][:40]:
+        out.append(f"    {n['uses']:>5}  {n['word']}")
     return out
 
 
@@ -5573,7 +5614,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),

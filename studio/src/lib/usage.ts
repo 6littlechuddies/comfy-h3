@@ -6,7 +6,7 @@
 //   - keyboard shortcuts held with Ctrl/Cmd/Alt ("key Ctrl+Enter") — never what you type
 import type { ApiGraph } from "./graphs";
 
-type Ev = { k: "f" | "m"; n: string; c: number };
+type Ev = { k: "f" | "m" | "n"; n: string; c: number };
 const q = new Map<string, Ev>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let off = false;
@@ -27,9 +27,9 @@ function flush(beacon = false) {
   } catch { /* never let logging break anything */ }
 }
 
-export function logUse(k: "f" | "m", name: string) {
+export function logUse(k: "f" | "m" | "n", name: string) {
   if (off) return;
-  const n = k === "m" ? name.slice(0, 90) : norm(name);
+  const n = k === "m" || k === "n" ? name.slice(0, 90) : norm(name);
   if (!n) return;
   const key = k + "|" + n;
   const e = q.get(key);
@@ -37,9 +37,18 @@ export function logUse(k: "f" | "m", name: string) {
   if (!timer) timer = setTimeout(() => flush(), 15_000);
 }
 
+/** the words of a job's negative prompt (each one once per job), so your common negatives can be your default */
+export function logNegative(neg: string) {
+  const words = [...new Set(neg.split(/[,\n]/).map((w) => w.replace(/[()[\]{}]|:\s*[\d.]+/g, "").trim().toLowerCase()).filter((w) => w && w.length < 40))];
+  if (!words.length) return;
+  logUse("n", "#jobs");
+  words.forEach((w) => logUse("n", w));
+}
+
 /** a job: its tab + mode (the timing key, numbers removed) and every model file it loads */
-export function logJob(tab: string, etaKey: string, graph: ApiGraph) {
+export function logJob(tab: string, etaKey: string, graph: ApiGraph, negative?: string) {
   try {
+    if (negative) logNegative(negative);
     logUse("f", `job ${etaKey || tab}`);
     const files = new Set<string>();
     for (const n of Object.values(graph)) {
@@ -60,6 +69,16 @@ let started = false;
 /** called once at start-up */
 export function startUsageLog() {
   if (started) return; started = true;
+  // once: the negatives of the results already in this browser, so your common negatives don't start from zero
+  setTimeout(() => {
+    try {
+      if (localStorage.getItem("h3.neg.backfill")) return;
+      import("./jobs").then(({ useJobs }) => {
+        for (const j of useJobs.getState().jobs) { const n = (j.meta?.sent as { negative?: string } | undefined)?.negative; if (n) logNegative(n); }
+        localStorage.setItem("h3.neg.backfill", "1");
+      }).catch(() => {});
+    } catch { /* private mode */ }
+  }, 20_000);
   document.addEventListener("click", (e) => {
     try {
       const t = e.target as Element | null;

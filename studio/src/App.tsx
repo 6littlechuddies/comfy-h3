@@ -206,6 +206,7 @@ export default function App() {
       <ImageImport />
       <LibraryPick />
       <AnonFrame />
+      <SaveEndChip />
       <PictureMenuHost />
       <SelectionBar />
       <RecipeEditorHost />
@@ -352,6 +353,7 @@ function MoreMenu() {
           <button className={item} onClick={() => openSelfCheck()}><Icon name="check" size={15} className="text-muted" /><span className="flex flex-col"><span>Check everything</span><span className="text-[12px] text-dim">Tests every model + CivitAI · Copy report</span></span></button>
           <button className={item} onClick={() => openSiteLink()}><Icon name="up" size={15} className="text-muted" /><span className="flex flex-col"><span>Your site</span><span className="text-[12px] text-dim">Connect · send characters as drafts</span></span></button>
           <ProtonItem cls={item} />
+          <SaveEndItem cls={item} />
           <div className="my-1 h-px bg-line2" />
           <button className={item} onClick={() => useShortcuts.setState({ open: true })}><Icon name="keyboard" size={15} className="text-muted" />Keyboard shortcuts<kbd className="ml-auto rounded border border-line px-1.5 font-mono text-[11px] text-muted">?</kbd></button>
           <button className={item} onClick={() => usePalette.setState({ open: true })}><Icon name="search" size={15} className="text-muted" />Search and commands<kbd className="ml-auto rounded border border-line px-1.5 font-mono text-[11px] text-muted">Ctrl K</kbd></button>
@@ -903,6 +905,42 @@ function AnonItem({ cls }: { cls: string }) {
         <span className="text-[12px] text-dim">New results vanish after {ANON_MINUTES} min unless you star, download or use them</span></span>
     </button>
   );
+}
+
+/** ⋯ menu: everything to your drive from the rental's fast line, then the rental shuts itself down — no waiting on your own
+ *  download, nothing left running. A phone alert (if set up) and the chip below say when it's done. */
+function SaveEndItem({ cls }: { cls: string }) {
+  const go = async () => {
+    const { askConfirm } = await import("./components/Dialogs");
+    if (!await askConfirm("Save everything to your drive, then shut this rental down?", "Characters, settings, results and the LoRA list go to your Google Drive from the rental's own fast connection (minutes, not hours). Only if that works is the rental destroyed — billing stops. If the drive is full or the save fails, the rental stays on and you're told why. Get the files from Google Drive whenever you like.", "Save & shut down", true)) return;
+    const r = await fetch("/studio-api/save-end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ end: true }) });
+    if (!r.ok) return useJobs.getState().toast((await r.json().catch(() => ({}))).error ?? "Couldn't start", "bad");
+    useSaveEnd.setState({ watching: true });
+  };
+  return (
+    <button className={cls} onClick={go}>
+      <Icon name="stop" size={15} className="text-muted" />
+      <span className="flex flex-col"><span>Save to drive &amp; shut down</span><span className="text-[12px] text-dim">Faster than downloading the export yourself — the rental stops when it's saved</span></span>
+    </button>
+  );
+}
+const useSaveEnd = create<{ watching: boolean }>(() => ({ watching: false }));
+/** the chip while a save-and-shut-down runs */
+function SaveEndChip() {
+  const watching = useSaveEnd((s) => s.watching);
+  const [st, setSt] = useState<{ state: string; error: string } | null>(null);
+  useEffect(() => {
+    if (!watching) return;
+    const t = setInterval(() => fetch("/studio-api/save-end").then((r) => r.json()).then((d) => {
+      setSt(d);
+      if (d.state === "failed") { useJobs.getState().toast(`Saving to your drive failed — the rental is still on: ${d.error}`, "bad"); useSaveEnd.setState({ watching: false }); }
+      if (d.state === "saved") { useJobs.getState().toast(d.error || "Saved to your drive", d.error ? "info" : "good"); useSaveEnd.setState({ watching: false }); }
+    }).catch(() => setSt({ state: "ending", error: "" })), 5000);
+    return () => clearInterval(t);
+  }, [watching]);
+  if (!watching) return null;
+  return createPortal(<div className="fixed bottom-14 left-1/2 z-[95] flex -translate-x-1/2 items-center gap-2 border border-accent bg-panel px-4 py-2 text-[13px] shadow-xl">
+    <span className="pulse text-accent">●</span>{st?.state === "ending" ? "Saved — the rental is shutting down. You can close this tab." : "Saving everything to your drive… (you can close this tab — it finishes and shuts down by itself)"}</div>, document.body);
 }
 
 /** the frame round the window while anonymous mode is on */

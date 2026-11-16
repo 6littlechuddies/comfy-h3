@@ -137,6 +137,8 @@ export function ProjectRail() {
   useEffect(() => { if (sel) setOpen((o) => (o.has(sel) ? o : new Set([...o, sel]))); }, [sel]);
   const toggleSmall = () => { setSmall((v) => { setPref(`h3.rail.small.${tab}`, v ? "0" : "1"); return !v; }); };
   const shown = q ? list.filter((c) => c.name.toLowerCase().includes(q.toLowerCase())) : list;
+  const [foldedGroups, setFolded] = useState<Set<string>>(() => new Set(pref("h3.rail.folded", "").split(",").filter(Boolean)));
+  const foldGroup = (g: string) => setFolded((f) => { const n = new Set(f); n.has(g) ? n.delete(g) : n.add(g); setPref("h3.rail.folded", [...n].join(",")); return n; });
 
   const zipIn = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -164,7 +166,11 @@ export function ProjectRail() {
       <button onClick={toggleSmall} title="Show the character list" aria-label="Show the character list" className="press flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="rail" size={16} /></button>
       <FreeDrop narrow on={!sel} onClick={() => pick(null)} />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto p-0.5">
-        {list.map((c) => <DropAvatar key={c.id} c={c} on={c.id === sel} onClick={() => pick(c.id)} />)}
+        {(["realistic", "anime"] as const).map((st) => {
+          const grp = list.filter((c) => (c.style === "anime" ? "anime" : "realistic") === st);
+          return grp.length ? <div key={st} className="flex flex-col items-center gap-2"><span className="micro mt-1 text-dim" title={st === "anime" ? "Anime projects" : "Realistic projects"}>{st === "anime" ? "ANI" : "REAL"}</span>
+            {grp.map((c) => <DropAvatar key={c.id} c={c} on={c.id === sel} onClick={() => pick(c.id)} />)}</div> : null;
+        })}
       </div>
       <QueuePanel narrow />
       <button onClick={add} title="New character" className="press flex h-9 w-9 items-center justify-center border border-line text-muted hover:border-accent hover:text-ink"><Icon name="plus" size={14} /></button>
@@ -189,11 +195,24 @@ export function ProjectRail() {
         <FreeDrop on={!sel} onClick={() => pick(null)} />
         {!loaded && <p className="px-2 py-2 text-[12.5px] text-muted">Loading…</p>}
         {loaded && list.length === 0 && <p className="px-2 py-3 text-[12.5px] leading-relaxed text-muted">No characters yet. Press <b className="text-ink">New</b>, or import profiles in Characters.</p>}
-        {shown.map((c) => (
-          <Project key={c.id} c={c} on={c.id === sel} tab={tab} open={open.has(c.id)}
-            toggle={() => setOpen((o) => { const n = new Set(o); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })}
-            pick={(go) => pick(c.id, go)} />
-        ))}
+        {/* realistic and anime projects apart, each group foldable (remembered) */}
+        {(["realistic", "anime"] as const).map((st) => {
+          const grp = shown.filter((c) => (c.style === "anime" ? "anime" : "realistic") === st);
+          if (!grp.length) return null;
+          const folded = foldedGroups.has(st);
+          return (
+            <div key={st} className="mt-2">
+              <button onClick={() => foldGroup(st)} className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11.5px] font-semibold uppercase tracking-wide text-dim hover:text-ink" aria-expanded={!folded}>
+                <Icon name="chev" size={11} className={cx("transition-transform", folded && "-rotate-90")} />{st === "anime" ? "Anime" : "Realistic"}<span className="ml-auto font-normal">{grp.length}</span>
+              </button>
+              {!folded && grp.map((c) => (
+                <Project key={c.id} c={c} on={c.id === sel} tab={tab} open={open.has(c.id)}
+                  toggle={() => setOpen((o) => { const n = new Set(o); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })}
+                  pick={(go) => pick(c.id, go)} />
+              ))}
+            </div>
+          );
+        })}
       </div>
       <div className="border-t border-line2 p-2.5 pb-0">
         <button onClick={() => openCatalog()} title="Every picture and video on this rental, by project — nothing is ever left out here"
