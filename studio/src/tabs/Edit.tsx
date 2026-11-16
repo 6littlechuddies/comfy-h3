@@ -23,6 +23,7 @@ import { Advanced, LoraList, Btn, Check, EtaText, H1, Icon, Label, Panel, Preset
 import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
 import { Feed } from "../components/Feed";
 import { useRemix } from "../lib/remix";
+import { FourKChip } from "../components/FourKChip";
 import { Painter } from "../components/Painter";
 import { EditChat } from "../components/EditChat";
 import type { InputFile } from "../lib/api";
@@ -223,6 +224,8 @@ function ClassicEdit() {
       {!anime && <Chip title="What you're doing" value={e.mode} onChange={(v) => set({ mode: v, instruction: v === "free" ? e.instruction : TEMPLATES(engine)[v] })}
         options={[{ value: "look", label: "Copy appearance" }, { value: "pose", label: "Copy the pose" }, { value: "scene", label: "Put in the scene" }, { value: "free", label: "Free edit" }]} />}
       <Chip title="How many" value={e.count} onChange={(v) => set({ count: v })} options={[1, 2, 3, 4].map((n) => ({ value: n, label: `×${n}` }))} />
+      <Chip title="Size" value={e.resolution >= 1400 ? 1448 : 1024} onChange={(v) => set({ resolution: v })} options={[{ value: 1448, label: "Full · ~2 MP (like Create)" }, { value: 1024, label: "Draft · ~1 MP, faster" }]} />
+      <FourKChip />
       {pics[0] && <span className={cx("inline-flex h-8 items-stretch overflow-hidden rounded-sm border text-[12.5px] font-medium", mask ? "border-bad/70 bg-bad/10 text-ink" : "border-line bg-raised2/70 text-ink")}>
         <button onClick={() => setPainting(true)} className="press inline-flex items-center gap-1.5 px-3 hover:bg-hover" title={mask ? "Change the painted area" : "Paint the part to change — only that part is redrawn"}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 2l4 4-12 12H6v-4z" /><path d="M3 22h6" /></svg>{mask ? "Painted area ✓" : "Paint area"}</button>
@@ -305,7 +308,7 @@ function ClassicEdit() {
         <FaceFix on={!!e.faceFix} strength={e.faceStrength ?? 0.45} onChange={(p) => set({ ...(p.on != null ? { faceFix: p.on } : {}), ...(p.strength != null ? { faceStrength: p.strength } : {}) })} />
         <TextIn label="Negative prompt · avoid" help="negative" value={e.negative} onChange={(v) => set({ negative: v })} placeholder="e.g. blurry, extra fingers" />
         <Advanced a={e[keys.adv]} set={(p) => set({ [keys.adv]: { ...e[keys.adv], ...p } } as Partial<typeof e>)}>
-          <TextIn label="Reference size" help="resolution" value={e.resolution} onChange={(v) => set({ resolution: Math.max(256, Math.min(2048, Number(v) || 1024)) })} />
+          <TextIn label="Size (longest-side equivalent: 1448 ≈ 2 MP like Create, 1024 ≈ 1 MP)" help="resolution" value={e.resolution} onChange={(v) => set({ resolution: Math.max(256, Math.min(2048, Number(v) || 1448)) })} />
         </Advanced>
       </>}>
       {painting && pics[0] && <Painter src={pics[0].url} onClose={() => setPainting(false)} onDone={(m) => { setMask(m); setPainting(false); if (Object.values(TEMPLATES(engine)).includes(e.instruction)) set({ mode: "free", instruction: "" }); }}

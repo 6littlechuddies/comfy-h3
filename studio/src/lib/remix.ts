@@ -46,3 +46,38 @@ export async function editPicture(j: Job, o: import("./jobs").Output) {
   st.setTab("create");
   useJobs.getState().toast("In Create: say what to change (or leave the prompt), pick how much may change, then Generate.", "info", "create");
 }
+
+/** "Make it again exactly": Create set to the very settings a picture was made with — model, checkpoint, LoRAs at their
+ *  strengths, size, sampler, steps, CFG, negative and the same seed (locked). From the full snapshot when it has one (your
+ *  character and pictures too); otherwise from what was sent (Batch recreates, older pictures), as an exact prompt. */
+export async function recreateExact(j: Job): Promise<boolean> {
+  const { modelOf, pickModel, DEFAULTS } = await import("./settings");
+  const st = useSettings.getState();
+  const snap = j.meta?.snapshot as Snapshot | undefined;
+  const sent = j.meta?.sent as { prompt?: string; negative?: string; model?: string; checkpoint?: string; loras?: { name: string; strength: number }[]; size?: string; seed?: number; steps?: number; cfg?: number; sampler?: string; scheduler?: string } | undefined;
+  if (snap?.section === "create") {
+    const s = snap.settings as import("./settings").CreateS;
+    const m = modelOf(s);
+    st.set("create", { ...s, ...(sent?.seed != null ? { [m.advKey]: { ...m.adv, seed: sent.seed, lockSeed: true } } : {}) } as never);
+    st.setTab("create");
+    return true;
+  }
+  if (!sent?.prompt) return false;
+  const label = (sent.model ?? "").toLowerCase();
+  const model = label.includes("raw") ? "krea2raw" : label.includes("krea") ? "krea2" : label.includes("illustrious") || label.includes("noob") ? "noob" : label.includes("anima") ? "anima" : "krea2";
+  const cur = st.s.create;
+  const m = modelOf({ ...cur, ...pickModel(model) } as import("./settings").CreateS);
+  const [w, h] = (sent.size ?? "").split("→")[0].split("×").map((x) => parseInt(x, 10));
+  const r = w && h ? w / h : 0.5625;
+  const shape = r < 0.62 ? "portrait" : r < 0.85 ? "tall" : r < 1.15 ? "square" : "wide";
+  const base = cur[m.advKey] ?? DEFAULTS.create[m.advKey];
+  st.set("create", {
+    ...pickModel(model), raw: true, extra: sent.prompt, negative: sent.negative ?? "", characterId: null, polish: false, animeTags: false, balance: false, shape,
+    upscale: (sent.size ?? "").includes("→") ? cur.upscale || 1.5 : 0,
+    [m.lorasKey]: (sent.loras ?? []).map((l) => ({ name: l.name, strength: l.strength })),
+    [m.advKey]: { ...base, sampler: sent.sampler ?? base.sampler, scheduler: sent.scheduler ?? base.scheduler, steps: sent.steps ?? base.steps, cfg: sent.cfg ?? base.cfg, seed: sent.seed ?? base.seed, lockSeed: sent.seed != null },
+    checkpoint: { ...(cur.checkpoint ?? {}), [model === "krea2raw" ? "krea2raw" : model]: !sent.checkpoint || sent.checkpoint === "official" ? "" : sent.checkpoint },
+  } as never);
+  st.setTab("create");
+  return true;
+}

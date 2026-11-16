@@ -10,6 +10,14 @@ type Link = [string, number];
 type Inputs = Record<string, unknown>;
 export type ApiGraph = Record<string, { class_type: string; inputs: Inputs; _meta?: { title: string } }>;
 
+/** a soft-edged cut-out: BiRefNet HR-matting at 2048 px (keeps single hair strands and see-through edges; RMBG-2.0 worked
+ *  at 1024 and its edge went blocky when zoomed). On a colour (e.g. chroma green) or transparent. Same ComfyUI-RMBG pack;
+ *  the model (~1 GB) downloads itself the first time. */
+function matte(g: G, image: Link, background: "Alpha" | "Color" = "Alpha", color = "#222222"): string {
+  return g.add("BiRefNetRMBG", { image, model: "BiRefNet-HR-matting", sensitivity: 1, mask_blur: 0, mask_offset: 0, invert_output: false,
+    refine_foreground: true, unload_model: false, background, background_color: color });
+}
+
 class G {
   graph: ApiGraph = {};
   private n = 0;
@@ -163,10 +171,7 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     image = decode(model, o(pos), o(neg), ks, o(vae));
   }
   if (p.cutout) {
-    const cut = g.add("RMBG", {
-      image, model: M.rmbg, sensitivity: 1, process_res: 1024, mask_blur: 0, mask_offset: 0,
-      invert_output: false, refine_foreground: true, unload_model: false, background: "Alpha", background_color: "#222222",
-    });
+    const cut = matte(g, image);
     g.add("SaveImage", { images: o(cut), filename_prefix: p.prefix + "_cutout" }, "cutout");
   } else {
     g.add("SaveImage", { images: image, filename_prefix: p.prefix }, "result");
@@ -208,8 +213,7 @@ function buildCreateKreaRay(p: CreateOpts, raw: boolean, negative: string): ApiG
     img = o(g.add("VAEDecode", { samples: o(ks2), vae: o(vae) }));
   }
   if (p.cutout) {
-    const cut = g.add("RMBG", { image: img, model: M.rmbg, sensitivity: 1, process_res: 1024, mask_blur: 0, mask_offset: 0,
-      invert_output: false, refine_foreground: true, unload_model: false, background: "Alpha", background_color: "#222222" });
+    const cut = matte(g, img);
     g.add("SaveImage", { images: o(cut), filename_prefix: p.prefix + "_cutout" }, "cutout");
   } else g.add("SaveImage", { images: img, filename_prefix: p.prefix }, "result");
   return g.graph;
@@ -228,15 +232,20 @@ export function buildPlainBackground(image: string, prefix: string, color = "#ee
   return g.graph;
 }
 
-/** remove the background of one picture (transparent PNG) */
+/** remove the background of one picture (transparent PNG, soft hair edges) */
 export function buildCutout(image: string, prefix: string): ApiGraph {
   const g = new G();
   const l = g.add("LoadImage", { image });
-  const cut = g.add("RMBG", {
-    image: o(l), model: M.rmbg, sensitivity: 1, process_res: 1024, mask_blur: 0, mask_offset: 0,
-    invert_output: false, refine_foreground: true, unload_model: false, background: "Alpha", background_color: "#222222",
-  });
-  g.add("SaveImage", { images: o(cut), filename_prefix: prefix }, "result");
+  g.add("SaveImage", { images: o(matte(g, o(l))), filename_prefix: prefix }, "result");
+  return g.graph;
+}
+
+/** the person on flat chroma-key green: their own pixels and lighting untouched, hair strands blended onto the green the
+ *  way a real green screen shot looks — key it in Photoshop / Premiere / CapCut */
+export function buildGreenScreen(image: string, prefix: string, color = "#00B140"): ApiGraph {
+  const g = new G();
+  const l = g.add("LoadImage", { image });
+  g.add("SaveImage", { images: o(matte(g, o(l), "Color", color)), filename_prefix: prefix }, "result");
   return g.graph;
 }
 

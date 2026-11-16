@@ -22,6 +22,7 @@ import { registerPics, remember } from "../lib/promptHistory";
 import type { Media } from "../lib/tray";
 import { pickFromCivitai } from "../components/ImageImport";
 import { Feed, type SentInfo } from "../components/Feed";
+import { FourKChip } from "../components/FourKChip";
 import { PromptPieces } from "../components/PromptPieces";
 import { askSweep } from "../components/Dialogs";
 import { StylePicker, styleAdd } from "../components/StylePicker";
@@ -281,6 +282,7 @@ export default function CreateTab() {
       {refs.remixOf && usingRefs && <Chip title="How much may change" value={refs.strength} onChange={(v) => useMakeRefs.setState({ strength: v })} options={[{ value: 0.35, label: "Change: a little" }, { value: 0.6, label: "Change: some" }, { value: 0.8, label: "Change: a lot" }, { value: 1, label: "Change: anything (new picture)" }]} />}
       {!c.raw && <Chip title="The writer (on the rental) — off: your words go to the model exactly as typed" value={writerOn ? 1 : 0} onChange={(v) => set(anime ? { animeTags: v === 1 } : { polish: v === 1 })}
         options={[{ value: 0, label: "Words as typed" }, { value: 1, label: anime ? "Writer makes tags" : "Writer rewrites" }]} />}
+      <FourKChip />
       <Chip title="How many" value={c.count} onChange={(v) => set({ count: v })} options={[1, 2, 4, 6, 8].map((n) => ({ value: n, label: `×${n}` }))} />
       {!c.raw && c.make === "character" && <Chip title="Background" value={c.cutout ? 1 : 0} onChange={(v) => set({ cutout: v === 1 })} options={[{ value: 0, label: "With background" }, { value: 1, label: "Cut out" }]} />}
       {person && !c.raw && <Chip title="Who's in the picture" value={cast} onChange={(v) => set({ cast: v })} options={CAST_OPTIONS} />}
@@ -351,6 +353,9 @@ export default function CreateTab() {
         </label>
         <FaceFix on={!!c.faceFix} strength={c.faceStrength ?? 0.45} onChange={(p) => set({ ...(p.on != null ? { faceFix: p.on } : {}), ...(p.strength != null ? { faceStrength: p.strength } : {}) })} />
         <TextArea label="Negative prompt · never show" help="negative" rows={2} value={c.negative} onChange={(v) => set({ negative: v })} />
+        <button className="-mt-2 self-start text-[12px] text-muted hover:text-ink" title="The words that keep coming back in the negatives of your results (and the CivitAI posts you recreated) — used here, and kept as your default"
+          onClick={() => import("../lib/negatives").then(({ commonNegatives }) => { const r = commonNegatives(); if (!r.text) return useJobs.getState().toast("Not enough negatives in your results yet to find common ones", "info"); set({ negative: r.text }); useJobs.getState().toast(`Your common negatives, from ${r.from} results — kept as the default from now on`, "good"); })}>
+          Use my most common negatives</button>
         {cardsN > 1 && !anime && (
           <Seg label={`Several cards (${cardsN})`} value={c.splitCards !== false ? "split" : "one"} onChange={(v) => set({ splitCards: v === "split" })}
             options={[{ value: "split", label: `Split one picture across ${rayCards()}` }, { value: "one", label: "One card per picture" }]} />

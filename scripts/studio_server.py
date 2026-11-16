@@ -2648,6 +2648,11 @@ def _redact(t: str) -> str:
     return t
 
 
+def _full(out: str) -> bool:
+    """rclone's words for a drive with no space left (Google: storageQuotaExceeded / quota; Proton: insufficient storage)"""
+    return bool(re.search(r"storageQuotaExceeded|quota|insufficient storage|no space left|storage (is )?full|exceeded.*storage", out or "", re.I))
+
+
 async def proton_sync(full: bool = False, force: bool = False) -> None:
     """new results (studio outputs) + today's export .zip → Proton Drive. `full` also re-checks older results."""
     if not _proton_on() or PROTON["running"]: return
@@ -2655,29 +2660,31 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
     folder = (os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/")
     try:
         await _proton_setup()
+        # your characters, names, profiles and settings (the export, small) go FIRST: a full drive used to fail on the
+        # results copy and never save them — so names and personalities written on one rental were missing on the next
+        err = ""
+        try: n_chars = len(json.load(open(CHAR_FILE)))
+        except (OSError, ValueError): n_chars = 0
+        if n_chars and (force or not last_change() or last_change() > PROTON.get("sent_change", 0)):
+            stamp = last_change()
+            path, name = await asyncio.to_thread(_build_export, set(), False)
+            try:
+                rc, out = await _rclone("copyto", path, f"proton:{folder}/exports/{name}", "--retries", "3", timeout=1800)
+                if rc == 0: PROTON["sent_change"] = stamp
+                else: err = ("YOUR DRIVE IS FULL — " if _full(out) else "") + "saving your characters and settings failed: " + _redact(out)[-400:]
+            finally:
+                try: os.remove(path)
+                except OSError: pass
+        if not err: await _proton_prune(folder)
         src = os.path.join(OUTPUT, "studio")
         if os.path.isdir(src):
             args = ["copy", src, f"proton:{folder}/results", "--transfers", "2", "--checkers", "4", "--retries", "3", "--low-level-retries", "5"]
             if not full: args += ["--max-age", f"{max(1, PROTON_EVERY // 60) * 3}m"]  # only what's new since the last runs
             rc, out = await _rclone(*args)
-            if rc != 0: raise RuntimeError("copying results failed: " + _redact(out)[-500:])
+            if rc != 0: err = err or (("YOUR DRIVE IS FULL — results aren't being backed up (your characters and settings were saved). Free space in Storage: empty the drive's trash, prune old exports, or delete old results. " if _full(out) else "copying results failed: ") + _redact(out)[-400:])
             m = re.findall(r"Transferred:\s+(\d+)\s*/\s*\d+", out)
             if m: PROTON["sent"] += int(m[-1])
-        try: n_chars = len(json.load(open(CHAR_FILE)))
-        except (OSError, ValueError): n_chars = 0
-        if not n_chars:  # nothing to save yet — and an empty export must never replace a real one
-            PROTON.update(state="ok", last_ok=time.time(), error=""); return
-        if not force and last_change() and last_change() <= PROTON.get("sent_change", 0):  # nothing new since the last upload or restore
-            PROTON.update(state="ok", last_ok=time.time(), error=""); return
-        stamp = last_change()
-        path, name = await asyncio.to_thread(_build_export, set(), False)
-        try:
-            rc, out = await _rclone("copyto", path, f"proton:{folder}/exports/{name}", "--retries", "3", timeout=1800)
-            if rc == 0: PROTON["sent_change"] = stamp
-            if rc != 0: raise RuntimeError("copying the export failed: " + _redact(out)[-500:])
-        finally:
-            try: os.remove(path)
-            except OSError: pass
+        if err: raise RuntimeError(err)
         await _proton_prune(folder)
         PROTON.update(state="ok", last_ok=time.time(), error="")
     except Exception as e:  # noqa: BLE001
@@ -4699,6 +4706,30 @@ async def _site_call(s, method: str, path: str, body=None) -> tuple[int, object]
     return 0, None
 
 
+async def site_pull(req):
+    """what the site has for characters you sent (name, age, profile, persona, voice notes) — so a Studio that lost its
+    changes (drive full, another rental) can take them back. ?ids=a,b (Studio character ids)"""
+    ids = [x for x in (req.query.get("ids") or "").split(",") if x][:200]
+    out = {}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
+        async def one(cid):
+            try:
+                st, data = await _site_call(s, "GET", f"/characters/{quote('h3-' + cid)}")
+                if st != 200 or not isinstance(data, dict): out[cid] = {"missing": True, "status": st}; return
+                ch = data.get("character") if isinstance(data.get("character"), dict) else data
+                prof = ch.get("profile") if isinstance(ch.get("profile"), dict) else {}
+                out[cid] = {"name": ch.get("name"), "age": ch.get("age"), "tags": ch.get("tags"),
+                            "bio": prof.get("bio"), "personality": prof.get("personality"), "backstory": prof.get("backstory"), "greeting": prof.get("greeting"),
+                            "persona": ch.get("persona_prompt"), "voice_notes": ch.get("voice_notes"), "status": ch.get("status") or ch.get("visibility")}
+            except RuntimeError as e:
+                out[cid] = {"error": str(e)[:200]}
+        sem = asyncio.Semaphore(6)
+        async def lim(cid):
+            async with sem: await one(cid)
+        await asyncio.gather(*(lim(c) for c in ids))
+    return web.json_response(out)
+
+
 async def site_test(req):
     """what the site answers: the API root and a character that doesn't exist — so the report shows the real shapes"""
     out = {"url": site_cfg()["url"]}
@@ -5539,7 +5570,7 @@ def main():
         web.get("/studio-api/grok/status", grok_status), web.post("/studio-api/grok/ask", grok_ask), web.get("/studio-api/grok/result/{id}", grok_result), web.delete("/studio-api/grok/result/{id}", grok_cancel),
         web.get("/grok-relay/next", relay_next), web.post("/grok-relay/answer", relay_answer), web.get("/grok-relay/h3-grok.user.js", relay_script), web.get("/grok-relay/img/{id}/{n}", relay_img),
         web.get("/studio-api/health", health), web.get("/studio-api/debug-report", debug_report), web.get("/studio-api/ws", relay_ws),
-        web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test),
+        web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
         web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),

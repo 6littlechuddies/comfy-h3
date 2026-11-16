@@ -82,9 +82,19 @@ async function asPng(url: string): Promise<Blob> {
   return new Promise((res, rej) => cv.toBlob((x) => (x ? res(x) : rej(new Error("couldn't convert"))), "image/png"));
 }
 
+// The menu was ~28 items. Your usage log (all rentals) showed only a handful in use — New character from this picture,
+// Download, Delete, Use in Edit, Animate — so those (plus 4K, green screen, cut out, how it was made) stay on top and the
+// rest sit under "More". Anything you pick 3+ times from More moves up by itself.
+const MAIN = new Set(["e1", "an", "newc", "how", "look", "cover", "loop", "4k", "green", "cut", "copy", "save", "del", "faceon"]);
+const USE_KEY = "h3.picmenu.use";
+const uses = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(USE_KEY) || "{}"); } catch { return {}; } };
+const isMain = (k: string) => MAIN.has(k) || (uses()[k] ?? 0) >= 3;
+const noteMenuUse = (k: string) => { try { const u = uses(); u[k] = (u[k] ?? 0) + 1; localStorage.setItem(USE_KEY, JSON.stringify(u)); } catch { /* private mode */ } };
+
 export function PictureMenuHost() {
   const at = usePicMenu((s) => s.at);
   const [busy, setBusy] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const toast = useJobs((s) => s.toast);
   const close = () => { if (!busy) usePicMenu.setState({ at: null }); };
   useEffect(() => {
@@ -248,6 +258,37 @@ export function PictureMenuHost() {
       },
     })),
     {
+      key: "4k", icon: "up", label: "Make it 4K", hide: isVideo, run: async () => {
+        const m = await toMedia(t);
+        const [{ buildRtxUpscale }, { rtxInstalled }] = await Promise.all([import("../lib/graphs"), import("../lib/downloads")]);
+        // enough to reach ~8 MP (4K: 2160×3840) from whatever size it is now
+        const px = await new Promise<number>((res) => { const im = new Image(); im.onload = () => res(im.naturalWidth * im.naturalHeight); im.onerror = () => res(2_000_000); im.src = m.url; });
+        const scale = Math.max(1.25, Math.min(4, Math.round(Math.sqrt(8_300_000 / Math.max(1, px)) * 4) / 4));
+        if (rtxInstalled() === false) {
+          const { upscalePicture } = await import("../lib/likeness");
+          return upscalePicture(m, "krea2");
+        }
+        await useJobs.getState().run(useSettings.getState().s.tab, "4K", buildRtxUpscale({ image: m.name, scale, prefix: "studio/upscale/4k" }), "upscale:rtx", { before: m.url, no4k: true });
+        return `Making it 4K (×${scale}) — it shows up in your results`;
+      },
+    },
+    {
+      key: "green", icon: "image", label: "Green screen (keep the lighting)", hide: isVideo, run: async () => {
+        const m = await toMedia(t);
+        const { buildGreenScreen } = await import("../lib/graphs");
+        await useJobs.getState().run(useSettings.getState().s.tab, "Green screen", buildGreenScreen(m.name, "studio/cutout/green"), "cutout", { before: m.url, no4k: true });
+        return "On chroma green with soft hair edges — key it in Photoshop or your video editor (first time: the matting model downloads, ~1 GB)";
+      },
+    },
+    {
+      key: "cut", icon: "image", label: "Cut out (transparent, fine hair)", hide: isVideo, run: async () => {
+        const m = await toMedia(t);
+        const { buildCutout } = await import("../lib/graphs");
+        await useJobs.getState().run(useSettings.getState().s.tab, "Cut out", buildCutout(m.name, "studio/cutout/cut"), "cutout", { before: m.url, no4k: true });
+        return "Cutting it out at high resolution — transparent PNG in your results";
+      },
+    },
+    {
       key: "face", icon: "sparkle", label: "Sharpen the face", hide: isVideo, run: async () => {
         const m = await toMedia(t);
         const { sharpenFace } = await import("../lib/faceDetail");
@@ -272,6 +313,15 @@ export function PictureMenuHost() {
     { key: "an", icon: "film", label: isVideo ? "Use in Animate" : "Animate it · image → video", run: () => send("animate", isVideo ? undefined : "start") },
     {
       key: "how", icon: "search", label: "How it was made · prompt & settings", hide: !!(t.gen?.page || t.civitId), run: async () => {
+        // one of your results (or a character picture kept from one): the same panel Create and Edit show, with "Make it again exactly"
+        const ref = t.output ?? null;
+        const { madeBy } = await import("../lib/made");
+        if (ref && madeBy(ref)) {
+          try { localStorage.setItem("h3.howmade", "1"); } catch { /* */ }
+          const { openViewer } = await import("./Viewer");
+          openViewer([{ url: viewUrl(ref), kind: "image", label: t.label ?? ref.filename }], 0);
+          return;
+        }
         const m = await toMedia(t);
         const { openFileMeta } = await import("./ImageImport");
         openFileMeta(m);
@@ -393,12 +443,19 @@ export function PictureMenuHost() {
     <div className="fixed inset-0 z-[96]" onMouseDown={close} onContextMenu={(e) => { e.preventDefault(); close(); }}>
       <div role="menu" aria-label="Picture" className="fade-in absolute max-h-[min(560px,80vh)] w-64 overflow-y-auto border border-line bg-raised2 py-1 shadow-2xl"
         style={{ left: Math.min(at.x, window.innerWidth - 268), top: Math.max(8, Math.min(at.y, window.innerHeight - Math.min(560, window.innerHeight * 0.8) - 8)) }} onMouseDown={(e) => e.stopPropagation()}>
-        {items.filter((i) => !i.hide).map((i) => (
-          <button key={i.key} role="menuitem" disabled={!!busy} onClick={() => act(i.key, i.run)}
-            className={cx("flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-hover disabled:opacity-50", busy === i.key && "text-accent")}>
-            <Icon name={i.icon} size={13} className="text-muted" />{busy === i.key ? "Working…" : i.label}
-          </button>
-        ))}
+        {(() => {
+          const vis = items.filter((i) => !i.hide);
+          const main = vis.filter((i) => isMain(i.key)), rest = vis.filter((i) => !isMain(i.key));
+          const btn = (i: typeof vis[number]) => (
+            <button key={i.key} role="menuitem" disabled={!!busy} onClick={() => { noteMenuUse(i.key); act(i.key, i.run); }}
+              className={cx("flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-hover disabled:opacity-50", busy === i.key && "text-accent")}>
+              <Icon name={i.icon} size={13} className="text-muted" />{busy === i.key ? "Working…" : i.label}
+            </button>);
+          return <>{main.map(btn)}
+            {rest.length > 0 && <button role="menuitem" onClick={() => setMore((v) => !v)} className="flex w-full items-center gap-2.5 border-t border-line px-3 py-1.5 text-left text-[12.5px] text-muted hover:bg-hover hover:text-ink">
+              <Icon name="chev" size={12} className={cx("text-dim transition-transform", more ? "" : "-rotate-90")} />More ({rest.length})</button>}
+            {more && rest.map(btn)}</>;
+        })()}
       </div>
     </div>, document.body);
 }

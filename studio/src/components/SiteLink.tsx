@@ -451,6 +451,32 @@ function Characters({ connected }: { connected: boolean }) {
     }
     toast(`Done: ${ok} of ${chosen.length} — check them on the site before publishing`, ok === chosen.length ? "good" : "info");
   };
+  // the site has newer names / profiles than this Studio (e.g. the drive was full and the Studio's copy wasn't saved): take them back
+  const pullAll = async () => {
+    const pick = (chosen.length ? chosen : list).filter((c) => c.site?.sent?.ok || c.site?.sentKeys?.length);
+    if (!pick.length) return toast("None of these have been sent to your site yet", "info");
+    try {
+      const r = await fetch(`/studio-api/site/pull?ids=${pick.map((c) => c.id).join(",")}`);
+      if (!r.ok) throw new Error(`the Studio answered ${r.status}`);
+      const got = await r.json() as Record<string, { name?: string; age?: number; tags?: string[]; bio?: string; personality?: string; backstory?: string; greeting?: string; persona?: string; voice_notes?: string; missing?: boolean; error?: string }>;
+      let n = 0; const missing: string[] = [];
+      for (const c of pick) {
+        const g = got[c.id];
+        if (!g || g.missing || g.error) { missing.push(c.name); continue; }
+        const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
+        const site = { ...cur.site };
+        const take = (k: "bio" | "personality" | "backstory" | "greeting" | "persona", v?: string) => { if (v && v.trim() && v !== site[k]) { site[k] = v; return true; } return false; };
+        let ch = false;
+        for (const k of ["bio", "personality", "backstory", "greeting", "persona"] as const) ch = take(k, g[k]) || ch;
+        if (g.voice_notes) { const [voice, habits] = g.voice_notes.split(/\s*Habits:\s*/); if (voice && voice !== site.voice) { site.voice = voice.trim(); ch = true; } if (habits) site.quirks = habits.replace(/\.$/, "").trim(); }
+        if (Array.isArray(g.tags) && g.tags.length) site.tags = g.tags;
+        const name = g.name && g.name.trim() && g.name !== cur.name ? g.name.trim() : cur.name;
+        const age = Number(g.age) >= 18 ? Number(g.age) : cur.age;
+        if (ch || name !== cur.name || age !== cur.age) { useCharacters.getState().save({ ...cur, name, age, site }); n++; }
+      }
+      toast(`${n ? `Took the site's name and profile for ${n}` : "The Studio already matches your site"}${missing.length ? ` · not on the site: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "…" : ""}` : ""}`, n ? "good" : "info");
+    } catch (e) { toast(`Couldn't read your site: ${(e as Error).message}`, "bad"); }
+  };
   const sendAll = async () => {
     let ok = 0;
     for (const c of chosen) {
@@ -473,6 +499,7 @@ function Characters({ connected }: { connected: boolean }) {
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <DeepToggle />
+        <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
         <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>

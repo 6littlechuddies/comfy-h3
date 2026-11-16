@@ -2,7 +2,9 @@ import { Crash } from "./components/Crash";
 import { IdleGuard } from "./components/IdleGuard";
 import { BUILT } from "./lib/selfcheck";
 import { useEffect, useRef, useState, type ComponentType } from "react";
+import { createPortal } from "react-dom";
 import { create } from "zustand";
+import { ANON_MINUTES, setAnon, useAnon } from "./lib/anon";
 import { askCivitKey, CIVIT_IMAGE_LINK, COLLECTION_LINK, civitKeyStatus, getCost, getStatus, uploadLoraWithToast, type Cost, type InstanceStatus } from "./lib/api";
 import { useJobs, type Tab } from "./lib/jobs";
 import { modelOf, useSettings } from "./lib/settings";
@@ -203,6 +205,7 @@ export default function App() {
       <LoraBrowser />
       <ImageImport />
       <LibraryPick />
+      <AnonFrame />
       <PictureMenuHost />
       <SelectionBar />
       <RecipeEditorHost />
@@ -343,6 +346,7 @@ function MoreMenu() {
             <span className={cx("ml-auto h-2 w-2 shrink-0 rounded-full", !key.set ? "bg-bad" : badKeys.length ? "bg-[#f0a845]" : "bg-good")} /></button>
           <a className={item} href="/terminal/?arg=claude" target="_blank" rel="noreferrer"><Icon name="chat" size={15} className="shrink-0 text-accent" /><span className="flex min-w-0 flex-col"><span>Claude on this rental</span><span className="text-[12px] text-dim">Reads the logs, finds and fixes problems</span></span><Icon name="external" size={13} className="ml-auto shrink-0 text-dim" /></a>
           <AlertsItem cls={item} https={https} />
+          <AnonItem cls={item} />
           <button className={item} onClick={() => { copyDebugReport(); }}><Icon name="script" size={15} className="shrink-0 text-muted" /><span className="flex min-w-0 flex-col"><span>Copy debug report</span><span className="text-[12px] text-dim">Errors, logs, GPU · passwords hidden</span></span></button>
           <a className={item} href="/terminal/" target="_blank" rel="noreferrer"><Icon name="keyboard" size={15} className="text-muted" />Terminal<Icon name="external" size={13} className="ml-auto text-dim" /></a>
           <button className={item} onClick={() => openSelfCheck()}><Icon name="check" size={15} className="text-muted" /><span className="flex flex-col"><span>Check everything</span><span className="text-[12px] text-dim">Tests every model + CivitAI · Copy report</span></span></button>
@@ -590,6 +594,13 @@ const trayActions = (it: ViewItem) => {
   return acts;
 };
 
+/** delete a tray picture: a result's file is deleted (like the trash on a result); an upload just leaves the tray */
+function trayDelete(item: TrayItem) {
+  const canDel = item.src.type === "output" && !/(^|\/)characters(\/|$)/.test(item.src.subfolder ?? "");
+  if (canDel) import("./lib/made").then(({ deleteFile }) => deleteFile(item.src)).catch(() => {});
+  useTray.getState().remove(item.id);
+}
+
 function TrayThumb({ item, open, setOpen, mx, onView }: { item: TrayItem; open: boolean; setOpen: (o: boolean) => void; mx: number | null; onView: () => void }) {
   const remove = useTray((s) => s.remove);
   const ref = useRef<HTMLDivElement>(null);
@@ -600,13 +611,14 @@ function TrayThumb({ item, open, setOpen, mx, onView }: { item: TrayItem; open: 
     fetch(trayUrl(item), { method: "HEAD" }).then((r) => { if (r.status === 404) remove(item.id); }).catch(() => {});
   }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const act = (fn: () => void) => () => { fn(); setOpen(false); };
+  const canDel = item.src.type === "output" && !/(^|\/)characters(\/|$)/.test(item.src.subfolder ?? "");
   const row = "rounded px-2.5 py-1.5 text-left hover:bg-hover";
   // dock magnification: grow with closeness to the cursor
   let k = 1;
   if (mx != null && ref.current) { const r = ref.current.getBoundingClientRect(); const d = Math.abs(mx - (r.left + r.width / 2)); k = 1 + 0.6 * Math.max(0, 1 - d / 150) ** 1.6; }
   const W = Math.round(64 * k), H = Math.round(52 * k);
   return (
-    <div ref={ref} className="relative flex shrink-0 flex-col items-center gap-1" style={{ width: W, transition: "width .09s ease-out" }}>
+    <div ref={ref} className="group/th relative flex shrink-0 flex-col items-center gap-1" style={{ width: W, transition: "width .09s ease-out" }}>
       <button draggable onDragStart={(e) => { e.dataTransfer.setData(DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = "copy"; }}
         onClick={onView} onContextMenu={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setPos({ left: Math.min(r.left, window.innerWidth - 190), bottom: window.innerHeight - r.top + 8 }); setOpen(!open); }}
         title={`${item.label} — click to view, right-click for more`} aria-haspopup="dialog"
@@ -614,6 +626,9 @@ function TrayThumb({ item, open, setOpen, mx, onView }: { item: TrayItem; open: 
         style={{ width: W, height: H, transition: "width .09s ease-out, height .09s ease-out" }}>
         <MediaView m={{ url: trayUrl(item), kind: item.kind, label: item.label }} controls={false} />
       </button>
+      {/* hover: delete straight from the tray (results are deleted; uploads just leave the tray) */}
+      <button onClick={(e) => { e.stopPropagation(); trayDelete(item); }} aria-label={canDel ? "Delete" : "Remove from tray"} title={canDel ? "Delete this file" : "Remove from the tray"}
+        className="press absolute right-0 top-0 z-10 flex h-6 w-6 items-center justify-center bg-black/75 text-white/80 opacity-0 hover:text-bad group-hover/th:opacity-100 focus:opacity-100"><Icon name={canDel ? "trash" : "x"} size={12} /></button>
       <span className="max-w-full truncate text-[10px] text-dim">{item.label}</span>
       {open && pos && (
         <>
@@ -626,6 +641,7 @@ function TrayThumb({ item, open, setOpen, mx, onView }: { item: TrayItem; open: 
             <button role="menuitem" className={row} onClick={act(() => sendTo("animate", [item.id]))}>Use in Animate</button>
             {item.kind === "video" && <button role="menuitem" className={row} onClick={act(() => sendTo("finish", [item.id]))}>Trim / loop / export</button>}
             <a role="menuitem" className={cx(row, "text-ink")} href={trayUrl(item)} download={item.src.filename} onClick={() => setOpen(false)}>Download</a>
+            {canDel && <button role="menuitem" className={cx(row, "text-bad")} onClick={act(() => trayDelete(item))}>Delete</button>}
             <button role="menuitem" className={cx(row, "text-muted")} onClick={act(() => remove(item.id))}>Hide from tray</button>
           </div>
         </>
@@ -875,6 +891,28 @@ function ProtonItem({ cls }: { cls: string }) {
         <span className={cx("text-[12px]", st.state === "error" ? "text-bad" : "text-dim")}>{st.state === "error" ? `Last try failed — ${st.error.slice(0, 70)}` : st.state === "sending" ? "Sending…" : `Automatic · last sent ${ago}${st.sent ? ` · ${st.sent} files` : ""}`}</span></span>
     </button>
   );
+}
+
+/** ⋯ menu: anonymous mode — new results vanish after 10 minutes unless you star, download or use them */
+function AnonItem({ cls }: { cls: string }) {
+  const on = useAnon((s) => s.on);
+  return (
+    <button className={cls} onClick={() => { setAnon(!on); useJobs.getState().toast(on ? "Anonymous mode off — what's still there stays" : `Anonymous mode on — new pictures and videos are deleted ${ANON_MINUTES} minutes after they finish unless you star, download or use them`, "info"); }}>
+      <Icon name="lock" size={15} className={on ? "text-hot" : "text-muted"} />
+      <span className="flex flex-col"><span>Anonymous mode {on ? "· on" : ""}</span>
+        <span className="text-[12px] text-dim">New results vanish after {ANON_MINUTES} min unless you star, download or use them</span></span>
+    </button>
+  );
+}
+
+/** the frame round the window while anonymous mode is on */
+function AnonFrame() {
+  const on = useAnon((s) => s.on);
+  if (!on) return null;
+  return createPortal(<>
+    <div className="pointer-events-none fixed inset-0 z-[200] border-[3px] border-dashed border-hot/80" aria-hidden />
+    <button onClick={() => setAnon(false)} title="Click to turn anonymous mode off" className="fixed left-1/2 top-0 z-[201] -translate-x-1/2 bg-hot px-3 py-0.5 text-[11.5px] font-bold text-black">ANONYMOUS · new results vanish after {ANON_MINUTES} min unless starred, downloaded or used</button>
+  </>, document.body);
 }
 
 /** ⋯ menu: pop-up + chime when something finishes while you're in another window */

@@ -144,7 +144,7 @@ export const DEFAULTS: Settings = {
     characterId: null, styleAnime: "default", styleReal: "default", raw: false,
   },
   edit: {
-    mode: "pose", engine: "krea", instruction: TEMPLATES("krea").pose, negative: "", enhance: true, resolution: 1024, count: 1, loras: [],
+    mode: "pose", engine: "krea", instruction: TEMPLATES("krea").pose, negative: "", enhance: true, resolution: 1448, count: 1, loras: [],
     adv: adv("euler", "simple", 25, 1),
     advKrea: adv("euler", "simple", 10, 1), lorasKrea: [], refBoost: 4,
     advAnima: adv("er_sde", "simple", 30, 4), lorasAnima: [], advNoob: adv("euler_ancestral", "normal", 28, 5.5), lorasNoob: [], strength: 0.55,
@@ -281,6 +281,8 @@ Promise.all([loadState<Settings>("settings"), loadState<SettingsState["presets"]
   // Qwen Image was removed: anything still set to it moves to Krea 2
   if ((merged.create.realModel as string) === "qwen") merged.create.realModel = "krea2";
   if ((merged.edit.engine as string) === "qwen") merged.edit.engine = "krea";
+  // Edit came out at ~1 MP (about 768×1344) while Create makes ~2 MP: the old 1024 default moves up to 2 MP, like Create
+  if (merged.edit.resolution === 1024) merged.edit.resolution = 1448;
   useSettings.setState({ s: merged, presets: p ?? {}, loaded: true });
 });
 

@@ -101,6 +101,8 @@ export const useJobs = create<JobState>((set, get) => ({
     const sp = [...new Set(Object.values(graph).map((n) => (n as { _meta?: { title?: string } })._meta?.title ?? "").filter((t) => t.endsWith("(Speed-ups)")).map((t) => t.replace(/ \(Speed-ups\)$/, "")))];
     if (sp.length) meta = { ...meta, speedups: sp };
     intoProjectFolder(graph, typeof meta.project === "string" ? meta.project : null);
+    // 4K on (Create / Edit): the result is enlarged ×2 by the NVIDIA upscaler inside the same job
+    try { const [{ withFourK }, { rtxInstalled }] = await Promise.all([import("./fourk"), import("./downloads")]); if (rtxInstalled() !== false && !meta.no4k) withFourK(graph, tab); } catch { /* never block a job */ }
     await ensureInputs(graph);
     await dropMissingLoras(graph, tab);
     const id = await queuePrompt(graph, !!meta?.front);

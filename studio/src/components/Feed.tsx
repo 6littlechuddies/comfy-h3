@@ -17,7 +17,7 @@ import { MOVE_DRAG, useMoveDrag } from "../lib/move";
 
 const NONE: Record<string, Picked> = {};
 
-interface Item { o: Output; j: Job }
+export interface Item { o: Output; j: Job }
 /** what a picture was made with, kept on its job: shown full screen under "How it was made" */
 export interface SentInfo { prompt: string; words?: string; negative?: string; model: string; checkpoint?: string; loras: { name: string; strength: number }[]; size: string; seed: number;
   steps?: number; cfg?: number; sampler?: string; scheduler?: string; character?: string }
@@ -75,7 +75,11 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
   const shown = onlyFav ? items.filter((it) => isFav(favs, it.o)) : items;
   // one press = one stack: a ×4 batch, or More like this / Remix variants on the picture they came from — arrows flip through
   const stacks: Item[][] = [];
-  {
+  // "Stacks off": every result is its own tile (the count above matches what you can scroll through)
+  const [flat, setFlat] = useState(() => { try { return localStorage.getItem("h3.feed.flat") === "1"; } catch { return false; } });
+  const pickFlat = (v: boolean) => { setFlat(v); try { localStorage.setItem("h3.feed.flat", v ? "1" : "0"); } catch { /* */ } };
+  if (flat) shown.forEach((it) => stacks.push([it]));
+  else {
     const at = new Map<string, number>();
     for (const it of shown) {
       const own = trayIdOf(it.o);
@@ -89,6 +93,10 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
     const variant = (it: Item) => (typeof it.j.meta?.stack === "string" && !(it.j.meta.stack as string).startsWith("batch:") ? 1 : 0);
     for (const st of stacks) st.sort((a, b) => variant(a) - variant(b) || a.j.queuedAt - b.j.queuedAt || a.j.outputs.indexOf(a.o) - b.j.outputs.indexOf(b.o));
   }
+  // results whose files aren't on this rental (made on an earlier one and not restored) are checked up front and left out,
+  // so the count is what you can actually open — before, they only disappeared once their tile had tried to load
+  const keysNow = items.map((it) => missingKey(it.o)).join("|");
+  useEffect(() => { checkAll(items.map((it) => it.o)); }, [keysNow]); // eslint-disable-line react-hooks/exhaustive-deps
   const [size, setSize] = useState<"s" | "m" | "l">(() => { try { return (localStorage.getItem("h3.feed.size") as "s" | "m" | "l") || "m"; } catch { return "m"; } });
   const pickSize = (v: "s" | "m" | "l") => { setSize(v); try { localStorage.setItem("h3.feed.size", v); } catch { /* */ } };
   const failed = jobs.find((j) => j.status === "error" && !j.meta?.quietFail); // a recipe's / picked pictures' failures get one summary instead
@@ -109,7 +117,7 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3 pt-1">
         <h2 className="display text-[17px] ">Results</h2>
-        <span className="text-xs text-dim">{all ? "all projects" : selName ? `${selName}'s project` : "Free work"}{items.length ? ` · ${items.length}` : ""}</span>
+        <span className="text-xs text-dim">{all ? "all projects" : selName ? `${selName}'s project` : "Free work"}{items.length ? ` · ${items.length}${stacks.length !== shown.length ? ` in ${stacks.length} stacks` : ""}` : ""}</span>
         {(elsewhere > 0 || all) && <button onClick={() => setAll((v) => !v)} className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">{all ? "Only this project" : `+ ${elsewhere} in other projects`}</button>}
         <button onClick={() => import("./Catalog").then((m) => m.openCatalog())} title="Every picture and video on this rental, including older ones" className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Catalog · all of them</button>
         <form role="search" onSubmit={(e) => { e.preventDefault(); const q = new FormData(e.currentTarget).get("q")?.toString().trim(); if (q) import("./Catalog").then((m) => m.searchResults(q)); }} className="relative hidden md:block">
@@ -134,6 +142,10 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
                 className={cx("press flex h-7 w-7 items-center justify-center text-[11px] font-semibold", size === v ? "bg-hover text-ink" : "text-dim hover:text-ink")}>{v.toUpperCase()}</button>
             ))}
           </span>
+        )}
+        {items.length > 0 && (
+          <button onClick={() => pickFlat(!flat)} aria-pressed={flat} title={flat ? "Every result is its own tile — click to stack takes and variations again" : "Takes and variations are stacked (arrows on a tile flip through) — click to show every result as its own tile"}
+            className={cx("press chip-raised flex h-7 items-center gap-1.5 rounded-sm px-3 text-xs", flat ? "!border-accent text-ink" : "text-muted hover:text-ink")}><Icon name="layers" size={12} /> {flat ? "Unstacked" : "Stacked"}</button>
         )}
         {items.length > 0 && (
           <button onClick={() => setOnlyFav((v) => !v)} className={cx("press chip-raised flex h-7 items-center gap-1.5 rounded-sm px-3 text-xs", onlyFav ? "!border-accent text-ink" : "text-muted hover:text-ink")}>
@@ -163,6 +175,16 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
 }
 
 /** a picture that didn't load: if its file isn't on this rental, the card goes (instead of an empty black box) */
+const checked = new Set<string>();
+/** HEAD every result not checked yet, six at a time (each file once per page load) */
+function checkAll(os: Output[]) {
+  const todo = os.filter((o) => !checked.has(missingKey(o)));
+  todo.forEach((o) => checked.add(missingKey(o)));
+  let i = 0;
+  const next = (): void => { const o = todo[i++]; if (!o) return; fetch(viewUrl(o), { method: "HEAD" }).then((r) => { if (r.status === 404) useMissing.setState((m) => ({ keys: { ...m.keys, [missingKey(o)]: true } })); }).catch(() => {}).finally(next); };
+  for (let k = 0; k < 6; k++) next();
+}
+
 function goneCheck(o: Output) {
   fetch(viewUrl(o), { method: "HEAD" }).then((r) => {
     if (r.status === 404) useMissing.setState((m) => ({ keys: { ...m.keys, [missingKey(o)]: true } }));
@@ -333,20 +355,20 @@ function Lightbox({ items, index, setIndex, acts }: { items: Item[]; index: numb
 }
 
 /** the prompt and settings a result was made with — and a button to use them again */
-function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; done: () => void }) {
+export function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; done: () => void }) {
   // video boards (and older jobs) keep only some of it — words and character, no LoRAs or prompt: shown as far as it goes
   const raw = it.j.meta?.sent as Partial<SentInfo> | undefined;
   const sent = raw && (raw.prompt || raw.words) ? { ...raw, prompt: raw.prompt ?? raw.words ?? "", loras: Array.isArray(raw.loras) ? raw.loras : [] } as SentInfo : undefined;
   const snap = it.j.meta?.snapshot as { section?: string; settings?: Record<string, unknown> } | undefined;
   const toast = useJobs((s) => s.toast);
   const copy = (t: string) => copyText(t);
+  // the same model, checkpoint, LoRAs, size, steps, sampler, negative and seed — not just the words
   const usePrompt = () => {
-    if (!sent) return;
-    const s = snap?.settings ?? {};
-    useSettings.getState().set("create", { ...(s.style ? { style: s.style, animeModel: s.animeModel, realModel: s.realModel } : {}), raw: true, extra: sent.prompt, negative: sent.negative ?? "" } as never);
-    useSettings.getState().setTab("create");
-    toast("In Create as an exact prompt — change it, or press Generate", "good");
-    done();
+    import("../lib/remix").then(({ recreateExact }) => recreateExact(it.j)).then((ok) => {
+      if (!ok) return toast("Nothing saved with this one to recreate — read it from the file instead", "info");
+      toast(snap?.section === "create" ? "Create is set exactly as it was made (same seed, locked) — press Generate, or change one thing first" : "In Create with its exact prompt, model, LoRAs, size, steps and seed — press Generate", "good");
+      done();
+    }).catch((e) => toast((e as Error).message, "bad"));
   };
   const full = async () => {
     const item = useTray.getState().addOutput(it.o, it.j.label);
@@ -370,7 +392,7 @@ function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; done: (
           {row("Sampler", [sent.sampler, sent.scheduler].filter(Boolean).join(" · "))}{row("Steps", sent.steps)}{row("CFG", sent.cfg)}
         </dl>
         <div className="mt-3 flex flex-col gap-1.5">
-          <button onClick={usePrompt} className="press btn-primary h-9 text-[12.5px] font-semibold text-accentink">Use this prompt in Create</button>
+          <button onClick={usePrompt} className="press btn-primary h-9 text-[12.5px] font-semibold text-accentink">Make it again exactly (same LoRAs, seed…)</button>
           <button onClick={full} className="press glass-btn h-9 text-[12.5px] text-white">Everything inside the file (pieces, workflow)…</button>
         </div>
       </> : <>

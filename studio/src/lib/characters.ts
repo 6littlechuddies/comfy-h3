@@ -169,6 +169,7 @@ export const useCharacters = create<CharState>((set, get) => ({
     let prev: FileRef | undefined;
     if (before) { try { prev = { ...(await keepFile(before, `characters/${id}/prev_${view}.png`)), v: Date.now() } as FileRef; } catch { /* nothing to keep */ } }
     const kept = await keepFile(from, `characters/${id}/${view}.png`);
+    import("./made").then(({ noteOrigin }) => noteOrigin(kept, from)).catch(() => {});
     const bust = { ...kept, v: Date.now() }; // same file name every time -> version it so the picture refreshes
     set((s) => ({ list: s.list.map((x) => (x.id === id ? { ...x, views: { ...x.views, [view]: bust }, ...(prev ? { prev: { ...x.prev, [view]: prev } } : {}),
       ...(view === "front" ? { frontYours: !!opts?.yours } : {}), updatedAt: Date.now() } : x)) }));
