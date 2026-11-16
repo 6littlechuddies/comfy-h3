@@ -477,6 +477,32 @@ export function MediaView({ m, className, controls = true, contain }: { m: { url
 }
 
 /** a drop zone for one file: drag from the tray, drop a file from your computer, or click to browse */
+/** the full-size viewer for a slot's picture — as the result it came from when it is one (so How it was made shows its settings) */
+function openSlotViewer(m: Media, info = false) {
+  const t = m.trayId ? useTray.getState().items.find((i) => i.id === m.trayId) : undefined;
+  const url = t && t.src.type === "output" ? `/view?filename=${encodeURIComponent(t.src.filename)}&subfolder=${encodeURIComponent(t.src.subfolder ?? "")}&type=output` : m.url;
+  if (info) { try { localStorage.setItem("h3.howmade", "1"); } catch { /* */ } }
+  import("./Viewer").then((v) => v.openViewer([{ url, kind: "image", label: m.label }], 0));
+}
+/** "RECIPE" on a slot picture that carries how it was made (prompt / settings / workflow inside the file, or one of your results) */
+function RecipeBadge({ m }: { m: Media }) {
+  const [has, setHas] = useState<boolean | null>(null);
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      const t = m.trayId ? useTray.getState().items.find((i) => i.id === m.trayId) : undefined;
+      if (t && t.src.type === "output") { const { madeBy } = await import("../lib/made"); if (madeBy(t.src)) { if (on) setHas(true); return; } }
+      const { fileGen } = await import("../lib/api");
+      const g = await fileGen(m as never).catch(() => null);
+      if (on) setHas(!!(g && g.found && (g.prompt || g.workflow)));
+    })();
+    return () => { on = false; };
+  }, [m.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (has === null) return null;
+  return <button type="button" onClick={(e) => { e.stopPropagation(); openSlotViewer(m, true); }} title={has ? "This picture carries how it was made (prompt, settings, LoRAs) — click to see it" : "No prompt or settings inside this picture"}
+    className={cx("micro absolute bottom-1.5 left-1.5 px-1.5 py-0.5", has ? "bg-accent text-accentink" : "bg-black/70 text-white/50")}>{has ? "RECIPE INSIDE" : "NO RECIPE"}</button>;
+}
+
 export function Slot({ value, onChange, accept = ["image"], label, className, hint, tall }: {
   value?: Media | null; onChange: (m: Media | null) => void; accept?: ("image" | "video" | "audio")[]; label?: string; className?: string; hint?: string; tall?: boolean;
 }) {
@@ -511,7 +537,7 @@ export function Slot({ value, onChange, accept = ["image"], label, className, hi
         className={cx("relative flex items-center justify-center overflow-hidden rounded-[10px] border text-center text-[13px]", tall ? "h-full min-h-40" : "h-full",
           value ? "border-line bg-black" : "hatch border-dashed border-line text-muted", over && "!border-accent ring-2 ring-accent/40")}>
         {value ? (value.kind === "image"
-          ? <button type="button" className="h-full w-full cursor-zoom-in" title="Click to see it full size · right-click for more" onClick={() => import("./Viewer").then((v) => v.openViewer([{ url: value.url, kind: "image", label: value.label }], 0))}><MediaView m={value} controls={false} contain /></button>
+          ? <button type="button" className="h-full w-full cursor-zoom-in" title="Click to see it full size (I: how it was made) · right-click for more" onClick={() => openSlotViewer(value)}><MediaView m={value} controls={false} contain /></button>
           : <MediaView m={value} controls contain />) : (
           <button type="button" onClick={() => file.current?.click()} className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-3 hover:text-ink">
             <Icon name="up" size={20} />
@@ -521,6 +547,7 @@ export function Slot({ value, onChange, accept = ["image"], label, className, hi
         )}
         {busy && value && <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs">Adding…</div>}
       </div>
+      {value && value.kind === "image" && <RecipeBadge m={value} />}
       {value && (
         <span className="absolute right-1.5 top-1.5 flex gap-1">
           <button aria-label="Replace" title="Replace — pick a file from your computer (or drop a picture on it)" onClick={() => file.current?.click()} className="flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-1 text-[11.5px] text-ink hover:bg-black"><Icon name="up" size={13} />Replace</button>

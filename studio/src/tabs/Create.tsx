@@ -289,7 +289,14 @@ export default function CreateTab() {
       <WordBankButton value={c.extra} onChange={(v) => set({ extra: v })} />
       {(["pose", "scene"] as const).map((k) => (
         <button key={k} type="button" title={k === "pose" ? "Swap the pose in the box for a saved one (yours, built-in, or pulled from CivitAI posts)" : "Swap the background in the box for a saved one"}
-          onClick={() => import("../components/LibraryPick").then(({ pickFromLibrary }) => pickFromLibrary(k, async (text) => { const { swapPart } = await import("../lib/inspo"); set({ extra: await swapPart(useSettings.getState().s.create.extra, k, text) }); }))}
+          onClick={() => import("../components/LibraryPick").then(({ pickFromLibrary }) => pickFromLibrary(k, async (text) => { const { swapPart } = await import("../lib/inspo"); set({ extra: await swapPart(useSettings.getState().s.create.extra, k, text) }); },
+            // the post's picture itself: the pose as a cut-out (picture 2, "Copy the pose"), or the place with its people removed (the place slot)
+            async (item) => {
+              const { posePicture, placePicture } = await import("../lib/poseRef");
+              const toast = useJobs.getState().toast;
+              if (k === "pose") { toast("Cutting the pose out of that picture (no background)…", "info"); const m = await posePicture(item); useMakeRefs.setState({ pic2: m, take: "pose" }); toast("Pose ready as picture 2 — your character takes that exact pose. Generate when you like", "good"); }
+              else { toast("Taking the people out of that picture…", "info"); const m = await placePicture(item); useMakeRefs.setState({ place: m }); toast("Background ready as the place — your character goes into it", "good"); }
+            }))}
           className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name={k === "pose" ? "user" : "image"} size={13} className="text-muted" />{k === "pose" ? "Saved poses" : "Backgrounds"}</button>
       ))}
       {ch && person && !c.raw && <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 px-3 text-[12.5px]">{ch.name}<button aria-label="Stop using this character" className="text-muted hover:text-ink" onClick={() => set({ characterId: null })}>×</button></span>}

@@ -133,7 +133,15 @@ export async function polishKrea(text: string, c: Character | null, shape: strin
   if (hit) { useMakeRefs.setState({ tags: { from: text, to: hit } }); return hit; }
   const { looks } = await import("./characters");
   const character = c ? looks(c) : "An adult person exactly as FRAME describes them (no fixed character — describe them from FRAME).";
-  const out = await runWriter("krea", { character, frame: text, aspect: shape === "wide" ? "16:9" : shape === "square" ? "1:1" : shape === "tall" ? "2:3" : "9:16" }, { tab: "create", label: "Writing your Krea 2 prompt", big: true });
+  let out = await runWriter("krea", { character, frame: text, aspect: shape === "wide" ? "16:9" : shape === "square" ? "1:1" : shape === "tall" ? "2:3" : "9:16" }, { tab: "create", label: "Writing your Krea 2 prompt", big: true });
+  // Grok (and some prompt files) add a "Negative prompt: …" part: it goes to Create's negative box, not into the picture's words
+  const neg = /\n?\s*\**\s*negative(?: prompt)?\s*\**\s*[:：]\s*([\s\S]+)$/i.exec(out);
+  if (neg) {
+    out = out.slice(0, neg.index).replace(/\s*\**\s*(positive )?prompt\s*\**\s*[:：]\s*/i, "").trim();
+    const words = neg[1].trim().replace(/^["“]|["”]$/g, "");
+    const { useSettings } = await import("./settings");
+    if (words) useSettings.getState().set("create", { negative: words });
+  }
   polishCache.set(key, out);
   useMakeRefs.setState({ tags: { from: text, to: out } });
   return out;
