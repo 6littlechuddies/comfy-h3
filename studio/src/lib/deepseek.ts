@@ -20,7 +20,14 @@ export async function setDeepseekKey(key: string) {
   if (!r.ok) throw new Error(d.error ?? `The rental answered ${r.status}`);
   useDeepseek.setState({ on: !!d.on, known: true, model: d.model ?? "", source: d.source ?? null });
   import("./downloads").then((m) => m.refreshDownloads()).catch(() => {});
+  // DeepSeek writes now: the local writer's files come off this disk and it isn't downloaded again (new rentals with the
+  // key in the template never download it)
+  // (key removed: the local writer downloads again)
+  for (const group of d.on ? ["writer", "writer_xl"] : ["writer"]) await fetch("/studio-api/downloads/later", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d.on ? { group, remove: true } : { group, later: false }) }).catch(() => null);
 }
+
+/** what the model name means, for people */
+export const modelName = (m: string) => (m === "deepseek-flash" ? "V4.1 Flash 1017" : m);
 
 let loading: Promise<void> | null = null;
 /** the first look is shared: everyone asking at start waits for the same answer */

@@ -778,7 +778,8 @@ def main() -> int:
         for g in groups:
             g["later"] = (g["id"] in later or g["id"] in full) and not all(complete(f) for f in g["files"])
             nd, lf = ROOM.get(g["id"], (0, 0))
-            g["why"] = (f"not enough disk — needs {nd / 2**30:.0f} GB, only {lf / 2**30:.0f} GB free after the {DISK_RESERVE / 2**30:.0f} GB kept for your results. "
+            g["why"] = ("DeepSeek writes instead (its key is set), so the local writer isn't downloaded" if g["id"] in ("writer", "writer_xl") and _deepseek_on()
+                        else f"not enough disk — needs {nd / 2**30:.0f} GB, only {lf / 2**30:.0f} GB free after the {DISK_RESERVE / 2**30:.0f} GB kept for your results. "
                         "Rent with a bigger disk, or press Later on a group you don't use (Storage page shows which)" if g["id"] in full
                         else f"needs a {BIG_ONLY[g['id']] // 1000 + 4} GB+ card" if g["id"] in BIG_ONLY and 0 < vram < BIG_ONLY[g["id"]]
                         else f"not in your “{PRESETS[preset_id()]['label']}” preset — press Download now if you want it" if preset_id() and g["id"] not in preset_groups() and g["id"] not in DEFAULT_LATER

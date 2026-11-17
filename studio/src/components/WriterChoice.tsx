@@ -4,7 +4,7 @@ import { useState } from "react";
 import { bigWriterFits, useGroup } from "../lib/downloads";
 import { WRITER_KEY } from "../lib/models";
 import { Seg, cx } from "./ui";
-import { setDeepseekKey, useDeepseek } from "../lib/deepseek";
+import { modelName, setDeepseekKey, useDeepseek } from "../lib/deepseek";
 import { GrokConnect, useGrokLink } from "./OutsideHost";
 
 type W = "big" | "outside";
@@ -70,7 +70,7 @@ function DeepseekKey() {
     try { await setDeepseekKey(k); setKey(""); setOpen(false); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   if (ds.on && !open) return (
-    <p className="-mt-1 text-[11.5px] text-good">● DeepSeek ({ds.model}) writes — key {ds.source === "template" ? "from your Vast template" : "pasted on this rental"}.{" "}
+    <p className="-mt-1 text-[11.5px] text-good">● DeepSeek {modelName(ds.model)} writes — key {ds.source === "template" ? "from your Vast template" : "pasted on this rental"}.{" "}
       {ds.source !== "template" && <button className="text-dim underline hover:text-ink" onClick={() => setOpen(true)}>Change</button>}{" "}
       <button className="text-dim underline hover:text-ink" title="Deletes the local writer's model files from this rental (it's not used while DeepSeek writes)" onClick={freeLocal}>Free the local writer's disk space</button></p>
   );
