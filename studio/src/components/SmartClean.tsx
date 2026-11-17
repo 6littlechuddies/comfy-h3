@@ -98,7 +98,12 @@ export function SmartClean({ onDone }: { onDone: () => void }) {
   const unopened = useMemo(() => (scan?.unopened.items ?? []).filter((it) => !skip[keyOf(it)]), [scan, skip]);
   const sum = (a: Item[]) => a.reduce((n, it) => n + it.size, 0);
   // model groups on this disk that no job has loaded, on any rental (needs a couple of rentals of log to judge)
-  const idle = usage && usage.on && usage.rentals >= 2 ? usage.groups.filter((g) => g.uses === 0 && g.state === "done" && g.gb >= 0.5) : [];
+  // …or sooner when the disk is full: then downloads still waiting (Eros Max…) can't fit, so never-used ones are offered after
+  // one rental too (the writer is left out: it's needed even before its first use is logged)
+  const waiting = usage?.groups.filter((g) => g.state === "waiting" || g.state === "downloading" || g.state === "error") ?? [];
+  const tight = !!scan && scan.disk.free < 15 * 2 ** 30;
+  const idle = usage && usage.on && (usage.rentals >= 2 || tight) ? usage.groups.filter((g) => g.uses === 0 && g.state === "done" && g.gb >= 0.5 && !/writer|llm/i.test(g.id))
+    .sort((a, b) => b.gb - a.gb) : [];
 
   const del = async (what: string, items: Item[], label: string) => {
     if (!items.length) return;
@@ -140,8 +145,13 @@ export function SmartClean({ onDone }: { onDone: () => void }) {
       {!scan && !err && <p className="mt-3 text-[13px] text-muted">Looking through your results…</p>}
       {scan && (
         <div className="mt-2">
+          {tight && (
+            <p className="mb-2 rounded-lg border border-bad/40 bg-bad/10 px-3 py-2 text-[12.5px] text-bad">
+              The disk is full ({fmtBytes(scan.disk.free)} left){waiting.length ? <> — {waiting.length} download{waiting.length === 1 ? " is" : "s are"} waiting and can't fit: {waiting.map((g) => g.label).join(", ")}</> : ""}. Models you've never used are listed first below; removing them makes room (they can be downloaded again any time).
+            </p>
+          )}
           {idle.map((g) => (
-            <Row key={g.id} title={g.label} size={`${g.gb} GB`} why={`A model download no job of yours has loaded, on any of your last ${usage!.rentals} rentals. New rentals already leave it for later.`}
+            <Row key={g.id} title={g.label} size={`${g.gb} GB`} why={usage!.rentals >= 2 ? `A model download no job of yours has loaded, on any of your last ${usage!.rentals} rentals. New rentals already leave it for later.` : "A model no job of yours has loaded on this rental, and the disk is full."}
               action={<button disabled={!!busy} onClick={() => removeModels(g.id, g.label, g.gb)} className={danger}>{busy === g.id ? "Removing…" : "Remove from this disk"}</button>} />
           ))}
           <Row title="Earlier tries of prompts you kept changing" size={fmtBytes(sum(early))} quiet={!scan.early.count}

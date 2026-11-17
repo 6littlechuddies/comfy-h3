@@ -312,6 +312,12 @@ function Header({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   );
 }
 
+// ⋯ menu order: how often you pick each entry (this browser), with a starting guess until you've used it a while
+const MORE_USE_KEY = "h3.moremenu.use";
+const moreUses = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(MORE_USE_KEY) || "{}"); } catch { return {}; } };
+const noteMoreUse = (k: string) => { try { const u = moreUses(); u[k] = (u[k] ?? MORE_PRIOR[k] ?? 0) + 1; localStorage.setItem(MORE_USE_KEY, JSON.stringify(u)); } catch { /* private mode */ } };
+const MORE_PRIOR: Record<string, number> = { storage: 6, site: 6, civit: 5, loras: 4, report: 4, speed: 3, drive: 3, saveend: 3, anon: 2, check: 2, outputs: 2, alerts: 1, civkey: 1, claude: 1, secure: 1, comfy: 0.5, terminal: 0.5 };
+
 function MoreMenu() {
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState<Awaited<ReturnType<typeof civitKeyStatus>>>({ set: true, source: null });
@@ -330,31 +336,47 @@ function MoreMenu() {
   const [https, setHttps] = useState<string | null>(null);
   useEffect(() => { if (!window.isSecureContext) getHttpsLink().then(setHttps); }, [open]);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13.5px] text-ink hover:bg-hover";
+  const [showAll, setAll] = useState(false);
+  // every entry, keyed; shown most-used first (your clicks, counted here) — the rest fold under "More"
+  const MORE_ITEMS = (): [string, React.ReactNode][] => [
+    ["speed", <button className={item} onClick={() => openSpeed()}><Icon name="sparkle" size={15} className="text-muted" /><span className="flex flex-col"><span>Speed-ups</span><span className="text-[12px] text-dim">Turbo steps, faster attention, warm-up · all on</span></span></button>],
+    ["storage", <button className={item} onClick={() => openStorage()}><Icon name="layers" size={15} className="text-muted" /><span className="flex flex-col"><span>Storage &amp; clean-up</span><span className="text-[12px] text-dim">What's using space · delete old results</span></span></button>],
+    ["outputs", <a className={item} href="/outputs/" target="_blank" rel="noreferrer"><Icon name="folder" size={15} className="text-muted" />All output files<Icon name="external" size={13} className="ml-auto text-dim" /></a>],
+    ["comfy", <a className={item} href="/" target="_blank" rel="noreferrer"><Icon name="layers" size={15} className="text-muted" />ComfyUI node editor<Icon name="external" size={13} className="ml-auto text-dim" /></a>],
+    ["secure", https && <a className={item} href={`${https}/studio/`}><Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>Secure link</span><span className="text-[12px] text-dim">Needed for the microphone</span></span></a>],
+    ["loras", <button className={item} onClick={() => openLoraBrowser()}><Icon name="search" size={15} className="text-muted" />Browse LoRAs</button>],
+    ["civit", <button className={item} onClick={() => openImageImport()}><Icon name="link" size={15} className="text-muted" />CivitAI: collections, links, files</button>],
+    ["civkey", <button className={item} onClick={() => askCivitKey().then((ok) => { if (ok) civitKeyStatus().then(setKey); })}>
+            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${ks.length ? (badKeys.length ? `${ks.length - badKeys.length} of ${ks.length} work (key ${badKeys.map((x) => x.n).join(", ")} refused) · ` : `${ks.length === 1 ? "works" : `all ${ks.length} work`} · `) : (key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
+            <span className={cx("ml-auto h-2 w-2 shrink-0 rounded-full", !key.set ? "bg-bad" : badKeys.length ? "bg-[#f0a845]" : "bg-good")} /></button>],
+    ["claude", <a className={item} href="/terminal/?arg=claude" target="_blank" rel="noreferrer"><Icon name="chat" size={15} className="shrink-0 text-accent" /><span className="flex min-w-0 flex-col"><span>Claude on this rental</span><span className="text-[12px] text-dim">Reads the logs, finds and fixes problems</span></span><Icon name="external" size={13} className="ml-auto shrink-0 text-dim" /></a>],
+    ["alerts", <AlertsItem cls={item} https={https} />],
+    ["anon", <AnonItem cls={item} />],
+    ["report", <button className={item} onClick={() => { copyDebugReport(); }}><Icon name="script" size={15} className="shrink-0 text-muted" /><span className="flex min-w-0 flex-col"><span>Copy debug report</span><span className="text-[12px] text-dim">Errors, logs, GPU · passwords hidden</span></span></button>],
+    ["terminal", <a className={item} href="/terminal/" target="_blank" rel="noreferrer"><Icon name="keyboard" size={15} className="text-muted" />Terminal<Icon name="external" size={13} className="ml-auto text-dim" /></a>],
+    ["check", <button className={item} onClick={() => openSelfCheck()}><Icon name="check" size={15} className="text-muted" /><span className="flex flex-col"><span>Check everything</span><span className="text-[12px] text-dim">Tests every model + CivitAI · Copy report</span></span></button>],
+    ["site", <button className={item} onClick={() => openSiteLink()}><Icon name="up" size={15} className="text-muted" /><span className="flex flex-col"><span>Your site</span><span className="text-[12px] text-dim">Connect · send characters as drafts</span></span></button>],
+    ["drive", <ProtonItem cls={item} />],
+    ["saveend", <SaveEndItem cls={item} />],
+  ];
   return (
     <div className="relative">
       <button onClick={() => setOpen((v) => !v)} aria-label="More" aria-expanded={open} className="press btn-raised flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:text-ink"><Icon name="dots" size={18} /></button>
       {open && <>
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div className="zoom-in absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-panel p-1.5 shadow-[0_24px_60px_-16px_rgba(0,0,0,.8)]" onClick={() => setOpen(false)}>
-          <button className={item} onClick={() => openSpeed()}><Icon name="sparkle" size={15} className="text-muted" /><span className="flex flex-col"><span>Speed-ups</span><span className="text-[12px] text-dim">Turbo steps, faster attention, warm-up · all on</span></span></button>
-          <button className={item} onClick={() => openStorage()}><Icon name="layers" size={15} className="text-muted" /><span className="flex flex-col"><span>Storage &amp; clean-up</span><span className="text-[12px] text-dim">What's using space · delete old results</span></span></button>
-          <a className={item} href="/outputs/" target="_blank" rel="noreferrer"><Icon name="folder" size={15} className="text-muted" />All output files<Icon name="external" size={13} className="ml-auto text-dim" /></a>
-          <a className={item} href="/" target="_blank" rel="noreferrer"><Icon name="layers" size={15} className="text-muted" />ComfyUI node editor<Icon name="external" size={13} className="ml-auto text-dim" /></a>
-          {https && <a className={item} href={`${https}/studio/`}><Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>Secure link</span><span className="text-[12px] text-dim">Needed for the microphone</span></span></a>}
-          <button className={item} onClick={() => openLoraBrowser()}><Icon name="search" size={15} className="text-muted" />Browse LoRAs</button>
-          <button className={item} onClick={() => openImageImport()}><Icon name="link" size={15} className="text-muted" />CivitAI: collections, links, files</button>
-          <button className={item} onClick={() => askCivitKey().then((ok) => { if (ok) civitKeyStatus().then(setKey); })}>
-            <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${ks.length ? (badKeys.length ? `${ks.length - badKeys.length} of ${ks.length} work (key ${badKeys.map((x) => x.n).join(", ")} refused) · ` : `${ks.length === 1 ? "works" : `all ${ks.length} work`} · `) : (key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
-            <span className={cx("ml-auto h-2 w-2 shrink-0 rounded-full", !key.set ? "bg-bad" : badKeys.length ? "bg-[#f0a845]" : "bg-good")} /></button>
-          <a className={item} href="/terminal/?arg=claude" target="_blank" rel="noreferrer"><Icon name="chat" size={15} className="shrink-0 text-accent" /><span className="flex min-w-0 flex-col"><span>Claude on this rental</span><span className="text-[12px] text-dim">Reads the logs, finds and fixes problems</span></span><Icon name="external" size={13} className="ml-auto shrink-0 text-dim" /></a>
-          <AlertsItem cls={item} https={https} />
-          <AnonItem cls={item} />
-          <button className={item} onClick={() => { copyDebugReport(); }}><Icon name="script" size={15} className="shrink-0 text-muted" /><span className="flex min-w-0 flex-col"><span>Copy debug report</span><span className="text-[12px] text-dim">Errors, logs, GPU · passwords hidden</span></span></button>
-          <a className={item} href="/terminal/" target="_blank" rel="noreferrer"><Icon name="keyboard" size={15} className="text-muted" />Terminal<Icon name="external" size={13} className="ml-auto text-dim" /></a>
-          <button className={item} onClick={() => openSelfCheck()}><Icon name="check" size={15} className="text-muted" /><span className="flex flex-col"><span>Check everything</span><span className="text-[12px] text-dim">Tests every model + CivitAI · Copy report</span></span></button>
-          <button className={item} onClick={() => openSiteLink()}><Icon name="up" size={15} className="text-muted" /><span className="flex flex-col"><span>Your site</span><span className="text-[12px] text-dim">Connect · send characters as drafts</span></span></button>
-          <ProtonItem cls={item} />
-          <SaveEndItem cls={item} />
+          {(() => {
+            const all = MORE_ITEMS();
+            const u = moreUses();
+            const ranked = all.filter(([, el]) => el).sort((a, b) => (u[b[0]] ?? MORE_PRIOR[b[0]] ?? 0) - (u[a[0]] ?? MORE_PRIOR[a[0]] ?? 0));
+            const top = ranked.slice(0, 7), rest = ranked.slice(7);
+            const wrap = ([k, el]: [string, React.ReactNode]) => <div key={k} onClickCapture={() => noteMoreUse(k)}>{el}</div>;
+            return <>
+              {top.map(wrap)}
+              {rest.length > 0 && <button className={cx(item, "text-muted")} onClick={(e) => { e.stopPropagation(); setAll((v) => !v); }}><Icon name="dots" size={15} className="text-dim" />{showAll ? "Fewer" : `More · ${rest.length}`}<Icon name="chev" size={13} className={cx("ml-auto text-dim transition-transform", showAll && "rotate-180")} /></button>}
+              {showAll && rest.map(wrap)}
+            </>;
+          })()}
           <div className="my-1 h-px bg-line2" />
           <button className={item} onClick={() => useShortcuts.setState({ open: true })}><Icon name="keyboard" size={15} className="text-muted" />Keyboard shortcuts<kbd className="ml-auto rounded border border-line px-1.5 font-mono text-[11px] text-muted">?</kbd></button>
           <button className={item} onClick={() => usePalette.setState({ open: true })}><Icon name="search" size={15} className="text-muted" />Search and commands<kbd className="ml-auto rounded border border-line px-1.5 font-mono text-[11px] text-muted">Ctrl K</kbd></button>
@@ -951,7 +973,10 @@ function DriveWarn() {
     const check = () => fetch("/studio-api/proton").then((r) => r.json()).then((d) => setErr(d?.on && d.state === "error" ? String(d.error || "") : "")).catch(() => {});
     check(); const t = setInterval(check, 120_000); return () => clearInterval(t);
   }, []);
-  if (!err) return null;
+  // × hides it until a different kind of error comes (numbers — times, sizes — stripped, so a retry doesn't bring it back)
+  const kindOf = (e: string) => e.replace(/[\d/:.]+/g, "").slice(0, 160);
+  const [hid, setHid] = useState(() => { try { return sessionStorage.getItem("h3.drivewarn.hid") ?? ""; } catch { return ""; } });
+  if (!err || hid === kindOf(err)) return null;
   const full = /quota|full/i.test(err);
   return createPortal(
     <div className="fixed inset-x-0 bottom-0 z-[94] flex items-center gap-3 border-t border-bad bg-[#2a0d0b] px-4 py-2 text-[12.5px]">
@@ -959,6 +984,8 @@ function DriveWarn() {
       <span className="min-w-0 flex-1 truncate text-ink/80" title={err}>{full ? "Nothing new is being saved — characters, names and profiles made on this rental are only here. Free space (Storage → empty the drive's trash, prune exports, delete old results) or add storage, then ⋯ → Send to drive now." : err}</span>
       <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => import("./components/Storage").then((m) => m.openStorage()).catch(() => {})}>Storage</button>
       <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => fetch("/studio-api/proton?force=1", { method: "POST" }).then(() => useJobs.getState().toast("Trying the drive again…", "info"))}>Try again</button>
+      <button aria-label="Hide" title="Hide (it comes back if a different problem shows up — Storage still shows it)" className="press px-1.5 text-[16px] leading-none text-muted hover:text-ink"
+        onClick={() => { const k = kindOf(err); setHid(k); try { sessionStorage.setItem("h3.drivewarn.hid", k); } catch { /* private mode */ } }}>×</button>
     </div>, document.body);
 }
 

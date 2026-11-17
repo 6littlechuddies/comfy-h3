@@ -2585,8 +2585,20 @@ PROTON_CONF = os.path.join(WORK, "h3-proton.conf")
 PROTON_EVERY = int(os.environ.get("PROTON_EVERY_MIN", "15")) * 60
 
 
+DRIVE_KEYS = os.path.join(WORK, ".h3-drive-keys.json")  # keys pasted in Storage on a running rental (beat the template's)
+
+
+def _drive_key(name: str) -> str:
+    """GDRIVE_TOKEN / GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET: the ones pasted in Storage on this rental, else the template's"""
+    try:
+        with open(DRIVE_KEYS) as f: v = (json.load(f) or {}).get(name)
+        if v: return str(v)
+    except (OSError, ValueError): pass
+    return os.environ.get(name) or ""
+
+
 def _gdrive_token() -> str:
-    t = (os.environ.get("GDRIVE_TOKEN") or "").strip()
+    t = (_drive_key("GDRIVE_TOKEN") or "").strip()
     if t and not t.startswith("{"):
         import base64
         try: t = base64.b64decode(t + "=" * (-len(t) % 4)).decode()
@@ -2623,7 +2635,7 @@ async def _proton_setup() -> None:
     if _gdrive_token():  # Google Drive (the remote keeps the name "proton" so every path stays the same)
         # your own Google client (GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET): rclone's shared one is being retired by Google.
         # The token must have been made with the same client (Connect Google Drive.bat passes them to rclone authorize).
-        own = [x for kv in (("client_id", os.environ.get("GDRIVE_CLIENT_ID")), ("client_secret", os.environ.get("GDRIVE_CLIENT_SECRET"))) if kv[1] for x in kv]
+        own = [x for kv in (("client_id", _drive_key("GDRIVE_CLIENT_ID")), ("client_secret", _drive_key("GDRIVE_CLIENT_SECRET"))) if kv[1] for x in kv]
         rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", *own, "token", _gdrive_token(), "--non-interactive", timeout=120)
         if rc != 0:
             try: os.remove(PROTON_CONF)
@@ -2667,6 +2679,46 @@ def _why_drive(out: str) -> str:
     if re.search(r"no such host|i/o timeout|connection refused|TLS handshake|context deadline", o, re.I):
         return "COULDN'T REACH GOOGLE from the rental (network) — it tries again on the next save. "
     return ""
+
+
+async def drive_keys(request: web.Request) -> web.Response:
+    """Storage → New drive keys: paste a new token (and the client it was made with) on a running rental — no new rental needed.
+    Tested at once; kept only if Google lets it in."""
+    d = await request.json()
+    tok = str(d.get("token") or "").strip()
+    cid = str(d.get("client_id") or "").strip()
+    sec = str(d.get("client_secret") or "").strip()
+    if not tok: return web.json_response({"error": "Paste the token from Connect Google Drive.bat (the {\"access_token\"…} text, or its base64)"}, status=400)
+    old = None
+    try:
+        with open(DRIVE_KEYS) as f: old = f.read()
+    except OSError: pass
+    os.makedirs(WORK, exist_ok=True)
+    with open(DRIVE_KEYS, "w") as f: json.dump({"GDRIVE_TOKEN": tok, "GDRIVE_CLIENT_ID": cid or _drive_key("GDRIVE_CLIENT_ID"), "GDRIVE_CLIENT_SECRET": sec or _drive_key("GDRIVE_CLIENT_SECRET")}, f)
+    os.chmod(DRIVE_KEYS, 0o600)
+    if not _gdrive_token():
+        msg = "That isn't a Google Drive token — copy everything between the { } that Connect Google Drive.bat printed."
+    else:
+        try: os.remove(PROTON_CONF)
+        except OSError: pass
+        try:
+            await _proton_setup()
+            rc, out = await _rclone("lsd", "proton:", "--max-depth", "1", timeout=60)
+            msg = "" if rc == 0 else (_why_drive(out) or "Google said no: ") + _redact(out)[-300:]
+        except Exception as e:  # noqa: BLE001
+            msg = _redact(str(e))[:400]
+    if msg:  # put the old keys back
+        if old is None:
+            try: os.remove(DRIVE_KEYS)
+            except OSError: pass
+        else:
+            with open(DRIVE_KEYS, "w") as f: f.write(old)
+        try: os.remove(PROTON_CONF)
+        except OSError: pass
+        return web.json_response({"error": msg}, status=400)
+    PROTON.update(state="ok", error="")
+    asyncio.get_running_loop().create_task(proton_sync(force=True))
+    return web.json_response({"ok": True})
 
 
 async def proton_sync(full: bool = False, force: bool = False) -> None:
@@ -3594,8 +3646,13 @@ def _redact(text):
         if _SECRET_NAME.search(k) and v and len(v) >= 6:
             for part in [v] + [x for x in re.split(r"[,\s]+", v) if len(x) >= 6]:
                 text = text.replace(part, "‹hidden›")
+    try:
+        with open(DRIVE_KEYS) as f:
+            for v in (json.load(f) or {}).values():
+                if isinstance(v, str) and len(v) >= 6: text = text.replace(v, "‹hidden›")
+    except (OSError, ValueError): pass
     text = re.sub(r"\bhf_[A-Za-z0-9]{20,}", "‹hidden›", text)
-    text = re.sub(r"(?i)(token|key|password|authorization)([\"']?\s*[:=]\s*[\"']?)[A-Za-z0-9._\-]{12,}", r"\1\2‹hidden›", text)
+    text = re.sub(r"(?i)(token|key|password|authorization)([\"']?\s*[:=]\s*[\"']?)(?=[A-Za-z._\-]*\d)[A-Za-z0-9._\-]{12,}", r"\1\2‹hidden›", text)
     return text
 
 
@@ -5684,7 +5741,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),

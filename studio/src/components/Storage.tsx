@@ -32,6 +32,37 @@ function MigrateButtons() {
   </>;
 }
 
+/** a running rental's drive keys can't change from Vast — paste the new ones here (tested before they're kept) */
+function DriveKeys({ open: start, onDone }: { open?: boolean; onDone: () => void }) {
+  const [open, setOpen] = useState(!!start);
+  const [tok, setTok] = useState(""); const [cid, setCid] = useState(""); const [sec, setSec] = useState("");
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  const go = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/studio-api/drive/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tok, client_id: cid, client_secret: sec }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg({ bad: true, text: d.error ?? `The rental answered ${r.status}` });
+      else { setMsg({ bad: false, text: "Connected — saving to your drive now. Put the same three in your Vast template so new rentals use them too." }); setTok(""); setSec(""); onDone(); }
+    } finally { setBusy(false); }
+  };
+  const inp = "h-8 w-full rounded-lg border border-line bg-black/30 px-2.5 text-[12.5px] text-ink outline-none focus:border-accent";
+  if (!open) return <button onClick={() => setOpen(true)} className="press btn-raised h-8 rounded-lg px-3 text-[12.5px] text-ink">New drive keys…</button>;
+  return (
+    <div className="mt-3 w-full space-y-2 rounded-lg border border-line p-3">
+      <p className="text-[12px] text-muted">For this rental, without starting a new one. The token is what <b>Connect Google Drive.bat</b> printed; the client ID and secret must be the exact ones you gave it (Google Cloud → Clients). Leave a box empty to keep this rental's current value. Tested before it's kept.</p>
+      <textarea value={tok} onChange={(e) => setTok(e.target.value)} placeholder='Token: {"access_token":…} (or the base64 line)' className={cx(inp, "h-16 py-1.5 font-mono")} />
+      <input value={cid} onChange={(e) => setCid(e.target.value)} placeholder="Client ID (…apps.googleusercontent.com)" className={inp} />
+      <input value={sec} onChange={(e) => setSec(e.target.value)} type="password" placeholder="Client secret (GOCSPX-…)" className={inp} />
+      <div className="flex items-center gap-2">
+        <button disabled={busy || !tok.trim()} onClick={go} className="press btn-primary h-8 rounded-lg px-3 text-[12.5px] font-semibold text-accentink disabled:opacity-40">{busy ? "Testing…" : "Test & use"}</button>
+        <button onClick={() => setOpen(false)} className="press h-8 px-2 text-[12.5px] text-muted">Cancel</button>
+      </div>
+      {msg && <p className={cx("text-[12.5px]", msg.bad ? "text-bad" : "text-good")}>{msg.text}</p>}
+    </div>
+  );
+}
+
 export const openStorage = () => useStorage.setState({ open: true });
 
 interface Drive { name?: string; folder?: string; total?: number; used?: number; trashed?: number; free?: number; studio_bytes?: number; studio_files?: number;
@@ -127,8 +158,8 @@ function StoragePanel() {
             <section className="card rounded-xl border border-line p-5">
               <h3 className="text-[15px] font-semibold">{dr?.name ?? "Your drive"}</h3>
               {!dr ? <p className="mt-1 text-[12.5px] text-muted">No drive is set up in the template, so nothing is backed up.</p>
-                : dr.error ? <p className="mt-1 text-[12.5px] text-bad">Couldn't check it: {dr.error}</p>
-                : dr.total == null && dr.used == null ? <p className="mt-1 text-[12.5px] text-muted">Checking… (press Check again in a moment)</p>
+                : dr.error ? <><p className="mt-1 text-[12.5px] text-bad">Couldn't check it: {dr.error}</p><DriveKeys open={/token|client|sign-in|oauth/i.test(dr.error)} onDone={() => load()} /></>
+                : dr.total == null && dr.used == null ? <><p className="mt-1 text-[12.5px] text-muted">Checking… (press Check again in a moment)</p><div className="mt-3"><DriveKeys onDone={() => load()} /></div></>
                 : (<>
                   <p className="mb-4 mt-0.5 text-[12.5px] text-muted">{fmtBytes(dr.used)} of {fmtBytes(dr.total)} used · “{dr.folder}” holds {fmtBytes(dr.studio_bytes)}{dr.studio_files != null ? ` in ${dr.studio_files} files` : ""}</p>
                   <Bar total={dr.total ?? (dr.used ?? 0) + (dr.free ?? 0)} parts={[
@@ -143,6 +174,7 @@ function StoragePanel() {
                       title={oldExports.length ? "" : "Only the newest 3 exports are there"}
                       className="press btn-raised h-8 rounded-lg px-3 text-[12.5px] text-ink disabled:opacity-40">{busy === "exports" ? "Deleting…" : `Delete older exports${oldExports.length ? ` · ${fmtBytes(oldExports.reduce((a, f) => a + f.size, 0))}` : ""}`}</button>
                     <MigrateButtons />
+                    <DriveKeys onDone={() => load()} />
                   </div>
                   {!!dr.exports?.length && (
                     <ul className="mt-3 space-y-0.5 text-[12px] text-muted">
