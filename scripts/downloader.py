@@ -500,8 +500,10 @@ DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,aut
 # screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
 # "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
 PRESETS = {
-    "real":       {"label": "Realistic pictures",          "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
-    "anime":      {"label": "Anime pictures",              "groups": ["anime", "animeref", "writer", "sam"]},
+    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
+    "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "animeref", "writer", "sam"]},
+    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
+    "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "animeref", "writer", "sam"]},
     "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "video", "sam", "qwen", "smooth", "writer_xl", "qwen_full"]},
     "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth", "writer_xl"]},
     "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "animeref", "writer", "video", "sam", "smooth", "writer_xl"]},
@@ -510,13 +512,23 @@ PRESETS = {
 
 
 def preset_id() -> str:
-    p = str(switches().get("preset") or os.environ.get("H3_PRESET", "")).strip().lower()
+    # nothing chosen yet: realistic pictures first, then video ("all" / Everything = the old smart order)
+    p = str(switches().get("preset") or os.environ.get("H3_PRESET", "") or "real").strip().lower()
     return p if p in PRESETS and p != "all" else ""
+
+
+# a pictures preset carries on into video once the pictures are in (H3 straight after them); the big optional Qwen edit
+# helpers go last. "… only" presets stop at the pictures.
+FOLLOW = {"real": ["video", "smooth", "writer_xl"], "anime": ["video", "smooth", "writer_xl"]}
+LAST = ("qwen", "qwen_full")
 
 
 def preset_groups() -> list[str]:
     p = preset_id()
-    return PRESETS[p]["groups"] if p else []
+    if not p: return []
+    want = PRESETS[p]["groups"]
+    extra = [g for g in FOLLOW.get(p, []) if g not in want]
+    return [g for g in want if g not in LAST] + extra + [g for g in want if g in LAST]
 
 
 def by_preset(groups: list) -> list:
@@ -840,6 +852,13 @@ def main() -> int:
                         log(f"{f['name']}: trying again"); drop_partial(f); f.pop("fresh", None); resolve(f)
         nxt = next_ids(groups)
         order = queue_order(groups, nxt)
+        # a CivitAI file that couldn't get a link (often: your CivitAI key only arrives with the restore from your drive, a
+        # minute after start) asks again every minute instead of waiting half an hour
+        for g in order:
+            for f in g["files"]:
+                if f.get("error") and wanted(f) and not complete(f) and f["url"].startswith(("https://civitai.com/", "civitai-file:")) and time.time() - f.get("resolved", 0) > 60:
+                    resolve(f)
+                    if not f.get("error"): log(f"{f['name']}: CivitAI gave the link now")
         want = [f for g in order for f in g["files"] if wanted(f) and not complete(f) and not f.get("error")]
         keys = {f["path"] for f in want}
         by_path = {f["path"]: f for g in groups for f in g["files"]}
@@ -873,7 +892,8 @@ def main() -> int:
                         log(f"{f['name']}: left for later — removing the part downloaded ({on_disk(f) // 2**20} MB)"); drop_partial(f)
         if p is None and want:
             # CivitAI's download links expire: refresh any older than half an hour (e.g. a group started "later")
-            stale = [f for f in want if (f["url"].startswith(("https://civitai.com/", "civitai-file:")) and time.time() - f.get("resolved", 0) > 1800)
+            stale = [f for f in want if (f["url"].startswith(("https://civitai.com/", "civitai-file:")) and (time.time() - f.get("resolved", 0) > 1800
+                                                                                                     or ((f.get("error") or not f.get("size")) and time.time() - f.get("resolved", 0) > 60)))
                      or (f.get("cdn") and (time.time() - f.get("resolved", 0) > 1800 or f.get("resolved", 0) < ROT["last_switch"]))]
             if stale:
                 with cf.ThreadPoolExecutor(8) as ex: list(ex.map(resolve, stale))
