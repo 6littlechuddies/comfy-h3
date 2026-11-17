@@ -203,10 +203,10 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
 
 // ------------------------------------------------------------------ bulk names: a first name for each, from their look
 type NameIdea = { id: string; name: string; alt: string[]; why: string; on: boolean };
-const autoNamed = (c: Character) => c.name.includes("·") || /\b(hair|bob|braid|ponytail|bangs|top|tank|dress|outfit)\b/i.test(c.name);
+export const autoNamed = (c: Character) => c.name.includes("·") || /\b(hair|bob|braid|ponytail|bangs|top|tank|dress|outfit)\b/i.test(c.name);
 const okName = (n: string) => /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,23}$/.test(n.trim()) && !/\b(teen|kid|child|loli|minor|young|baby)\b/i.test(n);
 
-async function suggestNames(chars: Character[], avoid: string[] = []): Promise<NameIdea[]> {
+export async function suggestNames(chars: Character[], avoid: string[] = []): Promise<NameIdea[]> {
   const chosen = new Set(chars.map((c) => c.id));
   const taken = useCharacters.getState().list.filter((x) => !chosen.has(x.id) && !autoNamed(x)).map((x) => x.name.trim()).filter(Boolean);
   const out: NameIdea[] = [];

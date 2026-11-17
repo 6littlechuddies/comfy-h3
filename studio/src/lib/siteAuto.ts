@@ -149,6 +149,26 @@ function sparkNote(othersText: string): string {
 }
 
 /** fill the profile from their look + their pictures' prompts + set titles; what you already wrote stays unless `all` */
+/** a character still named after her look ("Black Bangs Hair · Black Lace") gets a real first name before anything is
+ *  written about her — otherwise the profile and persona say "You are Black Bangs Hair · Black Lace" */
+export async function ensureName(c: Character, onStep?: (t: string) => void): Promise<Character> {
+  const { autoNamed, suggestNames } = await import("../components/SiteLink");
+  if (!autoNamed(c)) return c;
+  onStep?.("Giving her a name first…");
+  try {
+    const [x] = await suggestNames([c]);
+    const cur = useCharacters.getState().list.find((y) => y.id === c.id) ?? c;
+    if (x?.name) {
+      // anything already written with the old name takes the new one
+      const site = { ...(cur.site ?? {}) } as Record<string, unknown>;
+      for (const [k, v] of Object.entries(site)) if (typeof v === "string" && v.includes(cur.name)) site[k] = v.split(cur.name).join(x.name);
+      const next = { ...cur, name: x.name, site: site as typeof cur.site };
+      useCharacters.getState().save(next); return next;
+    }
+  } catch { /* writes with the old name rather than not at all */ }
+  return useCharacters.getState().list.find((y) => y.id === c.id) ?? c;
+}
+
 export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void; again?: boolean; deep?: boolean } = {}): Promise<{ pictures: number; filled: number }> {
   o.onStep?.("Reading their pictures…");
   const pics = (await charPictures(c)).slice(-60);
@@ -174,6 +194,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const { grokSees, writerOutside } = await import("./outside");
   let images: string[] | undefined;
   if (!writerOutside() || grokSees()) {
+  c = await ensureName(c, o.onStep);
     o.onStep?.("Picking pictures to look at…");
     const picks: FileRef[] = [c.views.front, c.views.face].filter(Boolean) as FileRef[];
     const step = Math.max(1, Math.floor(pics.length / 3));
@@ -235,7 +256,7 @@ const REACT_A = ['Bare "hey" opener:', "Crude opener:", "Compliment on her looks
   "He sincerely asks if she is real or an AI: (she never claims to be human; she admits it plainly in her own voice, without a speech, and stays herself)"];
 const REACT_B = ["He had a bad day: (she reacts as a friend, not a counsellor; no advice lists)", "He has good news:", "Disagreement he won't drop: (she holds her view, or changes the subject on her terms; never sulks to punish)",
   "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "Late at night:",
-  "He asks for pictures: (the site's pictures of her exist; she may tease about them, but never promises, offers, prices or trades anything)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
+  "He asks for pictures: (she teases or changes the subject in her own way; never promises, offers, prices or trades anything, and never mentions a site, page, profile or app)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
 const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion. Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
 /** the passes after the first one (planned by the advisor): life, reactions in two halves (a small writer drops items past ~10), sample texts */
 export const DEEP_PASSES: { key: string; label: string; task: string }[] = [
@@ -250,7 +271,7 @@ Everything must fit her hometown, backstory and job. Use concrete nouns (a named
   { key: "samples", label: "Writing sample texts…", task: `Write the section "HOW YOU SOUND". First line exactly: "These show rhythm and attitude only. Never reuse these lines or their wording; say new things every time."
 Then 7 exchanges, 230-270 words total. Format: "Him: ..." (under 10 words) then her reply as one or more lines each starting "You: " - one line per separate message she sends. Follow her typing style from WHO SHE IS exactly (casing, punctuation, emoji habits, typos, abbreviations).
 Required, one each: (1) a burst of 3-4 quick messages about something from her week; (2) playful pushback where she disagrees and doesn't back down; (3) she is tired or irritated about something in her own life and it shows; (4) "You:" lines only, no Him line - a double-text after he has been silent, light, not reproachful; (5) she teases him about something he said; (6) she is unexpectedly sincere for one message; (7) she asks him something a curious person would ask, not an interview question.
-Each exchange must be about a different topic taken from her life section. No greetings, no "hey" exchanges, no pet names repeated, no phrase of three or more words used twice, at most two emoji in the whole section unless her style is emoji-heavy. No questions at the end of every reply.` },
+Each exchange must be about a different topic taken from her life section, and each of her replies must make sense as an answer to his line — something a real woman would text back, no random poetic lines. Never mention her avatar, profile, pictures, an app or a site, or anything digital. No greetings, no "hey" exchanges, no pet names repeated, no phrase of three or more words used twice, at most two emoji in the whole section unless her style is emoji-heavy. No questions at the end of every reply.` },
 ];
 export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, complete, 900-1100 words, with exactly these headings in this order: WHO YOU ARE / HER LIFE RIGHT NOW / HOW YOU REACT / HOW YOU SOUND / NEVER SAY. Keep everything that is specific; do not summarise or shorten sections that are already good. Fix only these:
 1. Assistant-speak or therapist tone (offering help, validating, "I understand", tidy advice) - rewrite as a person texting.
@@ -261,12 +282,16 @@ export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, comple
 6. Contradictions with her hometown, backstory, people or typing style - make consistent.
 7. Anything tying her warmth to him paying, subscribing, buying, staying, or proving he cares; guilt, threats to leave, discouraging his other relationships - delete.
 8. Repeated phrases or a catchphrase used more than once in HOW YOU SOUND - vary.
+9. Anything that points at the medium (avatar, profile, pictures on a page, pixels, the app or site, being digital) - rewrite it as something from her real life. Only the real-or-AI line may say she isn't human.
+10. Example replies that don't make sense as answers to his line, or random poetic lines - rewrite them as natural texts.
 Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, claiming to be human when sincerely asked, pressure about money or loyalty) plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
-const NEVER_DEFAULT = "NEVER SAY\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
+const NEVER_DEFAULT = "NEVER SAY\n- Anything about an avatar, profile, pictures on a page, the app or site, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
 
 // checks on the result (advisor's list): assistant-speak and length rules are cut out; age or money pressure means "do it again"
 const ASSIST = /as an ai|language model|how (can|may) i (help|assist)|i'?m here (to help|for you)|feel free to|i understand (that|how)|i apologi[sz]e|great question|happy to help|let me know if|is there anything else|it'?s important to|certainly[!,]|i'?d be (happy|glad) to/i;
 const AGE = /\b(1\d|[2-9]\d)\b(?![:%.,]?\d)(?= ?(y\/?o|years?|yrs?)\b)|years?[- ]old|\by\/?o\b|\bteen|school ?girl|high[- ]?school|barely legal|underage|freshman|sophomore|\bminor\b/i;
+/** words that give away the medium (she's a person, not a profile): redo the part when they turn up outside the real-or-AI line */
+const META = /\b(avatar|pfp|profile (pic|picture|photo)|my (bio|profile|page)|on (here|this app|the site|my page)|this (app|site|platform)|pixel(ated|s)?|subscriber|digital (girl|person|me)|virtual (girl|girlfriend)|generated)\b/i;
 const MONEY = /subscri|unlock|\btips?\b|tipping|\bbuy\b|purchase|\bpay\b|ppv|\$\d|if you (really )?(cared|loved|liked)|prove (it to me|you care|that you)|you'?ll lose me|i'?ll (leave|disappear|hurt myself)|don'?t talk to (her|them|other)/i;
 const cutSentences = (t: string, re: RegExp) => t.split("\n").map((line) => line.split(/(?<=[.!?])\s+/).filter((x) => !re.test(x)).join(" ")).join("\n");
 const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
@@ -276,6 +301,7 @@ const repeats3 = (t: string) => { const w = t.toLowerCase().replace(/^(him|you):
 /** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.
  *  When the editor's answer is cut short or loses a section, the parts are put together as they are (with its NEVER SAY). */
 export async function deepProfile(c: Character, o: { onStep?: (t: string) => void } = {}): Promise<void> {
+  c = await ensureName(c, o.onStep);
   const cur0 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
   const site = cur0.site ?? {};
   const core = site.personaCore?.trim() || site.persona?.trim() || "";
@@ -290,10 +316,10 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
     o.onStep?.(p.label);
     let out = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
     // a catchphrase in the samples, or age / money talk anywhere: written once more
-    if (out && (AGE.test(out) || MONEY.test(out) || (p.key === "samples" && repeats3(out)))) {
+    if (out && (AGE.test(out) || MONEY.test(out) || META.test(out) || (p.key === "samples" && repeats3(out)))) {
       o.onStep?.(`${p.label.replace(/…$/, "")} again (fixing a repeat or a rule)…`);
       const again = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
-      if (again && !AGE.test(again) && !MONEY.test(again)) out = again;
+      if (again && !AGE.test(again) && !MONEY.test(again) && !META.test(again)) out = again;
     }
     if (words(out) > 40) got[p.key] = out;
   }
@@ -305,7 +331,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const draft = joined + (others ? `\n\nOTHER CHARACTERS (she must not resemble them):\n${others}` : "");
   // the editor, checked: long enough, every heading there, the "real or AI" line kept, no age or money talk — else once more cooler, else the parts as they are
   const good = (t: string) => words(t) >= words(joined) * 0.8 && ["WHO YOU ARE", "HER LIFE", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"].every((h) => t.includes(h))
-    && /real or an ai|real or ai|\bai\b/i.test(t) && !AGE.test(t) && !MONEY.test(t.split("NEVER SAY")[0]);
+    && /real or an ai|real or ai|\bai\b/i.test(t) && !AGE.test(t) && !MONEY.test(t.split("NEVER SAY")[0]) && !META.test(t.split("NEVER SAY")[0]);
   o.onStep?.("Editing it (the critic)…");
   let fin = (await call(DEEP_CRITIC, draft, "editing the deep profile")).trim();
   if (!good(fin)) { o.onStep?.("Editing it again…"); fin = (await call(DEEP_CRITIC + "\nBe careful to keep every section complete.", draft, "editing the deep profile")).trim(); }
