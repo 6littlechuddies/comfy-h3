@@ -508,8 +508,8 @@ function References({ ch, anime, words }: { ch: ReturnType<typeof useCharacters.
       <div className="flex items-center"><span className="lbl flex-1">Pictures to work from</span>
         {(r.pic2 || r.pic1Own || r.place) && <button className="text-[12px] text-muted hover:text-ink" onClick={() => useMakeRefs.setState({ pic2: null, pic1Own: false, pic1: null, place: null, remixOf: null, remixBase: null })}>clear</button>}</div>
       <div className="grid grid-cols-2 gap-2.5">
-        <div>
-          <Label><span className="flex items-center gap-1.5 truncate">{ch ? `1 · ${ch.name}` : "1 · your character"}{ch && !r.pic1Own && <span className="rounded-full border border-accent/60 px-1.5 text-[10px] font-medium normal-case tracking-normal text-accent" title="Their whole sheet is used: the view closest to the angle in your words">character · {Object.keys(ch.views).filter((k) => !["sheet", "cutout"].includes(k)).length} views</span>}</span></Label>
+        <div className="min-w-0">
+          <Label><span className="flex min-w-0 items-center gap-1.5 overflow-hidden"><span className="min-w-0 truncate" title={ch ? ch.name : undefined}>{ch ? `1 · ${ch.name}` : "1 · your character"}</span>{ch && !r.pic1Own && <span className="shrink-0 rounded-full border border-accent/60 px-1.5 text-[10px] font-medium normal-case tracking-normal text-accent" title="Their whole sheet is used: the view closest to the angle in your words">{Object.keys(ch.views).filter((k) => !["sheet", "cutout"].includes(k)).length} views</span>}</span></Label>
           <Slot className="h-36" value={r.pic1} label={ch ? "Their front picture" : "Pick a character on the left"} onChange={(v) => {
             // a picture from a character's sheet: use that character with their whole sheet, not as a loose picture
             const m = v?.trayId?.match(/^kept\/characters\/([^/]+)\/(?:prev_)?(\w+)\.png$/);
@@ -526,7 +526,7 @@ function References({ ch, anime, words }: { ch: ReturnType<typeof useCharacters.
           {ch && !ch.views.front && <button className="mt-1 text-[11.5px] text-accent hover:underline" onClick={() => setTab("characters")}>Make their front picture</button>}
           {!r.pic1 && !(ch && !ch.views.front) && <PicturePicker what="picture 1" onPick={(m) => useMakeRefs.setState({ pic1: m, pic1Own: true })} />}
         </div>
-        <div>
+        <div className="min-w-0">
           <Label><span className="block truncate">{r.remixOf ? "2 · the picture you're changing" : "2 · reference"}</span></Label>
           <Slot className="h-36" value={r.pic2} label="A pose, scene, CivitAI post — or a result to change" onChange={(v) => useMakeRefs.setState({ pic2: v, ...(v ? {} : { remixOf: null, remixBase: null }) })} />
           {!r.pic2 && <PicturePicker what="reference" onPick={(m) => useMakeRefs.setState({ pic2: m, remixOf: null, remixBase: null })} civitai={() => pickFromCivitai({ kind: "ref", slot: "pic2" })} />}

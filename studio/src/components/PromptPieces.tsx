@@ -142,6 +142,7 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
   const [state, setState] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [, setFlip] = useState(0); // re-render after switching Local / Grok
   // the last change, shown word by word (new = green, gone = struck) with Undo
   const [changed, setChanged] = useState<{ x: number; y: number; part: string; out: string; before: string; after: string } | null>(null);
   const toast = useJobs((s) => s.toast);
@@ -181,7 +182,13 @@ export function useRewriteMenu(tab: Tab | undefined, value: string, onChange: (v
     // while it's rewriting, the rest of the Studio stays usable: clicks go through, and a click outside just hides this box
     <div className={cx("fade-in fixed inset-0 z-[94]", busy && "pointer-events-none")} onMouseDown={() => setState(null)}>
       <div className="pointer-events-auto absolute w-[380px] border border-line bg-raised2 p-2.5 shadow-2xl" style={{ left: Math.min(state.x, window.innerWidth - 392), top: Math.min(state.y + 6, window.innerHeight - 150) }} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="micro mb-1 text-hot">{state.start === 0 && state.end >= value.length ? "CHANGE THE PROMPT" : "CHANGE THIS PART"}</div>
+        <div className="mb-1 flex items-center gap-2"><span className="micro text-hot">{state.start === 0 && state.end >= value.length ? "CHANGE THE PROMPT" : "CHANGE THIS PART"}</span>
+          {/* who rewrites it: the local writer or your Grok tab (the same switch as Prompt writer everywhere) */}
+          <span className="ml-auto flex gap-0.5 text-[11px]">{(["local", "grok"] as const).map((w) => {
+            const on = w === "grok" ? writerOutside() : !writerOutside();
+            return <button key={w} onClick={() => { import("../lib/models").then(({ WRITER_KEY }) => { try { if (w === "grok") localStorage.setItem(WRITER_KEY, "outside"); else if (writerOutside()) localStorage.removeItem(WRITER_KEY); } catch { /* */ } setNote((n) => n + ""); setFlip((f) => f + 1); }); }}
+              aria-pressed={on} title={w === "grok" ? "Your Grok tab rewrites it (connect it under Prompt writer)" : "The writer on the rental rewrites it"} className={cx("press border px-1.5 py-0.5", on ? "border-accent text-accent" : "border-line text-muted hover:text-ink")}>{w === "grok" ? "Grok" : "Local"}</button>;
+          })}</span></div>
         <p className="mb-2 line-clamp-2 bg-hot/10 px-1.5 py-1 font-mono text-[11.5px] text-ink/90">“{value.slice(state.start, state.end)}”</p>
         <div className="flex gap-1.5">
           <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } if (e.key === "Escape") setState(null); }}

@@ -63,6 +63,13 @@ export function SelectionBar() {
       },
     },
     {
+      key: "sfw", icon: "lock", label: "Make them SFW (dressed)", short: "SFW", why: noPics, run: async () => {
+        toast(`Dressing ${n(pics.length, "picture")} — ${c ? `in ${c.name}'s outfit` : "in a plain everyday outfit"}; face, pose and background stay`, "info", t);
+        const { makeSfw } = await import("../lib/sfw");
+        await eachPic(pics, "SFW version", t, async (it) => makeSfw(await mediaOf(ref(it), it.j.label), c, { tab: t, meta: stack(it) }));
+      },
+    },
+    {
       key: "face", icon: "sparkle", label: "Sharpen faces", why: noPics, run: async () => {
         toast(`Sharpening the faces in ${n(pics.length, "picture")}`, "info", t);
         const { sharpenFace } = await import("../lib/faceDetail");

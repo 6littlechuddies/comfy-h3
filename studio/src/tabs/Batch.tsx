@@ -12,7 +12,7 @@ import { droppedUrl, useTray } from "../lib/tray";
 import { useHandoffInto, usePrimaryAction } from "../App";
 import { modelOf, useSettings } from "../lib/settings";
 import { Btn, Icon, Label, Seg, Slot, TextIn, cx, DropSelect } from "../components/ui";
-import { PromptPieces } from "../components/PromptPieces";
+import { PromptPieces, useRewriteMenu } from "../components/PromptPieces";
 import { Workspace } from "../components/Workspace";
 import { Feed } from "../components/Feed";
 import { openViewer } from "../components/Viewer";
@@ -284,6 +284,8 @@ function RecreateRow({ r, locked }: { r: Row; locked: boolean }) {
   const linked = postCharacter(r.civit!.id);
   const toast = useJobs((s) => s.toast);
   const pick = (v: "pieces" | "text") => { setView(v); try { localStorage.setItem("h3.batch.recView", v); } catch { /* */ } };
+  // highlight + right-click in the Text view: rewrite that part (Local or Grok), like Create's prompt box
+  const rw = useRewriteMenu("batch", r.prompt, (v) => update(r.id, { prompt: v, status: v.trim() ? "ready" : "new" }));
   const newChar = async () => {
     try {
       const [{ genMedia }, { useNewFromPicture }, { useSettings }] = await Promise.all([import("../lib/civitUse"), import("./Characters"), import("../lib/settings")]);
@@ -309,9 +311,10 @@ function RecreateRow({ r, locked }: { r: Row; locked: boolean }) {
       </div>
       {view === "pieces" && !locked
         ? <PromptPieces value={r.prompt} onChange={(v) => update(r.id, { prompt: v, status: v.trim() ? "ready" : "new" })} tab="batch" />
-        : <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
+        : <><textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
+            onContextMenu={rw.onContextMenu} title="Highlight words and right-click to have Local or Grok rewrite just that part"
             placeholder="Its prompt — change any of it, or leave it as posted"
-            className="inset min-h-[92px] resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70" />}
+            className="inset min-h-[92px] resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70" />{rw.menu}</>}
     </div>
   );
 }

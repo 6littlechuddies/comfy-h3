@@ -453,8 +453,9 @@ function Characters({ connected }: { connected: boolean }) {
   };
   // the site has newer names / profiles than this Studio (e.g. the drive was full and the Studio's copy wasn't saved): take them back
   const pullAll = async () => {
-    const pick = (chosen.length ? chosen : list).filter((c) => c.site?.sent?.ok || c.site?.sentKeys?.length);
-    if (!pick.length) return toast("None of these have been sent to your site yet", "info");
+    // every ticked one (or all): the Studio may not remember sending them (its save was lost), the site knows
+    const pick = chosen.length ? chosen : list;
+    if (!pick.length) return;
     try {
       const r = await fetch(`/studio-api/site/pull?ids=${pick.map((c) => c.id).join(",")}`);
       if (!r.ok) throw new Error(`the Studio answered ${r.status}`);
@@ -474,7 +475,8 @@ function Characters({ connected }: { connected: boolean }) {
         const age = Number(g.age) >= 18 ? Number(g.age) : cur.age;
         if (ch || name !== cur.name || age !== cur.age) { useCharacters.getState().save({ ...cur, name, age, site }); n++; }
       }
-      toast(`${n ? `Took the site's name and profile for ${n}` : "The Studio already matches your site"}${missing.length ? ` · not on the site: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "…" : ""}` : ""}`, n ? "good" : "info");
+      const errs = pick.filter((c) => got[c.id]?.error).length;
+      toast(`${n ? `Took the site's name and profile for ${n}` : "Nothing new from your site"} · ${pick.length - missing.length - n} already matched${missing.length ? ` · ${missing.length} not found on the site under this Studio's id (made again here, or never sent): ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "…" : ""}` : ""}${errs ? ` · ${errs} couldn't be read` : ""}`, n ? "good" : "info");
     } catch (e) { toast(`Couldn't read your site: ${(e as Error).message}`, "bad"); }
   };
   const sendAll = async () => {

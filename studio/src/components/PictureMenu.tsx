@@ -85,7 +85,7 @@ async function asPng(url: string): Promise<Blob> {
 // The menu was ~28 items. Your usage log (all rentals) showed only a handful in use — New character from this picture,
 // Download, Delete, Use in Edit, Animate — so those (plus 4K, green screen, cut out, how it was made) stay on top and the
 // rest sit under "More". Anything you pick 3+ times from More moves up by itself.
-const MAIN = new Set(["e1", "an", "newc", "how", "look", "cover", "loop", "4k", "green", "cut", "copy", "save", "del", "faceon"]);
+const MAIN = new Set(["e1", "an", "newc", "how", "look", "cover", "loop", "4k", "green", "cut", "sfw", "copy", "save", "del", "faceon"]);
 const USE_KEY = "h3.picmenu.use";
 const uses = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(USE_KEY) || "{}"); } catch { return {}; } };
 const isMain = (k: string) => MAIN.has(k) || (uses()[k] ?? 0) >= 3;
@@ -278,6 +278,14 @@ export function PictureMenuHost() {
         const { buildGreenScreen } = await import("../lib/graphs");
         await useJobs.getState().run(useSettings.getState().s.tab, "Green screen", buildGreenScreen(m.name, "studio/cutout/green"), "cutout", { before: m.url, no4k: true });
         return "On chroma green with soft hair edges — key it in Photoshop or your video editor (first time: the matting model downloads, ~1 GB)";
+      },
+    },
+    {
+      key: "sfw", icon: "lock", label: "Make it SFW (dressed)", hide: isVideo, run: async () => {
+        const m = await toMedia(t);
+        const { makeSfw } = await import("../lib/sfw");
+        await makeSfw(m, coverChar ?? null, { tab: useSettings.getState().s.tab });
+        return `Dressing it${coverChar ? ` in ${coverChar.name}'s outfit` : ""} — face, pose and background stay; it shows up in your results`;
       },
     },
     {
