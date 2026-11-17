@@ -13,6 +13,25 @@ import { Icon, cx } from "./ui";
 import { SmartClean } from "./SmartClean";
 
 export const useStorage = create<{ open: boolean }>(() => ({ open: false }));
+/** moved to another Google account: copy from the old account's "H3 Studio" folder (shared with this one) */
+function MigrateButtons() {
+  const [st, setSt] = useState<{ state: string; note: string } | null>(null);
+  const poll = () => fetch("/studio-api/migrate").then((r) => r.json()).then((d) => { setSt(d); if (d.state === "copying") setTimeout(poll, 4000); }).catch(() => {});
+  useEffect(() => { poll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = async (results: boolean) => {
+    const { askConfirm } = await import("./Dialogs");
+    if (!await askConfirm(results ? "Copy everything from your old drive, results too?" : "Copy from your old drive?",
+      "First share the old Google account's “H3 Studio” folder with this one (Google Drive → right-click the folder → Share → this account's email, Editor or Viewer). Then this copies the newest export (characters, names, profiles, settings), your LoRAs, the usage log and any Hugging Face key file" + (results ? ", and every result — the big part, it can take a while." : ". Results stay on the old drive."), "Copy", false)) return;
+    await fetch("/studio-api/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ results }) });
+    setSt({ state: "copying", note: "Copying from your old drive…" }); setTimeout(poll, 3000);
+  };
+  return <>
+    <button onClick={() => go(false)} disabled={st?.state === "copying"} title="From another Google account's “H3 Studio” folder shared with this one" className="press btn-raised h-8 rounded-lg px-3 text-[12.5px] text-ink disabled:opacity-40">Copy from my old drive</button>
+    <button onClick={() => go(true)} disabled={st?.state === "copying"} className="press btn-raised h-8 rounded-lg px-3 text-[12.5px] text-muted disabled:opacity-40">…with results</button>
+    {st?.note && st.state !== "" && <span className={cx("w-full text-[12px]", st.state === "error" ? "text-bad" : "text-muted")}>{st.note}</span>}
+  </>;
+}
+
 export const openStorage = () => useStorage.setState({ open: true });
 
 interface Drive { name?: string; folder?: string; total?: number; used?: number; trashed?: number; free?: number; studio_bytes?: number; studio_files?: number;
@@ -123,6 +142,7 @@ function StoragePanel() {
                     <button disabled={!!busy || !oldExports.length} onClick={async () => { if (await askConfirm(`Delete ${oldExports.length} older export${oldExports.length > 1 ? "s" : ""}?`, "The newest 3 Export all .zip files are kept. Older ones are deleted for good.", "Delete", true)) act("exports", { do: "prune-exports", keep: 3 }); }}
                       title={oldExports.length ? "" : "Only the newest 3 exports are there"}
                       className="press btn-raised h-8 rounded-lg px-3 text-[12.5px] text-ink disabled:opacity-40">{busy === "exports" ? "Deleting…" : `Delete older exports${oldExports.length ? ` · ${fmtBytes(oldExports.reduce((a, f) => a + f.size, 0))}` : ""}`}</button>
+                    <MigrateButtons />
                   </div>
                   {!!dr.exports?.length && (
                     <ul className="mt-3 space-y-0.5 text-[12px] text-muted">

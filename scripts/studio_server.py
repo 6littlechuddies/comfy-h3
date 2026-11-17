@@ -2951,6 +2951,51 @@ def _export_when(f: dict) -> tuple:
     return (_export_time(f), str(f.get("ModTime", "")))
 
 
+MIGRATE = {"state": "", "note": "", "at": 0.0}
+
+
+async def _migrate_shared(folder: str, step=lambda t: None, results: bool = False) -> bool:
+    """moving to another Google account: share your old account's "H3 Studio" folder with the new one, and the first rental
+    on the new account copies what matters into its own "H3 Studio" — the newest export (characters, names, profiles,
+    settings), your uploaded LoRAs, the usage log and any Hugging Face key file. Results only when asked (they're what filled
+    the old drive). Google copies it drive-to-drive where it can, so nothing goes through the rental."""
+    try:
+        rc, out = await _rclone("lsjson", "proton:", "--drive-shared-with-me", "--dirs-only", timeout=240)
+        dirs = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 and "[" in out else []
+        if not any(str(d.get("Name")) == folder for d in dirs):
+            MIGRATE.update(state="none", note=f"No shared “{folder}” folder found — share the old account's folder with this one to copy it over"); return False
+        src = f"proton,shared_with_me:{folder}"
+        MIGRATE.update(state="copying", note="Copying from your old drive…", at=time.time()); step("Copying from your old drive")
+        rc, out = await _rclone("lsjson", f"{src}/exports", timeout=240)
+        ex = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 and "[" in out else []
+        zips = [f for f in ex if not f.get("IsDir") and str(f.get("Name", "")).lower().endswith(".zip")]
+        common = ["--drive-server-side-across-configs", "--retries", "3"]
+        if zips:
+            newest = max(zips, key=_export_when)
+            rc, o2 = await _rclone("copyto", f"{src}/exports/{newest['Name']}", f"proton:{folder}/exports/{newest['Name']}", *common, timeout=3600)
+            if rc != 0: raise RuntimeError("copying the export failed: " + _redact(o2)[-300:])
+        await _rclone("copy", f"{src}/loras", f"proton:{folder}/loras", *common, timeout=7200)
+        await _rclone("copy", src, f"proton:{folder}", "--max-depth", "1", "--include", "usage.json", "--include", "*hf*.txt", "--include", "*token*.txt", "--include", "*key*.txt", *common, timeout=600)
+        if results:
+            MIGRATE.update(note="Copying your results (this is the big part)…")
+            await _rclone("copy", f"{src}/results", f"proton:{folder}/results", "--transfers", "8", *common, timeout=6 * 3600)
+        MIGRATE.update(state="done", note=f"Copied from your old drive{' (results too)' if results else ''}" + (f": {newest['Name']}" if zips else " (it had no export)"))
+        return bool(zips)
+    except Exception as e:  # noqa: BLE001
+        MIGRATE.update(state="error", note=_redact(str(e))[:300]); return False
+
+
+async def migrate_route(req):
+    """GET → how the copy from the old drive is going · POST {results: bool} → copy now (e.g. the results as well)"""
+    if req.method == "POST":
+        if not _proton_on(): return web.json_response({"error": "No drive is set up"}, status=400)
+        d = await req.json() if req.can_read_body else {}
+        await _proton_setup()
+        _spawn(_migrate_shared((os.environ.get("PROTON_FOLDER") or "H3 Studio").strip("/"), results=bool(d.get("results"))))
+        return web.json_response({"ok": True})
+    return web.json_response(MIGRATE)
+
+
 async def _proton_restore(force: bool = False):
     """a fresh rental (no characters yet) brings back your newest export from Proton Drive by itself — characters, chats,
     presets, settings — then your results in the background. PROTON_RESTORE=0 turns it off. Shown on the startup screen and
@@ -2978,6 +3023,15 @@ async def _proton_restore(force: bool = False):
                 if "not found" not in out.lower() and "directory not found" not in out.lower(): errs.append(_redact(out)[-200:])
                 continue
             found += [{**f, "Where": where} for f in files if not f.get("IsDir") and str(f.get("Name", "")).lower().endswith(".zip") and (f.get("Size") or 0) > 0]
+        if not found:
+            # a NEW drive with nothing yet: your old "H3 Studio" folder, shared with this account, is copied over first
+            it.update(state="finding", error="")
+            moved = await _migrate_shared(folder, lambda t: it.update(name=t))
+            if moved:
+                rc, out = await _rclone("lsjson", f"proton:{folder}/exports", timeout=240)
+                try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 else []
+                except ValueError: files = []
+                found = [{**f, "Where": f"{folder}/exports"} for f in files if not f.get("IsDir") and str(f.get("Name", "")).lower().endswith(".zip") and (f.get("Size") or 0) > 0]
         if not found:
             it.update(state="error" if errs else "none", error=(f"Couldn't look in {_cloud()}: " + errs[0]) if errs else f"No exports in {_cloud()} yet"); return
         # newest = the date in the name (h3-…-2026-10-10.zip, the day it was made — an upload from your PC changes the
@@ -5614,7 +5668,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
