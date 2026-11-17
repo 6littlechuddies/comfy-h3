@@ -3,7 +3,18 @@
 $ErrorActionPreference = "Continue"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rclone = Join-Path $here "rclone.exe"
-if (-not (Test-Path $rclone)) { Write-Host "rclone.exe isn't here yet - run ""1 - Setup (run once).bat"" first." -ForegroundColor Red; exit 1 }
+if (-not (Test-Path $rclone)) {
+  # no rclone.exe here yet (older H3 Studio folder): fetch the official one from rclone.org into this folder
+  Write-Host "Getting rclone (the tool that signs in to Google Drive)..." -ForegroundColor Cyan
+  $zip = Join-Path $env:TEMP "rclone-h3.zip"; $tmp = Join-Path $env:TEMP "rclone-h3"
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile $zip -UseBasicParsing
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+    Expand-Archive $zip -DestinationPath $tmp -Force
+    Copy-Item (Get-ChildItem $tmp -Recurse -Filter rclone.exe | Select-Object -First 1).FullName $rclone
+  } catch { Write-Host "Couldn't download rclone: $_" -ForegroundColor Red; exit 1 }
+}
 Write-Host "`nA browser window opens: sign in to the Google account whose Drive should hold your backups, and allow access.`n" -ForegroundColor Cyan
 # your own Google client (recommended: rclone's shared one is being retired by Google). Leave empty to use the shared one.
 $cid = (Read-Host "Your Google client ID (Enter to skip)").Trim()
