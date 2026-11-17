@@ -61,8 +61,7 @@ export async function runSelfCheck(includeVideo: boolean) {
         : m.family === "anima" ? tiny({ style: "anime", animeModel: "anima", unet: m.name, cfg: 4 })
         : tiny({ realModel: "krea2", unet: m.name }),
     })),
-    { id: "writer", label: "Prompt writer (Fable 9B)", group: "writer", make: () => writerGraph(false), note: "loads the model: ~30 s" },
-    { id: "writer_xl", label: "Big prompt writer (Qwen3.8 27B)", group: "writer_xl", make: () => writerGraph(true), note: "loads the model: ~1 min" },
+    { id: "writer", label: "Prompt writer (Qwen3.8 27B)", group: "writer", make: () => writerGraph(false), note: "loads the model: ~1 min" },
     ...(includeVideo ? [{ id: "video", label: "Video (MiniMax H3), 1 s tiny clip", group: "video", note: "loads ~47 GB: a few minutes",
       make: (pic: string) => buildAnimate({ ...S, steps: 4, mode: "i2v", prompt: "The camera slowly pushes in.", images: [pic], videos: [], audios: [], seconds: 1, width: 256, height: 256, turbo: false, loras: [], refImageSize: "match", lowMemDecode: true, prefix: "studio/check/v" }) } as T] : []),
   ];

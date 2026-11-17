@@ -119,12 +119,12 @@ export const videoMp = (scene: Scene, seconds: number) => (scene.video.quality !
 const groupReady = (id: string) => { const g = useDownloads.getState().groups.find((x) => x.id === id); return !g || g.state === "done"; };
 /** the 27B writer (default) or the small Fable 9B. While the 27B is still downloading (or switched to "later") and the
  * 9B is already here, the 9B writes for now, so you're never stuck waiting; the 27B takes over once it's in. */
-export const bigWriter = (scene: Scene) => scene.writer !== "small" && ((groupReady("writer_xl") && bigWriterFits()) || !groupReady("writer"));
+export const bigWriter = (_scene: Scene) => true; // the 27B is the only writer
 /** the 27B is wanted but the 9B is standing in for it */
-export const standIn = (scene: Scene) => scene.writer !== "small" && !groupReady("writer_xl") && groupReady("writer");
+export const standIn = (scene: Scene) => scene.writer !== "small" && !groupReady("writer");
 /** why the writer can't run yet (still downloading), or undefined */
 export function writerWhy(scene: Scene): string | undefined {
-  const g = useDownloads.getState().groups.find((x) => x.id === (bigWriter(scene) ? "writer_xl" : "writer"));
+  const g = useDownloads.getState().groups.find((x) => x.id === "writer");
   if (!g || g.state === "done") return undefined;
   if (g.state === "later") return `${g.label} is set to download later — press Download now in the status menu`;
   if (g.state === "skipped") return `${g.label} is switched off (SKIP_MODELS in your Vast template)`;

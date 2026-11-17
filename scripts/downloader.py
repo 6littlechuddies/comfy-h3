@@ -504,9 +504,9 @@ PRESETS = {
     "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "animeref", "writer", "sam"]},
     "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
     "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "animeref", "writer", "sam"]},
-    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "video", "sam", "qwen", "smooth", "writer_xl", "qwen_full"]},
-    "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth", "writer_xl"]},
-    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "animeref", "writer", "video", "sam", "smooth", "writer_xl"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "video", "sam", "qwen", "smooth", "qwen_full"]},
+    "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth"]},
+    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "animeref", "writer", "video", "sam", "smooth"]},
     "all":        {"label": "Everything",                  "groups": []},
 }
 
@@ -519,7 +519,7 @@ def preset_id() -> str:
 
 # a pictures preset carries on into video once the pictures are in (H3 straight after them); the big optional Qwen edit
 # helpers go last. "… only" presets stop at the pictures.
-FOLLOW = {"real": ["video", "smooth", "writer_xl"], "anime": ["video", "smooth", "writer_xl"]}
+FOLLOW = {"real": ["video", "smooth"], "anime": ["video", "smooth"]}
 LAST = ("qwen", "qwen_full")
 
 

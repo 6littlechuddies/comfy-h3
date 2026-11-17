@@ -21,7 +21,8 @@ export const h3ErosOn = () => h3.eros;
 export const H3_MODEL_KEY = "h3.videoModel"; // "eros" = use Eros Max when it's here
 /** which local writer writes prompts: the 27B whenever it's downloaded (default), or "fast" = always the 9B */
 export const WRITER_KEY = "h3.writer";
-export const writerFast = () => { try { return localStorage.getItem(WRITER_KEY) === "fast"; } catch { return false; } };
+/** the 9B "fast" writer is gone: always false (an old "fast" choice now means the 27B) */
+export const writerFast = () => false;
 /** smoother videos: ComfyUI's FrameInterpolate (RIFE) doubles the frames, when the node and the model are here and it's on */
 const interp = { on: false, widget: "multiplier" };
 export const setInterp = (on: boolean, widget?: string) => { interp.on = on; if (widget) interp.widget = widget; };
@@ -66,8 +67,9 @@ export const M = {
   /** H3 Relay's swap recipe: the full-precision video VAE (also in the Video group) and the FL2V 8-step 768p turbo */
   h3VaeFp16: "minimax_h3_video_vae_fp16.safetensors",
   h3TurboFl8: "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-  llmWriter: "Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-Q8_0.gguf",
-  llmWriterVision: "mmproj-F16.gguf",
+  // the 9B Fable writer was removed: "the writer" is the 27B everywhere now (same files as llmBig)
+  llmWriter: "Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf",
+  llmWriterVision: "mmproj-Qwen3.8-27B-Uncensored-F16.gguf",
   llmBig: "Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf",
   llmBigVision: "mmproj-Qwen3.8-27B-Uncensored-F16.gguf",
   llmVideo: "Qwen3VL-8B-Instruct-Q8_0.gguf",

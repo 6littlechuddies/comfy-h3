@@ -30,13 +30,13 @@ loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve
 loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors
 loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors
 
-# @group writer Prompt writer
-# (small, and the Characters and Prompt tabs need it to read profiles, pictures and clips)
-# --- MinimaxH3 Auto Prompter v7.3 (civitai.com/models/2834106) ---
+# @group writer Prompt writer (27B)
+# --- Qwen3.8-27B-Uncensored (huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF), Q5_K_M (no MTP head) + vision ---
+# The only local writer (the 9B Fable writer was removed: its prompts and profiles were too messy). Writes every prompt,
+# reads pictures and clips. Needs a 28 GB+ card to run at speed; on smaller cards use Prompt writer → Grok tab.
 # LLM Text Processor: files must sit directly in models/LLM so their names match the workflow
-LLM               https://huggingface.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF/resolve/main/Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-Q8_0.gguf
-LLM               https://huggingface.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF/resolve/main/mmproj-F16.gguf
-# (the Studio reads your clips with this same model + its vision file, so nothing else is needed for the Prompt tab)
+LLM               https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/resolve/main/Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf
+LLM               https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/resolve/main/mmproj-Qwen3.8-27B-Uncensored-F16.gguf
 
 # @group sam Select by words (SAM 3)
 # --- SAM 3.1 (Meta's Segment Anything 3, repackaged for ComfyUI by Comfy-Org; 1.6 GB; the nodes are built into ComfyUI). Finds things by
@@ -92,12 +92,6 @@ loras/minimax     https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/
 loras/minimax     https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/main/h3_character_swap_v1.5.safetensors
 # …and the speed-up it was tested with (lightx2v FL2V 8-step 768p; H3 Relay's Character Swap recipe uses it on Ref2VA at 1.0)
 loras             https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors
-
-# @group writer_xl Big prompt writer (27B)
-# --- Qwen3.8-27B-Uncensored (huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF), Q5_K_M (no MTP head) + vision ---
-# The Scenes writer (blueprint + H3 compiler). Comes right after H3 (pictures first; the 9B writer covers Create and Edit until then).
-LLM               https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/resolve/main/Qwen3.8-27B-Uncensored-noMTP-Q5_K_M.gguf
-LLM               https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/resolve/main/mmproj-Qwen3.8-27B-Uncensored-F16.gguf
 
 # @group qwen_full Edit chat helper, full precision (48 GB+ cards)
 # --- The same Qwen-Image-Edit-2511 in bf16 (38 GB). Only worth it on a card with 48 GB or more; the Studio uses it instead of the

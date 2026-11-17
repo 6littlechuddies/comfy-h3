@@ -34,7 +34,7 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
   const grokEyes = sees && grokSees() && writerOutside() && !LOCAL_ONLY.includes(stage) && (await grokStatus()).connected;
   if (writerOutside() && (!sees || grokEyes) && !LOCAL_ONLY.includes(stage)) {
     const note = grokEyes ? `\n\n(The pictures this refers to are attached to this message, in order: the first attached image is picture 1, the second is picture 2.)` : "";
-    const ans = await askOutside(o.label, await packText(pack.id), input + note, grokEyes ? o.images : undefined);
+    const ans = await askOutside(`${o.label} · Grok`, await packText(pack.id), input + note, grokEyes ? o.images : undefined);
     if (ans !== null) {
       if (ans.includes(MINOR_FLAG)) throw new Error(stopMessage(texts));
       lastWrite[stage] = { pack: `${pack.name} (Grok)`, input, out: ans };
@@ -45,7 +45,7 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
   const once = async (inp: string) => {
     const graph = buildStage({ promptFile: pack.prompt_file, promptChars: pack.chars, input: inp, params: pack.params,
       images: pack.see_image === false && stage !== "describe" ? [] : o.images, big, seed: newSeed(), thinking: pack.thinking === "on" ? "on" : "off" });
-    const job = await useJobs.getState().run(o.tab, o.label, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
+    const job = await useJobs.getState().run(o.tab, `${o.label} · 27B`, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
     const done = await waitForJob(job.id);
     return (done.texts.out ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim().replace(/^["“]|["”]$/g, "");
   };

@@ -104,6 +104,8 @@ export const useJobs = create<JobState>((set, get) => ({
     // 4K on (Create / Edit): the result is enlarged ×2 by the NVIDIA upscaler inside the same job
     try { const [{ withFourK }, { rtxInstalled }] = await Promise.all([import("./fourk"), import("./downloads")]); if (rtxInstalled() !== false && !meta.no4k) withFourK(graph, tab); } catch { /* never block a job */ }
     await ensureInputs(graph);
+    // a sampler / scheduler this ComfyUI doesn't have (from a CivitAI post): swapped for a close one instead of failing
+    try { const sw = await (await import("./samplerCheck")).fixSamplers(graph); if (sw.length) get().toast(`${label}: ${sw.join(", ")} (not installed here)`, "info", tab); } catch { /* never block a job */ }
     await dropMissingLoras(graph, tab);
     const id = await queuePrompt(graph, !!meta?.front);
     import("./usage").then(({ logJob }) => logJob(tab, etaKey, graph, (meta?.sent as { negative?: string } | undefined)?.negative)).catch(() => {});

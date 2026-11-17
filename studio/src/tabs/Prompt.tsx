@@ -389,7 +389,7 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
 export function WriterSetup() {
   const [p, set] = useSection("prompt");
   const toast = useJobs((s) => s.toast);
-  const xl = useGroup("writer_xl");
+  const xl = useGroup("writer");
   const custom = !!p.guide.trim() && p.guide.trim() !== DEFAULTS.prompt.guide.trim();
   const saveMine = async () => {
     try {
@@ -402,7 +402,7 @@ export function WriterSetup() {
     <div className="flex flex-col gap-2 border border-line bg-raised/40 p-3">
       <span className="lbl">Video plan writer</span>
       <p className="text-[12.5px] text-ink">Qwen3.8 27B</p>
-      {!xl.ready && <p className="-mt-1 text-[11.5px] text-hot">The 27B isn't in yet ({xl.why}) — Fable 9B writes until it is.</p>}
+      {!xl.ready && <p className="-mt-1 text-[11.5px] text-hot">The 27B isn't in yet ({xl.why}) — use the Grok tab until it is.</p>}
       <span className="text-[12.5px] text-muted">Instructions (prompt file)</span>
       {custom ? (
         <p className="text-[12px] leading-relaxed text-hot">Your own instructions from the old “Writer instructions” box are still in use.

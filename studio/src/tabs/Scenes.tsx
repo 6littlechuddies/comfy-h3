@@ -94,7 +94,7 @@ function NewShot({ scene }: { scene: Scene }) {
 function SceneDrawer({ scene }: { scene: Scene }) {
   const { list, patch, add, remove, select } = useScenes(useShallow((s) => ({ list: s.list, patch: s.patch, add: s.add, remove: s.remove, select: s.select })));
   const groups = useDownloads((s) => s.groups);
-  const xl = groups.find((g) => g.id === "writer_xl");
+  const xl = groups.find((g) => g.id === "writer");
   const big = bigWriter(scene);
   return (
     <>
@@ -112,9 +112,9 @@ function SceneDrawer({ scene }: { scene: Scene }) {
       <div>
         <span className="lbl">Writer model · Qwen3.8 27B</span>
         <p className="mt-1 text-[11.5px] text-dim">
-          {standIn(scene) ? `Fable 9B is writing for now — the 27B ${xl?.state === "later" ? "is set to download later" : `is still downloading (${xl?.state === "downloading" ? `${xl.pct}%` : "in line"})`} and takes over once it's in.`
+          {standIn(scene) ? `The 27B ${xl?.state === "later" ? "is set to download later" : `is still downloading (${xl?.state === "downloading" ? `${xl.pct}%` : "in line"})`} — use the Grok tab until it's in.`
             : big && xl && xl.state !== "done" ? `27B is downloading (${xl.pct}%) — the steps unlock when it's in.`
-            : !xl ? "This rental's image predates the 27B download — use Fable 9B or rent again." : "The model your prompt files were written for."}
+            : !xl ? "The 27B writer isn't on this rental — use the Grok tab." : "The model your prompt files were written for."}
         </p>
       </div>
       <div>
