@@ -2653,6 +2653,22 @@ def _full(out: str) -> bool:
     return bool(re.search(r"storageQuotaExceeded|quota|insufficient storage|no space left|storage (is )?full|exceeded.*storage", out or "", re.I))
 
 
+def _why_drive(out: str) -> str:
+    """rclone's sign-in errors in plain words, put in front of the raw message (which gets cut off)"""
+    o = out or ""
+    if re.search(r"invalid_grant|token has been expired or revoked|Token has been revoked", o, re.I):
+        return ("DRIVE SIGN-IN EXPIRED OR REVOKED — run \"Connect Google Drive.bat\" again on your PC and put the new token in "
+                "GDRIVE_TOKEN (if your Google Cloud app is still in Testing, tokens die after 7 days: set it to In production). ")
+    if re.search(r"unauthorized_client|invalid_client", o, re.I):
+        return ("DRIVE TOKEN AND CLIENT DON'T MATCH — GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET must be the same ones the token was made with "
+                "(a reset secret needs the new value; a rental keeps the values it was started with — make a new one after changing them). ")
+    if re.search(r"accessNotConfigured|Drive API has not been used|SERVICE_DISABLED", o, re.I):
+        return "THE DRIVE API IS OFF in your Google Cloud project — turn on \"Google Drive API\" there, wait a minute. "
+    if re.search(r"no such host|i/o timeout|connection refused|TLS handshake|context deadline", o, re.I):
+        return "COULDN'T REACH GOOGLE from the rental (network) — it tries again on the next save. "
+    return ""
+
+
 async def proton_sync(full: bool = False, force: bool = False) -> None:
     """new results (studio outputs) + today's export .zip → Proton Drive. `full` also re-checks older results."""
     if not _proton_on() or PROTON["running"]: return
@@ -2671,7 +2687,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
             try:
                 rc, out = await _rclone("copyto", path, f"proton:{folder}/exports/{name}", "--retries", "3", timeout=1800)
                 if rc == 0: PROTON["sent_change"] = stamp
-                else: err = ("YOUR DRIVE IS FULL — " if _full(out) else "") + "saving your characters and settings failed: " + _redact(out)[-400:]
+                else: err = ("YOUR DRIVE IS FULL — " if _full(out) else _why_drive(out)) + "saving your characters and settings failed: " + _redact(out)[-400:]
             finally:
                 try: os.remove(path)
                 except OSError: pass
@@ -2681,7 +2697,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
             args = ["copy", src, f"proton:{folder}/results", "--transfers", "2", "--checkers", "4", "--retries", "3", "--low-level-retries", "5"]
             if not full: args += ["--max-age", f"{max(1, PROTON_EVERY // 60) * 3}m"]  # only what's new since the last runs
             rc, out = await _rclone(*args)
-            if rc != 0: err = err or (("YOUR DRIVE IS FULL — results aren't being backed up (your characters and settings were saved). Free space in Storage: empty the drive's trash, prune old exports, or delete old results. " if _full(out) else "copying results failed: ") + _redact(out)[-400:])
+            if rc != 0: err = err or (("YOUR DRIVE IS FULL — results aren't being backed up (your characters and settings were saved). Free space in Storage: empty the drive's trash, prune old exports, or delete old results. " if _full(out) else _why_drive(out) + "copying results failed: ") + _redact(out)[-400:])
             m = re.findall(r"Transferred:\s+(\d+)\s*/\s*\d+", out)
             if m: PROTON["sent"] += int(m[-1])
         if err: raise RuntimeError(err)
