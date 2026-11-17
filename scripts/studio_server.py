@@ -2598,14 +2598,25 @@ def _drive_key(name: str) -> str:
 
 
 def _gdrive_token() -> str:
+    """the Google sign-in (JSON). Copes with what a pasted value often is: base64, raw JSON, or several base64 pieces glued
+    together with PowerShell's error text (an earlier connector's output) — then the newest sign-in in it is used."""
     t = (_drive_key("GDRIVE_TOKEN") or "").strip()
+    texts = [t]
     if t and not t.startswith("{"):
         import base64
-        try: t = base64.b64decode(t + "=" * (-len(t) % 4)).decode()
-        except Exception: t = ""  # noqa: BLE001
-    # just the sign-in object: an earlier connector also caught PowerShell's warning text around it
-    m = re.search(r'\{\s*"access_token".*?\}', t, re.S)
-    return m.group(0) if m else (t if t.startswith('{"') else "")
+        texts = []
+        for piece in [t] + [x for x in re.split(r"=+|[^A-Za-z0-9+/_-]+", t) if len(x) > 40]:
+            piece = piece.lstrip("+")
+            for alt in (piece, piece.replace("-", "+").replace("_", "/")):
+                try: texts.append(base64.b64decode(alt + "=" * (-len(alt) % 4)).decode("utf-8", "replace")); break
+                except Exception: pass  # noqa: BLE001
+    found = []
+    for x in texts:
+        for m in re.finditer(r'\{\s*"access_token".*?\}', x, re.S):
+            try: found.append((json.loads(m.group(0)).get("expiry") or "", m.group(0)))
+            except ValueError: pass
+    if found: return max(found)[1]  # newest sign-in
+    return t if t.startswith('{"') else ""
 
 
 def _cloud() -> str:
@@ -4845,7 +4856,7 @@ async def import_latest(req):
 LATER_FILE = os.path.join(STATE, "download_later.json")
 H3_RUN = os.environ.get("H3_RUN", "/opt/h3/run")
 # groups that only work with another one in (Krea 2 RAW uses the Krea 2 text encoder and VAE)
-NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"]}
+NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"]}
 
 
 async def downloads_later(req):

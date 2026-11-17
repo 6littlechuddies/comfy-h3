@@ -43,3 +43,11 @@ https://github.com/akatz-ai/h3-relay@e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220
 # --- Raylight (komikndr; Apache-2.0): several cards — an H3 video's frames split across every card (Ulysses sequence parallel),
 #     used by the all-cards ComfyUI that start.sh runs when the rental has 2+ cards. Brings ray + xfuser (they leave torch alone) ---
 https://github.com/komikndr/raylight@74f5defa8a4d0e6e62cf0ea5e717ea6b4305bb13
+
+# --- H3 Continuity Studio (KadoBOT; MIT): a Timeline for long H3 sequences — clips that continue each other, "visual memory"
+#     of earlier shots, H3 context windows; its Story writer can use DeepSeek (OpenAI-compatible endpoint). Node editor only ---
+https://github.com/KadoBOT/ComfyUI-H3-Continuity-Studio@a2ddb97ae8cf3e47b7ccf50a348e752cce125248
+
+# --- H3 Character Sheet Designer (ukr8b3g-cmyk; MIT): up to 13-view character sheets with native H3 reference conditioning.
+#     Its P-H3 workflow uses the H3 first/last-frame model we already have + the "Character sheets (P-H3)" download ---
+https://github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer@63a24c3c6a2b5a28dc4158819a4aeb39e9727639

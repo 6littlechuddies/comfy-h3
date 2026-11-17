@@ -124,6 +124,14 @@ loras/qwen21      https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/l
 diffusion_models  https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_raw_bf16.safetensors  krea2_raw_bf16.safetensors  fallback=https://huggingface.co/krea/Krea-2-Raw/resolve/main/raw.safetensors
 text_encoders     https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors
 
+# @group ph3 Character sheets (P-H3, for the Character Sheet Designer)
+# --- PrunaAI's P-H3 Image set: turns the H3 first/last-frame video model (Video group) into a still-image model for the H3
+# Character Sheet Designer node (github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer, workflow "P-H3 Subgraph"). Waits as
+# "later" until you ask for it. ---
+text_encoders     https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_text_encoder_int8_convrot.safetensors
+vae               https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/vae/p-h3-image_vae_int8_convrot.safetensors
+loras/P-H3-Image  https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/loras/p-h3-image_lora_bf16.safetensors
+
 # @group autoprompter AutoPrompter workflow extras
 # Only used by the imported "MinimaxH3 Auto Prompter" workflow in the ComfyUI node editor (QwenVL GGUF node), not by the Studio
 LLM/GGUF/Qwen/Qwen3-VL-8B-Instruct-GGUF  https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q8_0.gguf
