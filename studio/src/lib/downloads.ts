@@ -57,7 +57,11 @@ async function poll() {
     if (r.ok) {
       const d = await r.json();
       const before = useDownloads.getState().groups;
-      useDownloads.setState({ known: true, active: !!d.active, groups: d.groups ?? [], mbps: d.mbps ?? 0, pct: d.pct ?? 0, left_s: d.left_s ?? -1, gpu: d.gpu, local: !!d.local, preset: d.preset, presets: d.presets });
+      const dsm = await import("./deepseek");
+      await dsm.ensureDeepseek();
+      const ds = dsm.deepseekOn();
+      const groups = ((d.groups ?? []) as Group[]).map((g) => (ds && g.id === "writer" ? { ...g, label: "Prompt writer (DeepSeek)", state: "done" as const, pct: 100, why: null } : g));
+      useDownloads.setState({ known: true, active: !!d.active, groups, mbps: d.mbps ?? 0, pct: d.pct ?? 0, left_s: d.left_s ?? -1, gpu: d.gpu, local: !!d.local, preset: d.preset, presets: d.presets });
       // on your own PC there's no local prompt writer: prompts come from your Grok tab unless you've picked something else
       if (d.local) { try { if (!localStorage.getItem("h3.writer")) localStorage.setItem("h3.writer", "outside"); } catch { /* */ } }
       syncKreaTE(d.groups ?? []);
@@ -73,6 +77,8 @@ async function poll() {
   timer = setTimeout(poll, next);
 }
 if (typeof window !== "undefined") { clearTimeout(timer); poll(); }
+/** ask the downloader again now (e.g. DeepSeek was just switched on: the writer shows ready) */
+export function refreshDownloads() { clearTimeout(timer); void poll(); }
 
 /** leave a group out on this rental, or fetch it now / try a failed one again */
 export async function setLater(id: GroupId, later: boolean | "next"): Promise<void> {

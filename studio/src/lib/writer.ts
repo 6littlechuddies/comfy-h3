@@ -45,7 +45,7 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
   const once = async (inp: string) => {
     const graph = buildStage({ promptFile: pack.prompt_file, promptChars: pack.chars, input: inp, params: pack.params,
       images: pack.see_image === false && stage !== "describe" ? [] : o.images, big, seed: newSeed(), thinking: pack.thinking === "on" ? "on" : "off" });
-    const job = await useJobs.getState().run(o.tab, `${o.label} · 27B`, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
+    const job = await useJobs.getState().run(o.tab, `${o.label} · ${(await import("./deepseek")).deepseekOn() ? "DeepSeek" : "27B"}`, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
     const done = await waitForJob(job.id);
     return (done.texts.out ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim().replace(/^["“]|["”]$/g, "");
   };

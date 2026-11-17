@@ -104,6 +104,12 @@ export const useJobs = create<JobState>((set, get) => ({
     // 4K on (Create / Edit): the result is enlarged ×2 by the NVIDIA upscaler inside the same job
     try { const [{ withFourK }, { rtxInstalled }] = await Promise.all([import("./fourk"), import("./downloads")]); if (rtxInstalled() !== false && !meta.no4k) withFourK(graph, tab); } catch { /* never block a job */ }
     await ensureInputs(graph);
+    // DeepSeek on: a writer job goes to DeepSeek through the rental instead of ComfyUI (falls back if it has parts DeepSeek can't do)
+    if (Object.values(graph).some((n) => n.class_type === "LLMTextProcessor") && !meta.localWriter) {
+      const { deepseekOn, ensureDeepseek } = await import("./deepseek");
+      await ensureDeepseek();
+      if (deepseekOn()) { const j = await runOnDeepseek(tab, label, graph, etaKey, meta); if (j) return j; }
+    }
     // a sampler / scheduler this ComfyUI doesn't have (from a CivitAI post): swapped for a close one instead of failing
     try { const sw = await (await import("./samplerCheck")).fixSamplers(graph); if (sw.length) get().toast(`${label}: ${sw.join(", ")} (not installed here)`, "info", tab); } catch { /* never block a job */ }
     await dropMissingLoras(graph, tab);
@@ -142,7 +148,8 @@ export const useJobs = create<JobState>((set, get) => ({
   cancel: (id) => {
     const job = get().jobs.find((j) => j.id === id);
     if (!job) return;
-    if (job.status === "running") interrupt(id);
+    if (id.startsWith("ds-")) { /* DeepSeek's answer is ignored when it comes */ }
+    else if (job.status === "running") interrupt(id);
     else deleteQueued([id]);
     patch(id, { status: "cancelled", endedAt: Date.now() });
   },
@@ -166,6 +173,37 @@ export const useJobs = create<JobState>((set, get) => ({
 
 /** each job's graph, so a waiting one can be moved to the front */
 const GRAPHS = new Map<string, ApiGraph>();
+type DsAnswer = { texts?: Record<string, string>; error?: string; node?: string };
+/** a writer job answered by DeepSeek: shows in the queue like any job, done when DeepSeek answers (null = not one it can do) */
+async function runOnDeepseek(tab: Tab, label: string, graph: ApiGraph, etaKey: string, meta: Record<string, unknown>): Promise<Job | null> {
+  const id = `ds-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const titles: Record<string, string> = {}; const classes: Record<string, string> = {};
+  for (const [nid, n] of Object.entries(graph)) { if (n._meta?.title) titles[nid] = n._meta.title; classes[nid] = n.class_type; }
+  const now = Date.now();
+  const job: Job = { id, tab, label: label.replace(/ · (27B|9B)$/, "") + (/ · (DeepSeek|Grok)$/.test(label) ? "" : " · DeepSeek"), etaKey, status: "running", value: 0, max: 0, outputs: [], texts: {}, queuedAt: now, startedAt: now,
+    etaMs: useJobs.getState().eta(`ds:${etaKey}`), meta: { ...meta, deepseek: true }, titles, classes, doneNodes: 0, totalNodes: Object.keys(graph).length };
+  collected.add(id);
+  const go = fetch("/studio-api/deepseek/graph", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ graph }) })
+    .then(async (r) => ({ status: r.status, d: await r.json().catch(() => ({})) as DsAnswer }))
+    .catch((e) => ({ status: 0, d: { error: `Couldn't reach the rental: ${(e as Error).message}` } as DsAnswer }));
+  // a graph with a part DeepSeek can't do answers at once (422): that one goes to ComfyUI after all
+  const first = await Promise.race([go, new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
+  if (first && first.status === 422) { collected.delete(id); return null; }
+  useJobs.setState((s) => ({ jobs: trimJobs([job, ...s.jobs]) }));
+  void go.then(({ status, d }) => {
+    if (!find(id) || find(id)!.status === "cancelled") return;
+    if (status === 422) { patch(id, { status: "error", endedAt: Date.now(), error: `DeepSeek can't run this job (${d.node ?? "a part it doesn't know"})` }); return; }
+    if (status !== 200 || !d.texts) {
+      const msg = d.error ?? `DeepSeek: the rental answered ${status}`;
+      patch(id, { status: "error", endedAt: Date.now(), error: msg });
+      if (!meta.quietFail) useJobs.getState().toast(`${job.label} failed: ${msg}`, "bad", tab);
+      return;
+    }
+    recordTiming(`ds:${etaKey}`, Date.now() - now);
+    patch(id, { status: "done", endedAt: Date.now(), texts: d.texts, value: 1, max: 1, doneNodes: job.totalNodes });
+  });
+  return job;
+}
 /** the same graph with every RTX upscale step taken out (whatever read from it reads its input instead) */
 function withoutRtx(src: ApiGraph): ApiGraph {
   const g = JSON.parse(JSON.stringify(src)) as ApiGraph;
@@ -511,7 +549,9 @@ async function loadSaved() {
   for (const j of saved) if (j.status === "done" || j.status === "error" || j.status === "cancelled") collected.add(j.id);
   useJobs.setState((s) => ({ jobs: trimJobs([...s.jobs, ...saved.filter((j) => !s.jobs.some((x) => x.id === j.id))]) }));
   // jobs that were still going when the page closed: finished meanwhile → collect them; else they keep reporting in
-  for (const j of saved.filter((x) => x.status === "running" || x.status === "queued")) {
+  // a DeepSeek job can't be picked up again after the page closed: it says so instead of spinning
+  for (const j of saved.filter((x) => x.id.startsWith("ds-") && (x.status === "running" || x.status === "queued"))) patch(j.id, { status: "error", error: "The page closed before DeepSeek answered — run it again." });
+  for (const j of saved.filter((x) => (x.status === "running" || x.status === "queued") && !x.id.startsWith("ds-"))) {
     history(j.id).then((h) => { if (h) collect(j.id); }).catch(() => {});
   }
 }
@@ -521,7 +561,7 @@ connect();
 // safety net: every few seconds, ask ComfyUI what it's doing — a job it's making shows as running, and one that finished
 // while no message reached this tab (another tab queued it, the connection dropped) is collected
 setInterval(async () => {
-  const open = useJobs.getState().jobs.filter((j) => j.status === "queued" || j.status === "running");
+  const open = useJobs.getState().jobs.filter((j) => (j.status === "queued" || j.status === "running") && !j.id.startsWith("ds-"));
   if (!open.length) return;
   let q: { queue_running?: unknown[][]; queue_pending?: unknown[][]; h3_partial?: boolean } | null = null;
   try { q = await (await fetch("/queue", { cache: "no-store" })).json(); } catch { return; }

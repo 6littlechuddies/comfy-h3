@@ -603,6 +603,14 @@ BIG_ONLY = {"qwen_full": 44000, "writer_xl": 28000}
 DISK_RESERVE = int(float(os.environ.get("DISK_RESERVE_GB", "15")) * 2**30)
 
 
+def _deepseek_on() -> bool:
+    if (os.environ.get("DEEPSEEK_API_KEY") or "").strip(): return True
+    try:
+        with open(os.path.join(os.environ.get("H3_WORK") or os.path.expanduser("~/.h3/work"), ".h3-api-keys.json")) as f:
+            return bool((json.load(f) or {}).get("DEEPSEEK_API_KEY"))
+    except (OSError, ValueError): return False
+
+
 def later_ids(groups) -> set[str]:
     d = switches()
     small = SMALL_SKIP if SMALL_GPU and os.environ.get("H3_SMALL_LATER") == "1" else set()
@@ -612,6 +620,8 @@ def later_ids(groups) -> set[str]:
     ids = (SKIP | DEFAULT_LATER | small | outside | set(d.get("later") or [])) - set(d.get("now") or [])
     vram = GPU.get("vram_mb", 0)
     ids |= {g for g, need in BIG_ONLY.items() if 0 < vram < need}
+    # DeepSeek writes instead (its key in the template, or pasted in the Studio): the local writer isn't downloaded
+    if _deepseek_on(): ids |= {"writer", "writer_xl"}
     if groups: ids.discard(groups[0]["id"])
     return ids
 

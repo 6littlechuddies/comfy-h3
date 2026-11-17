@@ -2681,6 +2681,178 @@ def _why_drive(out: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ DeepSeek: the writer, through DeepSeek's API instead of a local model
+# DEEPSEEK_API_KEY in the Vast template (or pasted in the Studio: kept in WORK/.h3-api-keys.json on this rental). Every writer
+# job the Studio makes (an LLMTextProcessor graph) is read here and sent to DeepSeek: the system prompt file, the words, the
+# pictures (and frames of a clip), the settings — the answer comes back under the same titles the ComfyUI job would have.
+API_KEYS = os.path.join(WORK, ".h3-api-keys.json")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
+DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com").rstrip("/")
+
+
+def _api_key(name: str) -> str:
+    try:
+        with open(API_KEYS) as f: v = (json.load(f) or {}).get(name)
+        if v: return str(v)
+    except (OSError, ValueError): pass
+    return (os.environ.get(name) or "").strip()
+
+
+async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "") -> tuple[str, str]:
+    body = {"model": DEEPSEEK_MODEL, "messages": messages, "max_tokens": max(64, min(32000, int(max_tokens))), "temperature": temperature, "top_p": top_p,
+            "thinking": {"type": "enabled" if thinking else "disabled"}, "stream": False}
+    if thinking: body["reasoning_effort"] = "low"  # a lot of thinking makes the writing worse, not better
+    last = ""
+    async with aiohttp.ClientSession() as s:
+        for attempt in range(3):
+            try:
+                async with s.post(f"{DEEPSEEK_URL}/chat/completions", json=body, headers={"Authorization": f"Bearer {key or _api_key('DEEPSEEK_API_KEY')}"},
+                                  timeout=aiohttp.ClientTimeout(total=600)) as r:
+                    txt = await r.text()
+                    if r.status == 200:
+                        m = (json.loads(txt).get("choices") or [{}])[0].get("message") or {}
+                        return str(m.get("content") or ""), str(m.get("reasoning_content") or "")
+                    last = f"DeepSeek answered {r.status}: " + _redact(txt)[:300]
+                    if r.status in (400, 401, 402, 403, 422): break  # bad key, no balance, a request it won't take: no point retrying
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last = f"Couldn't reach DeepSeek: {type(e).__name__}"
+            await asyncio.sleep(2 + attempt * 3)
+    if " 401" in last: last = "DeepSeek refused the key (401) — check DEEPSEEK_API_KEY. " + last
+    if " 402" in last: last = "DeepSeek: no balance left on the account (402) — top up at platform.deepseek.com. " + last
+    raise RuntimeError(last)
+
+
+def _img_url(path: str, max_side: int = 1536) -> str:
+    """a picture as a data: URL, shrunk so the longest side is at most max_side (smaller requests, same reading)"""
+    import base64, io
+    try:
+        from PIL import Image
+        im = Image.open(path); im = im.convert("RGB"); im.thumbnail((max_side, max_side))
+        b = io.BytesIO(); im.save(b, "JPEG", quality=88); data = b.getvalue()
+    except Exception:  # noqa: BLE001
+        with open(path, "rb") as f: data = f.read()
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+
+
+def _input_path(name: str) -> str:
+    name = str(name or "")
+    kind = "input"
+    m = re.match(r"^(.*) \[(input|output|temp)\]$", name)
+    if m: name, kind = m.group(1), m.group(2)
+    base = {"input": INPUT, "output": OUTPUT}.get(kind, INPUT)
+    p = os.path.normpath(os.path.join(base, name))
+    if not p.startswith(os.path.normpath(base)): raise ValueError("bad file")
+    return p
+
+
+async def _clip_frames(n: dict) -> list[str]:
+    """VHS_LoadVideo's frames (24 fps, every nth, a cap) as pictures, via ffmpeg"""
+    i = n.get("inputs") or {}
+    src = _input_path(i.get("video"))
+    rate, skip, nth, cap = 24, int(i.get("skip_first_frames") or 0), max(1, int(i.get("select_every_nth") or 1)), max(1, min(16, int(i.get("frame_load_cap") or 8)))
+    tmp = os.path.join(WORK, "ds-frames", uuid.uuid4().hex[:8]); os.makedirs(tmp, exist_ok=True)
+    try:
+        vf = f"fps={rate},select='gte(n\\,{skip})*not(mod(n-{skip}\\,{nth}))',scale=-2:{int(i.get('custom_height') or 384) or 384}"
+        p = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-i", src, "-vf", vf, "-vsync", "vfr", "-frames:v", str(cap), os.path.join(tmp, "f%03d.jpg"),
+                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(p.communicate(), 120)
+        files = sorted(os.listdir(tmp))
+        if not files: raise RuntimeError("couldn't read frames from the clip: " + err.decode(errors="ignore")[-200:])
+        return [_img_url(os.path.join(tmp, f), 768) for f in files]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+class _Unsupported(Exception):
+    pass
+
+
+async def deepseek_graph(request: web.Request) -> web.Response:
+    """run a writer graph (LLMTextProcessor + its pictures/words) on DeepSeek: {graph} → {texts: {title: text}}"""
+    if not _api_key("DEEPSEEK_API_KEY"): return web.json_response({"error": "no DeepSeek key"}, status=400)
+    g = (await request.json()).get("graph") or {}
+    cache: dict = {}
+
+    async def val(x):
+        if isinstance(x, list) and len(x) == 2 and isinstance(x[0], str):
+            return await node_out(x[0], int(x[1]))
+        return x
+
+    async def images(link) -> list[str]:
+        nid = link[0]; n = g.get(nid) or {}; c = n.get("class_type"); i = n.get("inputs") or {}
+        if c == "LoadImage": return [_img_url(_input_path(i.get("image")))]
+        if c == "BatchImagesNode":
+            out = []
+            for k in sorted(i, key=lambda k: int(re.sub(r"\D", "", k) or 0)):
+                if isinstance(i[k], list): out += await images(i[k])
+            return out
+        if c == "VHS_LoadVideo": return await _clip_frames(n)
+        raise _Unsupported(c)
+
+    async def node_out(nid: str, idx: int):
+        if (nid, idx) in cache: return cache[(nid, idx)]
+        n = g.get(nid) or {}; c = n.get("class_type"); i = n.get("inputs") or {}
+        if c == "StringConcatenate":
+            a, b = await val(i.get("string_a", "")), await val(i.get("string_b", ""))
+            v = f"{a}{i.get('delimiter', '')}{b}"
+        elif c in ("PrimitiveString", "PrimitiveStringMultiline", "String", "StringMultiline"):
+            v = await val(i.get("value", ""))
+        elif c == "LLMTextProcessor":
+            sysf = str(i.get("system_prompt") or "none")
+            system = ""
+            if sysf != "none":
+                try:
+                    with open(os.path.join(LLM_PROMPTS, os.path.basename(sysf)), encoding="utf-8", errors="ignore") as f: system = f.read()
+                except OSError: system = ""
+            prompt = str(await val(i.get("prompt", "")))
+            pics = await images(i["image"]) if isinstance(i.get("image"), list) else []
+            user = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": u}} for u in pics] if pics else prompt
+            msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}]
+            content, reasoning = await _deepseek(msgs, max_tokens=int(i.get("max_tokens") or 4000), temperature=float(i["temperature"]) if i.get("temperature") is not None else 0.6,
+                                                 top_p=float(i.get("top_p") or 0.9), thinking=str(i.get("reasoning") or "off") == "on")
+            cache[(nid, 0)], cache[(nid, 1)] = content, reasoning
+            v = content if idx == 0 else reasoning
+        else:
+            raise _Unsupported(c)
+        cache[(nid, idx)] = v
+        return v
+
+    texts: dict = {}
+    try:
+        for nid, n in g.items():
+            if n.get("class_type") in ("PreviewAny", "ShowText|pysssss") and isinstance((n.get("inputs") or {}).get("source"), list):
+                title = (n.get("_meta") or {}).get("title") or nid
+                texts[title] = str(await val(n["inputs"]["source"]))
+    except _Unsupported as e:
+        return web.json_response({"error": "unsupported", "node": str(e)}, status=422)
+    except Exception as e:  # noqa: BLE001
+        return web.json_response({"error": _redact(str(e))[:500]}, status=502)
+    return web.json_response({"texts": texts})
+
+
+async def deepseek_status(request: web.Request) -> web.Response:
+    """GET: is DeepSeek set up? POST {key}: try a key (one tiny call), keep it on this rental if it works ("" removes it)"""
+    if request.method == "POST":
+        key = str((await request.json()).get("key") or "").strip()
+        data = {}
+        try:
+            with open(API_KEYS) as f: data = json.load(f) or {}
+        except (OSError, ValueError): pass
+        if key:
+            try: await _deepseek([{"role": "user", "content": "Say ok."}], max_tokens=8, key=key)
+            except Exception as e:  # noqa: BLE001
+                return web.json_response({"error": _redact(str(e)).replace(key, "‹hidden›")[:400]}, status=400)
+            data["DEEPSEEK_API_KEY"] = key
+        else:
+            data.pop("DEEPSEEK_API_KEY", None)
+        os.makedirs(WORK, exist_ok=True)
+        with open(API_KEYS, "w") as f: json.dump(data, f)
+        os.chmod(API_KEYS, 0o600)
+    k = _api_key("DEEPSEEK_API_KEY")
+    src = "template" if os.environ.get("DEEPSEEK_API_KEY") and k == os.environ.get("DEEPSEEK_API_KEY", "").strip() else "pasted" if k else None
+    return web.json_response({"on": bool(k), "model": DEEPSEEK_MODEL, "source": src})
+
+
 async def drive_keys(request: web.Request) -> web.Response:
     """Storage → New drive keys: paste a new token (and the client it was made with) on a running rental — no new rental needed.
     Tested at once; kept only if Google lets it in."""
@@ -3646,11 +3818,13 @@ def _redact(text):
         if _SECRET_NAME.search(k) and v and len(v) >= 6:
             for part in [v] + [x for x in re.split(r"[,\s]+", v) if len(x) >= 6]:
                 text = text.replace(part, "‹hidden›")
-    try:
-        with open(DRIVE_KEYS) as f:
-            for v in (json.load(f) or {}).values():
-                if isinstance(v, str) and len(v) >= 6: text = text.replace(v, "‹hidden›")
-    except (OSError, ValueError): pass
+    for fn in (DRIVE_KEYS, API_KEYS):
+        try:
+            with open(fn) as f:
+                for v in (json.load(f) or {}).values():
+                    if isinstance(v, str) and len(v) >= 6: text = text.replace(v, "‹hidden›")
+        except (OSError, ValueError): pass
+    text = re.sub(r"\bsk-[A-Za-z0-9]{20,}", "‹hidden›", text)
     text = re.sub(r"\bhf_[A-Za-z0-9]{20,}", "‹hidden›", text)
     text = re.sub(r"(?i)(token|key|password|authorization)([\"']?\s*[:=]\s*[\"']?)(?=[A-Za-z._\-]*\d)[A-Za-z0-9._\-]{12,}", r"\1\2‹hidden›", text)
     return text
@@ -5741,7 +5915,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
