@@ -364,7 +364,7 @@ function MoreMenu() {
       <button onClick={() => setOpen((v) => !v)} aria-label="More" aria-expanded={open} className="press btn-raised flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:text-ink"><Icon name="dots" size={18} /></button>
       {open && <>
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-        <div className="zoom-in absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-panel p-1.5 shadow-[0_24px_60px_-16px_rgba(0,0,0,.8)]" onClick={() => setOpen(false)}>
+        <div className="zoom-in absolute right-0 top-full z-50 mt-2 max-h-[calc(100vh-90px)] w-72 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-[0_24px_60px_-16px_rgba(0,0,0,.8)]" onClick={() => setOpen(false)}>
           {(() => {
             const all = MORE_ITEMS();
             const u = moreUses();
