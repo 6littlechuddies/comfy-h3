@@ -26,7 +26,7 @@ loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve
 # @group kedit2 Edit V2 (Krea 2)
 # --- Krea 2 Identity Edit V2 + General Edit V2 (civitai.com/models/2761113, 1.7 GB each): Identity restages a person from a
 # picture (swaps, "put her here"), General does plain-words changes. Used instead of v1.2 once both are here (Edit → Edit
-# model can switch back). If this group fails, v1.2 keeps working. ---
+# model can switch back, which downloads v1.2 again — it is retired otherwise). ---
 loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors
 loras/Krea2       https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors
 

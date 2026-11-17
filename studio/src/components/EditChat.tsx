@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useHandoffInto, usePrimaryAction } from "../App";
 import { viewUrl } from "../lib/api";
 import { coverOf, isAdult, useCharacters } from "../lib/characters";
-import { setLater, useDownloads, useGroup } from "../lib/downloads";
+import { kreaEditGroup, setLater, useDownloads, useGroup } from "../lib/downloads";
 import { pickFromCivitai } from "./ImageImport";
 import { useEditChars, useEditPick, useEditWords } from "../lib/editPick";
 import { qwenFast, addCharacter, addPic, canvasOf, continueFrom, inProject, send, takeAsPic, useEditChat, type Chat, type ChatPic, type Engine, type Turn } from "../lib/editchat";
@@ -39,7 +39,7 @@ export function EditChat() {
   const chars = useCharacters(useShallow((s) => s.list.filter((c) => isAdult(c) && c.views.front)));
   const selChar = useCharacters((s) => s.list.find((x) => x.id === s.sel) ?? null);
   const toast = useJobs((s) => s.toast);
-  const kedit = useGroup("kedit");
+  const kedit = useGroup(kreaEditGroup());
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
@@ -126,7 +126,7 @@ export function EditChat() {
     </>
   );
   return (
-    <Workspace needs="kedit" tab="edit" title="Edit" sub="Chat · talk to the picture"
+    <Workspace needs={kreaEditGroup()} tab="edit" title="Edit" sub="Chat · talk to the picture"
       bar={<PromptBar value={draft} onChange={setDraft} chips={chips} minRows={2} mention={mention} pose="instruct"
         lead={canvas ? <span className="group relative block h-14 w-11 overflow-hidden rounded-[3px] border border-line" title={`Working on: ${canvas.label}`}><img src={canvas.url} alt="" className="h-full w-full object-cover" /><span className="micro absolute inset-x-0 bottom-0 bg-black/70 text-center text-[9px] text-white">{chat?.head ? "NOW" : "START"}</span>
           <button aria-label="Stop working on this picture" title="Stop working on this picture — the next message starts from the first picture you name with @" onClick={() => chat && useEditChat.getState().patch(chat.id, (c) => ({ ...c, head: null, start: null }))}

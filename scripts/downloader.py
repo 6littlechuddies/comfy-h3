@@ -493,6 +493,10 @@ SMALL_SKIP = {"video", "writer_xl", "autoprompter", "eros"}
 # Waiting until asked for (status menu → Now, or the tab that needs it): Eros Max (Animate → Video model), LoRA training
 # (Characters → Train) and the AutoPrompter extras (old node-editor workflow only) — they ate the disk the 27B writer needs
 DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend").split(",") if x.strip()}
+# Retired: never downloaded, and taken off the disk when found (Edit V1 — V2 replaces it; the Qwen edit helper, both builds;
+# the IP-Adapter anime sheets; the node editor's AutoPrompter LLM — DeepSeek writes). "Download now" still fetches one.
+RETIRED = {x.strip() for x in os.environ.get("H3_RETIRED", "kedit,qwen,qwen_full,animeref,autoprompter").split(",") if x.strip()}
+DEFAULT_LATER |= RETIRED
 
 
 # Presets: what this rental is for. Its groups come first (in this order) and every other group waits as "Later" — one
@@ -500,13 +504,13 @@ DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,aut
 # screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
 # "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
 PRESETS = {
-    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
-    "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "animeref", "writer", "sam"]},
-    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "sam", "qwen", "qwen_full"]},
-    "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "animeref", "writer", "sam"]},
-    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit", "kedit2", "writer", "video", "sam", "qwen", "smooth", "qwen_full"]},
+    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kedit2", "writer", "sam"]},
+    "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "writer", "sam"]},
+    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kedit2", "writer", "sam"]},
+    "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "writer", "sam"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit2", "writer", "video", "sam", "smooth"]},
     "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth"]},
-    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "animeref", "writer", "video", "sam", "smooth"]},
+    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "writer", "video", "sam", "smooth"]},
     "all":        {"label": "Everything",                  "groups": []},
 }
 
@@ -819,6 +823,19 @@ def main() -> int:
     with open(os.path.join(RUN, "downloader.pid"), "w") as fh:
         fh.write(str(os.getpid()))
     mark_later(); check_groups(); write(groups)
+    # retired groups (and the local writer while DeepSeek writes) still on this disk: removed once, unless you chose "Download now"
+    try:
+        sw = switches(); now_ids = set(sw.get("now") or [])
+        gone = {g["id"] for g in groups[1:] if (g["id"] in RETIRED or (g["id"] in ("writer", "writer_xl") and _deepseek_on()))
+                and g["id"] not in now_ids and any(os.path.exists(f["path"]) for f in g["files"])}
+        if gone:
+            sw["later"] = sorted(set(sw.get("later") or []) | gone); sw["remove"] = sorted(set(sw.get("remove") or []) | gone)
+            os.makedirs(os.path.dirname(LATER_FILE), exist_ok=True)
+            with open(LATER_FILE + ".tmp", "w") as fh: json.dump(sw, fh)
+            os.replace(LATER_FILE + ".tmp", LATER_FILE)
+            log("removing from this disk (not used): " + ", ".join(sorted(gone)))
+    except Exception as e:  # noqa: BLE001
+        log(f"retired groups: {e}")
     lf_mtime = os.path.getmtime(LATER_FILE) if os.path.exists(LATER_FILE) and not switches().get("remove") else 0
 
     p = None; dl_start = None; dl_base = 0; launched_order: tuple = ()

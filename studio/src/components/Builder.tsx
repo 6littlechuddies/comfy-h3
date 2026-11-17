@@ -4,7 +4,7 @@ import { useState } from "react";
 import { viewUrl } from "../lib/api";
 import { buildTrainSet, downloadSet, editCaption, isBuilding, recheck, removeItem, setTrainOpts, toggleKeep, triggerOf, addToSet } from "../lib/builder";
 import { faceView, useCharacters, type Character, type TrainItem } from "../lib/characters";
-import { useGroup } from "../lib/downloads";
+import { kreaEditGroup, useGroup } from "../lib/downloads";
 import { friendlyError, useJobs } from "../lib/jobs";
 import { openViewer } from "./Viewer";
 import { TrainHere } from "./TrainHere";
@@ -14,7 +14,7 @@ const SHOT_LABEL: Record<TrainItem["shot"], string> = { close: "close-up", half:
 
 export function TrainSetMaker({ c, back }: { c: Character; back: () => void }) {
   const toast = useJobs((s) => s.toast);
-  const kedit = useGroup("kedit");
+  const kedit = useGroup(kreaEditGroup());
   const writer = useGroup("writer");
   const [count, setCount] = useState(24);
   const [open, setOpen] = useState<string | null>(null);

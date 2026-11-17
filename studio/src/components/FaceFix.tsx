@@ -1,10 +1,10 @@
-import { useGroup } from "../lib/downloads";
+import { kreaEditGroup, useGroup } from "../lib/downloads";
 import { Slider } from "./ui";
 
 /** "Sharpen the face after": SAM 3 finds the face, Krea 2 Edit redraws it sharper looking at the character's own picture */
 export function FaceFix({ on, strength, onChange }: { on: boolean; strength: number; onChange: (p: { on?: boolean; strength?: number }) => void }) {
   const sam = useGroup("sam");
-  const kedit = useGroup("kedit");
+  const kedit = useGroup(kreaEditGroup());
   const ready = sam.ready && kedit.ready;
   return (
     <div className="-mt-2 flex flex-col gap-2">

@@ -99,7 +99,12 @@ export async function setPreset(id: string): Promise<void> {
 }
 
 /** the model groups an Edit engine needs: Krea 2 Edit also uses the Krea 2 model, text encoder and VAE */
-const ENGINE_GROUPS: Record<string, string[]> = { krea: ["image", "kedit"], anima: ["anime"], noob: ["anime"] };
+/** Krea 2 Edit's models: V2 (the default; V1 is retired and only downloads if you switch Edit → Edit model back to it) */
+export function kreaEditGroup(): GroupId {
+  let v1 = false; try { v1 = localStorage.getItem(KREA_EDIT_KEY) === "v1"; } catch { /* private mode */ }
+  return v1 ? "kedit" : "kedit2";
+}
+const ENGINE_GROUPS: Record<string, string[]> = { get krea() { return ["image", kreaEditGroup()]; }, anima: ["anime"], noob: ["anime"] } as Record<string, string[]>;
 /** the first of an Edit engine's groups that isn't in yet (for the "still downloading" notice), else its main group */
 export function editGroup(engine: string): GroupId {
   const need = ENGINE_GROUPS[engine] ?? ENGINE_GROUPS.krea;
