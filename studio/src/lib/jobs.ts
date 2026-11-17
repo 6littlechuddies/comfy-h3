@@ -166,6 +166,17 @@ export const useJobs = create<JobState>((set, get) => ({
 
 /** each job's graph, so a waiting one can be moved to the front */
 const GRAPHS = new Map<string, ApiGraph>();
+/** the same graph with every RTX upscale step taken out (whatever read from it reads its input instead) */
+function withoutRtx(src: ApiGraph): ApiGraph {
+  const g = JSON.parse(JSON.stringify(src)) as ApiGraph;
+  const ids = Object.keys(g).filter((k) => g[k].class_type === "RTXVideoSuperResolution");
+  for (const rid of ids) {
+    const from = g[rid].inputs.images;
+    delete g[rid];
+    for (const n of Object.values(g)) for (const [k, v] of Object.entries(n.inputs)) if (Array.isArray(v) && v[0] === rid) n.inputs[k] = from;
+  }
+  return g;
+}
 function patch(id: string, p: Partial<Job> | ((j: Job) => Partial<Job>)) {
   useJobs.setState((s) => ({ jobs: s.jobs.map((j) => (j.id === id ? { ...j, ...(typeof p === "function" ? p(j) : p) } : j)) }));
 }
@@ -234,6 +245,21 @@ async function collect(id: string, mayLose = true) {
   if (lost) collected.delete(id);
   misses.delete(id);
   const st = useJobs.getState();
+  // RTX upscaling installed but this GPU can't run it ("NvVFX_Load failed"): turn it off for this rental and
+  // run the same job again without that step, instead of losing it
+  const g0 = GRAPHS.get(id);
+  if (failed && g0 && /NvVFX|RTXVideoSuperResolution|nvidia.?vfx/i.test(errMsg ?? "") && !job.meta?.noRtxRetry) {
+    try {
+      (await import("./downloads")).rtxBroken();
+      const g = withoutRtx(g0);
+      useJobs.getState().toast(`${job.label}: this rental's GPU can't run RTX upscaling — running it again without it (native size)`, "info", job.tab);
+      void useJobs.getState().run(job.tab, job.label, g, job.etaKey, { ...(job.meta ?? {}), no4k: true, noRtxRetry: true });
+      GRAPHS.delete(id);
+      patch(id, { error: "This GPU can't run RTX upscaling — it was run again without it (see the next job)." });
+      return;
+    } catch { /* fall through to the normal failure */ }
+  }
+  GRAPHS.delete(id);
   if (failed) {
     // training-set pictures show "failed" on their own tile; one message at the end instead of one per picture
     if (!job.meta?.buildFor && !job.meta?.quietFail) st.toast(`${job.label} failed: ${cleanError(errMsg)}`, "bad", job.tab);

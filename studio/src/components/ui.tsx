@@ -492,6 +492,7 @@ function RecipeBadge({ m }: { m: Media }) {
     (async () => {
       const t = m.trayId ? useTray.getState().items.find((i) => i.id === m.trayId) : undefined;
       if (t && t.src.type === "output") { const { madeBy } = await import("../lib/made"); if (madeBy(t.src)) { if (on) setHas(true); return; } }
+      { const { charSourceOf } = await import("../lib/made"); if (await charSourceOf(`${m.trayId ?? ""} ${m.url}`)) { if (on) setHas(true); return; } }
       const { fileGen } = await import("../lib/api");
       const g = await fileGen(m as never).catch(() => null);
       if (on) setHas(!!(g && g.found && (g.prompt || g.workflow)));

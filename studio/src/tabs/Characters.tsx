@@ -394,6 +394,8 @@ function FromPicture() {
         if (failed.length) loraNote += ` Couldn't add: ${failed.join("; ").slice(0, 160)}.`;
       }
     }
+    // how their picture was made comes along (the CivitAI post), so "How it was made" / RECIPE work on their front picture
+    if (gen && (gen.page || gen.prompt)) c.from = { page: gen.page, prompt: gen.prompt };
     useCharacters.getState().save(c);
     await useCharacters.getState().setView(c.id, "front", { filename: pic!.name, subfolder: "", type: "input" }, { yours: true });
     useCharacters.getState().select(c.id);

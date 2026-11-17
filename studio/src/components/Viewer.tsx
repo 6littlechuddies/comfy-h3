@@ -26,6 +26,14 @@ export function refOfUrl(url: string): FileRef | null {
   } catch { return null; }
 }
 
+/** a character's picture made from a CivitAI post: open that post's prompt, settings and LoRAs */
+function CharSource({ url }: { url: string }) {
+  const [page, setPage] = useState<string | null>(null);
+  useEffect(() => { import("../lib/made").then(({ charSourceOf }) => charSourceOf(url)).then(setPage).catch(() => setPage(null)); }, [url]);
+  if (!page) return null;
+  return <button className="press btn-primary mt-3 h-9 w-full text-[12.5px] font-semibold text-accentink" onClick={() => { import("./ImageImport").then(({ openImageImport }) => openImageImport(page, "link")); close(); }}>The CivitAI post they were made from</button>;
+}
+
 export interface ViewItem { url: string; kind: "image" | "video" | "audio" | string; label?: string; trayId?: string; download?: string }
 interface ViewerState { items: ViewItem[]; index: number; actions?: (it: ViewItem) => { label: string; run: () => void }[] }
 const useViewer = create<ViewerState & { open: boolean }>(() => ({ open: false, items: [], index: 0 }));
@@ -147,6 +155,7 @@ export function Viewer() {
         : <aside className="w-[340px] shrink-0 border-l border-white/10 bg-black/40 p-4 text-[12.5px]">
             <div className="mb-2 flex items-center"><span className="micro text-white/60">HOW IT WAS MADE</span><button onClick={() => setInfo(false)} aria-label="Close" className="ml-auto text-white/60 hover:text-white"><Icon name="x" size={14} /></button></div>
             <p className="text-white/70">Not one of this browser's results (an upload, or made on another rental) — whatever's inside the file can still be read.</p>
+            <CharSource url={it.url} />
             {ref && <button className="press btn-primary mt-3 h-9 w-full text-[12.5px] font-semibold text-accentink" onClick={async () => {
               const { useTray } = await import("../lib/tray"); const { openFileMeta } = await import("./ImageImport");
               const t = useTray.getState().addOutput({ ...ref, kind: it.kind === "video" ? "video" : "image" } as never, it.label ?? ref.filename);

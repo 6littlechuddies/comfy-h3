@@ -51,6 +51,8 @@ export interface Character {
   gender: "female" | "male" | "other";
   style: "anime" | "realistic";
   hair: string; eyes: string; body: string; ethnicity: string; outfit: string; details: string; personality: string;
+  /** the picture this character was made from, when it carried how it was made (a CivitAI post: its page) */
+  from?: { page?: string; prompt?: string };
   loras: LoraPick[];
   /** the fixed "look block": pasted word-for-word into every starting frame and shot (Scenes) */
   block?: string;

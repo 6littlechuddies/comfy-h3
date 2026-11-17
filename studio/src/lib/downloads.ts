@@ -33,6 +33,8 @@ export function syncKreaTE(groups: { id: string; state: string }[] = useDownload
 /** is the RTX Video Super Resolution node installed? (null = not asked yet) */
 let rtxNode: boolean | null = null;
 export const rtxInstalled = () => rtxNode;
+/** the node is there but this rental's GPU/driver can't run it (NvVFX_Load failed): off until the next rental */
+export function rtxBroken() { rtxNode = false; setRtx(false); }
 /** FrameInterpolate's "how many times" input name ("" = node missing, null = not asked yet) */
 let interpWidget: string | null = null;
 /** is the Krea2T Enhancer node installed? (null = not asked yet) */

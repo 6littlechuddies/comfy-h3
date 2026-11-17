@@ -25,3 +25,12 @@ export function deleteFile(f: FileRef) {
   const m = madeBy(f);
   useJobs.getState().removeOutputs([{ jobId: m?.j.id ?? "", filename: f.filename, subfolder: f.subfolder ?? "" }]);
 }
+
+/** a character's own picture (front / face…) whose character was made from a CivitAI post: that post's page */
+export async function charSourceOf(url: string): Promise<string | null> {
+  const m = /characters(?:%2F|\/)([^/&%]+)(?:%2F|\/)(?:prev_)?(\w+)\.png/i.exec(url);
+  if (!m) return null;
+  const { useCharacters } = await import("./characters");
+  const c = useCharacters.getState().list.find((x) => x.id === m[1]);
+  return c?.from?.page ?? null;
+}
