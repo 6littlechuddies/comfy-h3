@@ -3,7 +3,7 @@ import { planWriter, useBigPlanner } from "../lib/packs";
 import { buildDescribeVideo, buildPromptHelper, MINOR_FLAG, type PromptOpts } from "../lib/graphs";
 import { coverOf, isAdult, useCharacters, VIEWS, type Character, type View } from "../lib/characters";
 import { look } from "../lib/charVideo";
-import { viewUrl } from "../lib/api";
+import { makeBoard, viewUrl } from "../lib/api";
 import { useShallow } from "zustand/react/shallow";
 import { useGroup } from "../lib/downloads";
 import { useJobs } from "../lib/jobs";
@@ -295,12 +295,37 @@ const FEW: View[] = ["front", "face"];
 const ALL: View[] = ["front", "face", "threeq", "left", "right", "back", "smile", "angry", "surprised"];
 const viewName = (v: View) => VIEWS.find((x) => x.id === v)?.label.toLowerCase() ?? v;
 /** the references with this character's pictures added in front (they become <Picture 1>, <Picture 2>…); H3 takes 9 at most */
-type CharMode = "sheet" | "all" | "few";
+type CharMode = "sheet" | "stitch" | "all" | "few";
+// the body angles a stitched sheet is made of (in this order); her face goes in as its own picture beside it
+const STITCH: View[] = ["front", "threeq", "left", "right", "back"];
+/** her own saved angle pictures tiled side by side into ONE picture (H3 reads one multi-angle picture as one person
+ *  better than separate pictures) — real pictures, unlike the drawn reference sheet. null = fewer than 2 angles saved */
+async function stitchedSheet(c: Character): Promise<Ref | null> {
+  const files = STITCH.map((v) => c.views[v]).filter(Boolean) as NonNullable<Character["views"][View]>[];
+  if (files.length < 2) return null;
+  const input = await makeBoard(files);
+  const media = { ...input, url: viewUrl({ filename: input.name, subfolder: "", type: "input" }), label: `${c.name} (stitched angles)` };
+  return { ...makeRef(media), label: `${c.name} — reference sheet`, charId: c.id };
+}
 /** which of her pictures go in: her one-picture reference sheet + face close-up (best for H3 — two pictures, the face kept
  *  big), every angle, or front + face. "Sheet" falls back to every angle when she has no sheet yet. */
 export async function withCharacter(c: Character, refs: Ref[], mode: CharMode = charMode()): Promise<Ref[]> {
   if (refs.some((r) => r.charId === c.id)) return refs;
   const room = 9 - refs.filter((r) => r.media.kind === "image").length;
+  if (mode === "stitch") {
+    const sheet = await stitchedSheet(c);
+    if (sheet) {
+      if (room < 1) throw new Error("H3 takes at most 9 pictures — remove one first");
+      const face = room >= 2 && c.views.face ? await useCharacters.getState().asMedia(c.id, "face") : null;
+      const add = [sheet, ...(face ? [{ ...makeRef(face), label: `${c.name} — face close-up`, charId: c.id }] : [])];
+      const firstOther = refs.findIndex((r) => !r.charId);
+      const next = [...refs];
+      next.splice(firstOther < 0 ? next.length : firstOther, 0, ...add);
+      return next;
+    }
+    useJobs.getState().toast(`${c.name} has fewer than 2 angle pictures to stitch — using her reference sheet instead`, "info");
+    mode = "sheet";
+  }
   const pick: View[] = mode === "sheet" && c.views.sheet ? (["sheet", c.views.face ? "face" : "front"] as View[]) : mode === "few" ? FEW : ALL;
   const views = pick.filter((v) => c.views[v]).slice(0, Math.max(0, room));
   if (!views.length) throw new Error("H3 takes at most 9 pictures — remove one first");
@@ -315,7 +340,7 @@ export async function withCharacter(c: Character, refs: Ref[], mode: CharMode = 
   if (add.length < total) useJobs.getState().toast(`Added ${add.length} of ${c.name}'s ${total} pictures — H3 takes 9 pictures at most`, "info");
   return next;
 }
-const charMode = (): CharMode => { try { const v = localStorage.getItem("h3.charviews"); return v === "few" ? "few" : v === "all" ? "all" : "sheet"; } catch { return "sheet"; } };
+const charMode = (): CharMode => { try { const v = localStorage.getItem("h3.charviews"); return v === "few" ? "few" : v === "all" ? "all" : v === "stitch" ? "stitch" : "sheet"; } catch { return "sheet"; } };
 
 /** "<Picture 1> is a character reference sheet of Mia… <Picture 2> is her face close-up. The woman in the video is Mia…" —
  *  put in front of the prompt when a character's pictures are references and the prompt doesn't name their tags yet */
@@ -365,14 +390,14 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between"><button onClick={() => show(false)} className="text-[12.5px] text-muted hover:text-ink">▾ Characters</button>
-        <span className="flex gap-1 text-[11.5px]">{([["sheet", "Sheet + face", "Her one-picture reference sheet and her face close-up — best for H3 (falls back to every angle if she has no sheet)"], ["all", "Every angle", "Every angle as its own picture (up to 9)"], ["few", "Front + face", "Full body and face only"]] as const).map(([v, l, t]) => (
+        <span className="flex gap-1 text-[11.5px]">{([["sheet", "Sheet + face", "Her one-picture reference sheet and her face close-up — best for H3 (falls back to every angle if she has no sheet)"], ["stitch", "Stitched + face", "Her own angle pictures (front, three-quarter, sides, back) tiled into ONE picture, plus her face close-up — real pictures instead of the drawn sheet"], ["all", "Every angle", "Every angle as its own picture (up to 9)"], ["few", "Front + face", "Full body and face only"]] as const).map(([v, l, t]) => (
           <button key={v} title={t} onClick={() => pickEvery(v)} className={cx("press rounded-sm px-1.5 py-0.5", every === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink")}>{l}</button>))}</span></div>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {list.map((c) => {
           const on = has(c.id);
           const pic = coverOf(c)!;
           return (
-            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every === "sheet" ? (c.views.sheet ? "reference sheet + face" : "every angle (no sheet yet)") : every === "all" ? "every angle of the sheet" : "full body + face"}`}
+            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every === "sheet" ? (c.views.sheet ? "reference sheet + face" : "every angle (no sheet yet)") : every === "stitch" ? "her angle pictures stitched into one + face" : every === "all" ? "every angle of the sheet" : "full body + face"}`}
               className={cx("press group relative flex w-[72px] shrink-0 flex-col items-stretch gap-1 rounded-sm border p-1 text-left transition-colors", on ? "border-accent bg-accent/10" : "border-line hover:border-muted")}>
               <span className="checker block h-[78px] overflow-hidden rounded-[2px]"><img src={viewUrl(pic)} alt="" className="h-full w-full object-cover" /></span>
               <span className="truncate px-0.5 text-[11.5px]">{adding === c.id ? "Adding…" : c.name}</span>
