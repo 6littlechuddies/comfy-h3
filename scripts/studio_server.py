@@ -2582,6 +2582,19 @@ async def relay_ws(req):
 # unofficial and in beta: when Proton changes something it can stop working — the status says so, nothing else is affected.
 PROTON = {"state": "off", "last_ok": None, "last_try": None, "error": "", "sent": 0, "running": False}
 PROTON_CONF = os.path.join(WORK, "h3-proton.conf")
+# rebuilt from the template's (or pasted) keys each time the Studio starts: a remote saved with a sign-in/client pair that
+# no longer works would otherwise stick for the rental's whole life
+try: os.remove(PROTON_CONF)
+except OSError: pass
+
+
+def _drive_signin_bad(out: str) -> bool:
+    """a sign-in error: the saved remote is dropped so the next try sets it up again (trying every sign-in/client pair)"""
+    if re.search(r"unauthorized_client|invalid_client|invalid_grant|couldn't fetch token", out or "", re.I):
+        try: os.remove(PROTON_CONF)
+        except OSError: pass
+        return True
+    return False
 PROTON_EVERY = int(os.environ.get("PROTON_EVERY_MIN", "15")) * 60
 
 
@@ -2971,7 +2984,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
             try:
                 rc, out = await _rclone("copyto", path, f"proton:{folder}/exports/{name}", "--retries", "3", timeout=1800)
                 if rc == 0: PROTON["sent_change"] = stamp
-                else: err = ("YOUR DRIVE IS FULL — " if _full(out) else _why_drive(out)) + "saving your characters and settings failed: " + _redact(out)[-400:]
+                else: _drive_signin_bad(out); err = ("YOUR DRIVE IS FULL — " if _full(out) else _why_drive(out)) + "saving your characters and settings failed: " + _redact(out)[-400:]
             finally:
                 try: os.remove(path)
                 except OSError: pass
@@ -2981,6 +2994,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
             args = ["copy", src, f"proton:{folder}/results", "--transfers", "2", "--checkers", "4", "--retries", "3", "--low-level-retries", "5"]
             if not full: args += ["--max-age", f"{max(1, PROTON_EVERY // 60) * 3}m"]  # only what's new since the last runs
             rc, out = await _rclone(*args)
+            if rc != 0: _drive_signin_bad(out)
             if rc != 0: err = err or (("YOUR DRIVE IS FULL — results aren't being backed up (your characters and settings were saved). Free space in Storage: empty the drive's trash, prune old exports, or delete old results. " if _full(out) else _why_drive(out) + "copying results failed: ") + _redact(out)[-400:])
             m = re.findall(r"Transferred:\s+(\d+)\s*/\s*\d+", out)
             if m: PROTON["sent"] += int(m[-1])
@@ -3320,7 +3334,7 @@ async def _proton_restore(force: bool = False):
             try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 else None
             except ValueError: files = None
             if files is None:
-                if "not found" not in out.lower() and "directory not found" not in out.lower(): errs.append(_redact(out)[-200:])
+                if "not found" not in out.lower() and "directory not found" not in out.lower(): _drive_signin_bad(out); errs.append(_redact(out)[-200:])
                 continue
             found += [{**f, "Where": where} for f in files if not f.get("IsDir") and str(f.get("Name", "")).lower().endswith(".zip") and (f.get("Size") or 0) > 0]
         if not found:
