@@ -2605,7 +2605,11 @@ def _gdrive_token() -> str:
     if t and not t.startswith("{"):
         import base64
         texts = []
-        for piece in [t] + [x for x in re.split(r"=+|[^A-Za-z0-9+/_-]+", t) if len(x) > 40]:
+        # also cut at each start of a base64 sign-in ('{"access_token"' encodes to eyJhY2Nlc3NfdG9rZW4i), so glued pieces separate
+        starts = [m.start() for m in re.finditer("eyJhY2Nlc3NfdG9rZW4i", t)]
+        cuts = [t[a:b] for a, b in zip(starts, starts[1:] + [len(t)])]
+        cuts = [c[:n] for c in cuts for n in range(len(c), max(len(c) - 400, 40), -1) if n % 4 == 0][:4000]
+        for piece in [t] + [x for x in re.split(r"=+|[^A-Za-z0-9+/_-]+", t) if len(x) > 40] + cuts:
             piece = piece.lstrip("+")
             for alt in (piece, piece.replace("-", "+").replace("_", "/")):
                 try: texts.append(base64.b64decode(alt + "=" * (-len(alt) % 4)).decode("utf-8", "replace")); break
@@ -2617,6 +2621,36 @@ def _gdrive_token() -> str:
             except ValueError: pass
     if found: return max(found)[1]  # newest sign-in
     return t if t.startswith('{"') else ""
+
+
+def _gdrive_tokens() -> list[str]:
+    """every sign-in found in GDRIVE_TOKEN, newest first (a pasted value can hold several)"""
+    first = _gdrive_token()
+    t = (_drive_key("GDRIVE_TOKEN") or "").strip()
+    texts = [t]
+    if t and not t.startswith("{"):
+        import base64
+        texts = []
+        # also cut at each start of a base64 sign-in ('{"access_token"' encodes to eyJhY2Nlc3NfdG9rZW4i), so glued pieces separate
+        starts = [m.start() for m in re.finditer("eyJhY2Nlc3NfdG9rZW4i", t)]
+        cuts = [t[a:b] for a, b in zip(starts, starts[1:] + [len(t)])]
+        cuts = [c[:n] for c in cuts for n in range(len(c), max(len(c) - 400, 40), -1) if n % 4 == 0][:4000]
+        for piece in [t] + [x for x in re.split(r"=+|[^A-Za-z0-9+/_-]+", t) if len(x) > 40] + cuts:
+            piece = piece.lstrip("+")
+            try: texts.append(base64.b64decode(piece + "=" * (-len(piece) % 4)).decode("utf-8", "replace"))
+            except Exception: pass  # noqa: BLE001
+    found = []
+    for x in texts:
+        for m in re.finditer(r'\{\s*"access_token".*?\}', x, re.S):
+            try: found.append((json.loads(m.group(0)).get("expiry") or "", m.group(0)))
+            except ValueError: pass
+    out = [first] if first else []
+    for _, tok in sorted(found, reverse=True):
+        if tok not in out: out.append(tok)
+    return out
+
+
+DRIVE_HOW = {"how": ""}  # which sign-in + client worked (for the debug report)
 
 
 def _cloud() -> str:
@@ -2647,12 +2681,27 @@ async def _proton_setup() -> None:
         # your own Google client (GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET): rclone's shared one is being retired by Google.
         # The token must have been made with the same client (Connect Google Drive.bat passes them to rclone authorize).
         own = [x for kv in (("client_id", _drive_key("GDRIVE_CLIENT_ID")), ("client_secret", _drive_key("GDRIVE_CLIENT_SECRET"))) if kv[1] for x in kv]
-        rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", *own, "token", _gdrive_token(), "--non-interactive", timeout=120)
-        if rc != 0:
+        # A token only refreshes with the client it was made with. Which one that was is easy to get wrong (Connect Google
+        # Drive.bat run once without the client, once with it; an old token pasted along with the new one), so every sign-in
+        # in GDRIVE_TOKEN is tried with your client and then with rclone's own, and the first pair Google accepts is kept.
+        tries = [(i, tok, cl) for i, tok in enumerate(_gdrive_tokens()) for cl in ([own, []] if own else [[]])]
+        last = ""
+        for i, tok, cl in tries:
             try: os.remove(PROTON_CONF)
             except OSError: pass
-            raise RuntimeError("couldn't connect Google Drive: " + out[-300:].replace(_gdrive_token(), "•••"))
-        return
+            rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", *cl, "token", tok, "--non-interactive", timeout=120)
+            if rc != 0: last = out.replace(tok, "•••"); continue
+            if len(tries) == 1: DRIVE_HOW["how"] = "sign-in 1, " + ("your client" if cl else "rclone's client"); return
+            rc, out = await _rclone("lsd", "proton:", "--max-depth", "1", timeout=60)
+            if rc == 0:
+                DRIVE_HOW["how"] = f"sign-in {i + 1} of {len(_gdrive_tokens())} in GDRIVE_TOKEN, " + ("your GDRIVE_CLIENT_ID" if cl else "rclone's built-in client (yours didn't match it)")
+                print(f"google drive: connected with {DRIVE_HOW['how']}", flush=True)
+                return
+            last = out
+            if not re.search(r"unauthorized_client|invalid_client|invalid_grant|couldn't fetch token", out, re.I): return  # a different problem: keep this one and let the caller report it
+        try: os.remove(PROTON_CONF)
+        except OSError: pass
+        raise RuntimeError(f"couldn't connect Google Drive (tried {len(tries)} sign-in/client pairs): " + (_why_drive(last) or "") + _redact(last)[-300:])
     args = ["config", "create", "proton", "protondrive", "username", os.environ["PROTON_USER"], "password", os.environ["PROTON_PASSWORD"],
             "replace_existing_draft", "true", "--obscure", "--non-interactive"]
     if os.environ.get("PROTON_2FA_SECRET"): args[6:6] = ["otp_secret_key", re.sub(r"\s+", "", os.environ["PROTON_2FA_SECRET"]).upper()]
