@@ -88,8 +88,9 @@ export function addList(text: string): number {
   return add.length;
 }
 
-/** any stated age under 18 ("17", "16-17", "15 (Part 1), 19") — conservative: one young number is enough */
-const youngAge = (age: string) => (age.match(/\d+/g) ?? []).map(Number).some((n) => n < 18);
+/** every stated age is under 18 ("17", "16-17"); a canon adult version ("15 (Part 1), 19") counts as adult — the writer then
+ *  plans that adult version. No age stated: not young (the writer judges from the story and design) */
+const youngAge = (age: string) => { const ns = (age.match(/\d+/g) ?? []).map(Number).filter((n) => n > 0 && n < 2000); return ns.length > 0 && ns.every((n) => n < 18); };
 
 /** steps 1–2 for one character: AniList, the adult check, the official picture */
 async function lookUp(it: CosItem): Promise<Partial<CosItem>> {
@@ -158,11 +159,15 @@ async function lorasPosts(it: CosItem): Promise<string> {
   } catch { return "(couldn't read its posts)"; }
 }
 
+/** reference notes without the sentences that would stop the writer outright ("she lost her child", "at 12 years old she…"):
+ *  backstory, not what's photographed. The writer still judges the character's own age from the rest and the picture */
+const usableNotes = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).filter((x) => !minorWords(x).length).join(" ").trim();
+
 /** step 4: the writer's adult check, costume and one prompt per shot */
 async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string): Promise<Partial<CosItem>> {
   const triggers = [...(picksOf(it) ?? []).map((l) => l.trigger), ...(it.extra ?? []).map((l) => l.trigger ?? "")].filter(Boolean).join(", ");
   const raw = await runWriter("cosplay", { taste, posts, shots: briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n"), character: it.name, series: it.series || "(not given)",
-    cosplayer: cosplayer || "(none given: an adult woman in her twenties)", triggers: triggers || "(none)", notes: it.notes || "(nothing found — use what you know; if unsure about the age, it is NOT allowed)" },
+    cosplayer: cosplayer || "(none given: an adult woman, about 25 years old)", triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
     { tab: "batch", label: `Cosplay · ${it.name}`, images: it.picture ? [it.picture] : undefined, big: true });
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("The writer didn't answer in the expected format — try again");
@@ -213,7 +218,7 @@ export async function researchAll(cosplayer: string, only?: string) {
     } catch (e) {
       const msg = (e as Error).message;
       // the writer's own age stop counts as a skip, not an error
-      up(/under 18|minor|adult/i.test(msg) ? { status: "skipped", why: msg.slice(0, 160) } : { status: "error", why: msg.slice(0, 200) });
+      up(/^Stopped:/.test(msg) ? { status: "skipped", why: msg.slice(0, 160) } : { status: "error", why: msg.slice(0, 200) });
     }
   };
   let next = 0;

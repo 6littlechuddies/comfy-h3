@@ -163,8 +163,9 @@ RUN chmod +x /opt/h3/start.sh
 # which image this is (scripts/image_rev.sh) and which code it came with: rentals then take newer code from the
 # "code-latest" release by themselves (scripts/self_update.sh) when it was made for this same image
 ARG IMAGE_REV=dev
+ARG IMAGE_BASE=dev
 ARG CODE_REV=dev
-RUN echo "$IMAGE_REV" > /opt/h3/IMAGE_REV && echo "$CODE_REV" > /opt/h3/CODE_REV
+RUN echo "$IMAGE_REV" > /opt/h3/IMAGE_REV && echo "$IMAGE_BASE" > /opt/h3/IMAGE_BASE && echo "$CODE_REV" > /opt/h3/CODE_REV
 
 EXPOSE 8188
 WORKDIR /opt/ComfyUI

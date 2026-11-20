@@ -15,7 +15,30 @@ fi
 mkdir -p "$TMP/b" && tar -xzf "$TMP/code.tgz" -C "$TMP/b" 2>/dev/null || { echo "self-update: broken bundle — skipped"; exit 0; }
 want="$(cat "$TMP/b/IMAGE_REV" 2>/dev/null)"; have="$(cat "$H3/IMAGE_REV" 2>/dev/null)"
 if [[ -z "$want" || "$want" != "$have" ]]; then
-  echo "self-update: the newest code needs a newer image (${want:-?} vs ${have:-?}) — using the image's own until it's rebuilt"; exit 0
+  # only the node list differs (same base image): install the nodes this code needs, here, then take the code
+  wbase="$(cat "$TMP/b/IMAGE_BASE" 2>/dev/null)"; hbase="$(cat "$H3/IMAGE_BASE" 2>/dev/null)"
+  if [[ -n "$wbase" && "$wbase" == "$hbase" && -s "$TMP/b/custom_nodes.txt" ]]; then
+    echo "self-update: new ComfyUI nodes in this code — installing them on this rental"
+    COMFY_DIR="${COMFY_DIR:-/opt/ComfyUI}"; cons="$TMP/torch.txt"
+    pip freeze 2>/dev/null | grep -iE '^(torch|torchvision|torchaudio)==' > "$cons" || true
+    ok=1
+    while read -r line; do
+      grep -qxF "$line" "$H3/custom_nodes.txt" 2>/dev/null && continue   # already there at this version
+      repo="${line%@*}"; ref=""; [[ "$line" == *@* ]] && ref="${line##*@}"
+      name="$(basename "$repo" .git)"; dir="$COMFY_DIR/custom_nodes/$name"
+      echo "self-update:   node $name ${ref:0:7}"
+      rm -rf "$dir.new"
+      if git clone -q --depth 1 "$repo" "$dir.new" && { [[ -z "$ref" ]] || (cd "$dir.new" && git fetch -q --depth 1 origin "$ref" && git checkout -q FETCH_HEAD); }; then
+        rm -rf "$dir" && mv "$dir.new" "$dir"
+        [[ -f "$dir/requirements.txt" ]] && { pip install -q -r "$dir/requirements.txt" -c "$cons" || echo "self-update:   (its requirements didn't all install)"; }
+        [[ -f "$dir/install.py" ]] && { (cd "$dir" && python install.py) >/dev/null 2>&1 || true; }
+      else echo "self-update:   couldn't get $name"; rm -rf "$dir.new"; ok=0; fi
+    done < <(grep -vE '^\s*(#|$)' "$TMP/b/custom_nodes.txt")
+    if [[ $ok == 1 ]]; then cp -f "$TMP/b/custom_nodes.txt" "$H3/custom_nodes.txt"; echo "$want" > "$H3/IMAGE_REV"
+    else echo "self-update: a node didn't install — keeping this rental's code; try a restart, or a new rental"; exit 0; fi
+  else
+    echo "self-update: the newest code needs a newer image (${want:-?} vs ${have:-?}) — delete this rental and make a new one to get it"; exit 0
+  fi
 fi
 new="$(cat "$TMP/b/CODE_REV" 2>/dev/null)"
 if [[ -n "$new" && "$new" == "$(cat "$H3/CODE_REV" 2>/dev/null)" ]]; then echo "self-update: already up to date (${new:0:7})"; exit 0; fi
@@ -29,10 +52,11 @@ old_start="$(sha256sum "$H3/start.sh" | cut -c1-64)"
 rm -rf "$H3/studio.new" && mv "$TMP/b/studio" "$H3/studio.new" && rm -rf "$H3/studio.old" \
   && { [[ -d "$H3/studio" ]] && mv "$H3/studio" "$H3/studio.old"; mv "$H3/studio.new" "$H3/studio"; } && rm -rf "$H3/studio.old"
 [[ -d "$TMP/b/prompts" ]] && rm -rf "$H3/prompts" && mv "$TMP/b/prompts" "$H3/prompts"
-for f in studio_server.py downloader.py watchdog.py comfy_router.py Caddyfile h3-grok.user.js start.sh models.txt CLAUDE.md; do
-  [[ -f "$TMP/b/$f" ]] && cp -f "$TMP/b/$f" "$H3/$f"
+for f in studio_server.py downloader.py watchdog.py comfy_router.py Caddyfile h3-grok.user.js start.sh models.txt CLAUDE.md self_update.sh install_nodes.sh; do
+  # a new file put in place (not written over): start.sh and this script are running while they're replaced
+  [[ -f "$TMP/b/$f" ]] && cp -f "$TMP/b/$f" "$H3/$f.new" && mv -f "$H3/$f.new" "$H3/$f"
 done
-chmod +x "$H3/start.sh"
+chmod +x "$H3/start.sh" "$H3/self_update.sh"
 mkdir -p "$H3/boot" && [[ -f "$TMP/b/boot/boot.html" ]] && cp -f "$TMP/b/boot/boot.html" "$H3/boot/boot.html"
 # the startup screen uses the Studio's own fonts (their file names change with each build)
 for pair in "archivo-latin-wdth-normal-:archivo" "ibm-plex-mono-latin-400-normal-:plex-400" "ibm-plex-mono-latin-500-normal-:plex-500"; do

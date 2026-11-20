@@ -41,6 +41,8 @@ jobs:
           cp models.txt scripts/studio_server.py scripts/downloader.py scripts/watchdog.py scripts/comfy_router.py scripts/Caddyfile scripts/h3-grok.user.js scripts/start.sh scripts/claude/CLAUDE.md $b/
           cp scripts/boot.html $b/boot/boot.html
           bash scripts/image_rev.sh > $b/IMAGE_REV
+          bash scripts/image_rev.sh base > $b/IMAGE_BASE
+          cp custom_nodes.txt scripts/install_nodes.sh scripts/self_update.sh $b/
           echo "$GITHUB_SHA" > $b/CODE_REV
           python3 -m py_compile $b/studio_server.py $b/downloader.py $b/watchdog.py $b/comfy_router.py && rm -rf $b/__pycache__
           tar -czf h3-code.tar.gz -C $b .
