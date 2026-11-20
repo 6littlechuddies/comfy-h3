@@ -191,6 +191,32 @@ if len(HF_KEYS) > 1:
     HF_TOKEN = _pick_key(set())
 if HF_TOKEN: _mark_seen(HF_TOKEN)
 
+# Several keys at once ("the team"): Hugging Face limits each ACCOUNT (its resolver allowance, and it slows an account down
+# after a lot of downloading), so with keys on different accounts, files are spread over up to HF_SPREAD of them, each
+# file fetched with its own key. Every key's speed per file is measured side by side; one that's clearly slower than
+# the best is benched (rested, remembered on your drive) and its files move to a fresh key — or to the faster ones when
+# none is left: survival of the fittest. HF_SPREAD=1 = the old way (one key, switched when it slows).
+SPREAD = max(1, int(os.environ.get("HF_SPREAD") or 3))
+TEAM_WEAK = float(os.environ.get("HF_TEAM_WEAK", "0.4"))  # under this share of the best key's speed per file = benched
+TEAM: list[str] = []
+
+
+def _team_pick(keep: list[str] = ()) -> list[str]:
+    """up to SPREAD keys, one per account (two keys on one account share its limits, so the second adds nothing),
+    rested accounts and brand-new keys first; keys Hugging Face won't take are left out"""
+    team = [k for k in keep if k in HF_KEYS]
+    accts = {_acct(k) for k in team}
+    tried = set(team)
+    while len(team) < min(SPREAD, len(HF_KEYS)):
+        if not [k for k in HF_KEYS if k not in tried]: break
+        k = _pick_key(tried)
+        if not k or k in tried: break
+        tried.add(k)
+        a = _acct(k)
+        if _dead(k) or (a in accts and a != "hidden"): continue
+        team.append(k); accts.add(a); _mark_seen(k)
+    return team or ([HF_TOKEN] if HF_TOKEN else [])
+
 
 def _hf_accounts():
     """which Hugging Face account each key is on (names only, never the keys). Keys made on one account share its
@@ -308,9 +334,10 @@ def parse() -> list[dict]:
 def resolve(fl: dict) -> None:
     """real download URL (CivitAI -> signed link, so the API key never goes to the file host) and its size"""
     url, headers = fl["url"], {}
-    fl["resolved"] = time.time(); fl.pop("error", None); fl.pop("get", None)
-    if HF_TOKEN and url.startswith(HF_BASE):
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"; fl["hf"] = True
+    tok = fl.get("key") or HF_TOKEN  # its own key in the team, else the current one
+    fl["resolved"] = time.time(); fl.pop("error", None); fl.pop("get", None); fl["rkey"] = tok
+    if tok and url.startswith(HF_BASE):
+        headers["Authorization"] = f"Bearer {tok}"; fl["hf"] = True
     try:
         m = re.match(r"civitai-file:(\d+):(.+)$", url)
         if m:  # one file of a CivitAI version picked by a word in its name (versions with several files: bf16 / int8 / ...)
@@ -352,8 +379,8 @@ def resolve(fl: dict) -> None:
             elif fl.get("fallback"):
                 log(f"{fl['name']}: CivitAI gave no download link ({r.status_code}{'' if CIVITAI_TOKEN else ', no CIVITAI_TOKEN'}) — using {fl['fallback']}")
                 url = fl["fallback"]
-                if HF_TOKEN and url.startswith(HF_BASE):
-                    headers["Authorization"] = f"Bearer {HF_TOKEN}"; fl["hf"] = True
+                if tok and url.startswith(HF_BASE):
+                    headers["Authorization"] = f"Bearer {tok}"; fl["hf"] = True
             else:
                 fl["error"] = f"CivitAI gave no download link ({r.status_code}) — check CIVITAI_TOKEN"
         fl["get"] = url
@@ -362,7 +389,7 @@ def resolve(fl: dict) -> None:
         if r.status_code >= 400 and fl.get("fallback") and not url.startswith("https://civitai.com/") and url != fl["fallback"]:
             log(f"{fl['name']}: {r.status_code} from {url.split('/resolve/')[0]} — using {fl['fallback']}")
             url = fl["get"] = fl["fallback"]
-            headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN and url.startswith(HF_BASE) else {}
+            headers = {"Authorization": f"Bearer {tok}"} if tok and url.startswith(HF_BASE) else {}
             fl["hf"] = bool(headers)
             r = requests.head(url, headers=headers, allow_redirects=True, timeout=30)
         fl["size"] = int(r.headers.get("Content-Length") or 0)
@@ -382,9 +409,9 @@ def resolve(fl: dict) -> None:
         if "get" not in fl and fl.get("fallback") and url.startswith("https://civitai.com/"):
             log(f"{fl['name']}: couldn't reach CivitAI ({e}) — using {fl['fallback']}")
             fl["get"] = fl["fallback"]; fl.pop("error", None)
-            fl["hf"] = bool(HF_TOKEN and fl["get"].startswith(HF_BASE))
+            fl["hf"] = bool(tok and fl["get"].startswith(HF_BASE))
             try:
-                h = {"Authorization": f"Bearer {HF_TOKEN}"} if fl["hf"] else {}
+                h = {"Authorization": f"Bearer {tok}"} if fl["hf"] else {}
                 fl["size"] = int(requests.head(fl["get"], headers=h, allow_redirects=True, timeout=30).headers.get("Content-Length") or 0)
                 return
             except Exception:  # noqa: BLE001
@@ -708,7 +735,7 @@ def write(groups, rate_now=0.0, rate_avg=0.0, note=""):
          "mbps": round(rate_now), "avg_mbps": round(rate_avg),
          "left_s": int((total - done) / 1048576 / rate_avg) if rate_avg > 0 else -1,
          "elapsed_s": int(now - T0), "note": note, "hf_key": ({"n": HF_KEYS.index(HF_TOKEN) + 1, "of": len(HF_KEYS), "switches": ROT["n"], "last": ROT["last"], "mbps": ROT["hf_mbps"], "accounts": ROT["accounts"], "limited": ROT["limited"],
-                    "account": _acct(HF_TOKEN), "tired_accounts": sorted(a for a, t in (ROT.get("acct_slow") or {}).items() if time.time() - t < ACCT_SLOW_FOR)} if HF_TOKEN in HF_KEYS else None), "speed_ok": STATE["speed_ok"], "speed_best": STATE["speed_best"],
+                    "account": _acct(HF_TOKEN), "team": ROT.get("team") if len(TEAM) > 1 else None, "tired_accounts": sorted(a for a, t in (ROT.get("acct_slow") or {}).items() if time.time() - t < ACCT_SLOW_FOR)} if HF_TOKEN in HF_KEYS else None), "speed_ok": STATE["speed_ok"], "speed_best": STATE["speed_best"],
          "files": queue_wait([file_info(g, f, now) for g in groups for f in g["files"]])}
     tmp = OUT + ".tmp"
     with open(tmp, "w") as fh:
@@ -725,6 +752,9 @@ def main() -> int:
     global HF_TOKEN
     os.makedirs(RUN, exist_ok=True)
     if HF_KEYS: log(f"{len(HF_KEYS)} Hugging Face key(s); starting on key {HF_KEYS.index(HF_TOKEN) + 1}")
+    if len(HF_KEYS) > 1 and SPREAD > 1:
+        TEAM[:] = _team_pick([HF_TOKEN])
+        if len(TEAM) > 1: log(f"Hugging Face: {len(TEAM)} keys side by side (keys {', '.join(str(HF_KEYS.index(k) + 1) for k in TEAM)}) — the slowest is benched as they go")
     if len(HF_KEYS) > 1:
         import threading
         threading.Thread(target=_hf_accounts, daemon=True).start()
@@ -843,6 +873,8 @@ def main() -> int:
     rate_now = rate_avg = 0.0
     samples: list[tuple[float, int]] = []  # (time, bytes on disk) for the speed check
     hf_samples: list[tuple[float, int, int]] = []  # (time, bytes of the Hugging Face files in this run, how many are running)
+    team_samples: list[tuple[float, dict, dict]] = []  # (time, bytes per team key, files per team key)
+    team_weak: dict[str, float] = {}  # team key → since when it's been clearly slower than the best
     launched_at = time.time(); by_path = {}; run_hf: list[dict] = []; log_pos = 0
     shown: list[tuple[float, int]] = []  # (time, bytes) of the last ~12 s, for the speed on the page (3 s alone jumps around)
     log_out = open("/var/log/aria2.log" if os.path.isdir("/var/log") and os.access("/var/log", os.W_OK) else os.devnull, "a")
@@ -919,8 +951,19 @@ def main() -> int:
                     if not complete(f) and not wanted(f) and os.path.exists(f["path"] + SUFFIX):
                         log(f"{f['name']}: left for later — removing the part downloaded ({on_disk(f) // 2**20} MB)"); drop_partial(f)
         if p is None and want:
+            # the team: every Hugging Face file gets one of the team's keys (biggest files spread first, kept on its key
+            # while that key stays in the team); a file on a new key needs a new file-server link, signed for that key
+            if len(TEAM) > 1:
+                load = {k: 0 for k in TEAM}
+                for f in want:
+                    if f.get("hf") and f.get("key") in load: load[f["key"]] += max(0, (f.get("size") or 0) - on_disk(f))
+                for f in sorted(want, key=lambda x: -(x.get("size") or 0)):
+                    if f.get("hf") and f.get("key") not in load:
+                        k = min(load, key=load.get); f["key"] = k; load[k] += max(0, (f.get("size") or 0) - on_disk(f))
+            else:
+                for f in want: f.pop("key", None)
             # CivitAI's download links expire: refresh any older than half an hour (e.g. a group started "later")
-            stale = [f for f in want if (f["url"].startswith(("https://civitai.com/", "civitai-file:")) and (time.time() - f.get("resolved", 0) > 1800
+            stale = [f for f in want if (f.get("hf") and (f.get("key") or HF_TOKEN) != f.get("rkey")) or (f["url"].startswith(("https://civitai.com/", "civitai-file:")) and (time.time() - f.get("resolved", 0) > 1800
                                                                                                      or ((f.get("error") or not f.get("size")) and time.time() - f.get("resolved", 0) > 60)))
                      or (f.get("cdn") and (time.time() - f.get("resolved", 0) > 1800 or f.get("resolved", 0) < ROT["last_switch"]))]
             if stale:
@@ -934,8 +977,8 @@ def main() -> int:
                     os.makedirs(os.path.dirname(f["path"]), exist_ok=True)
                     fh.write(f"{f['get']}\n  dir={os.path.dirname(f['path'])}\n  out={f['name']}{SUFFIX}\n")
                     if f.get("hf") and f["get"].startswith(HF_BASE):
-                        fh.write(f"  header=Authorization: Bearer {HF_TOKEN}\n")
-            log(f"downloading {len(want)} files in one queue")
+                        fh.write(f"  header=Authorization: Bearer {f.get('key') or HF_TOKEN}\n")
+            log(f"downloading {len(want)} files in one queue" + (f" · Hugging Face spread over {len(TEAM)} keys: " + ", ".join(f"key {HF_KEYS.index(k) + 1} ({sum(1 for f in want if f.get('key') == k)} files)" for k in TEAM) if len(TEAM) > 1 else ""))
             if dl_start is None:
                 dl_start, dl_base = time.time(), sum(on_disk(f) for g in groups for f in g["files"])
                 last_t, last_b = dl_start, dl_base
@@ -972,7 +1015,57 @@ def main() -> int:
                 ROT["last"] = f"{len(added)} new key(s) from your drive"
                 threading.Thread(target=_hf_accounts, daemon=True).start()  # which account the new keys are on
                 if ROT.get("slow_since") is not None: ROT["last_switch"] = 0.0  # slow right now: try the new key at once
-        if p is not None and p.poll() is None and len(HF_KEYS) > 1 and run_hf:
+        # the accounts behind the keys are known now (looked up in the background): two team keys on one account share
+        # its limits — keep one, bring in a key on another account
+        if len(TEAM) > 1 and ROT.get("accounts") and not ROT.get("team_checked"):
+            ROT["team_checked"] = True
+            seen_a, keep = set(), []
+            for k in TEAM:
+                a = _acct(k)
+                if a in seen_a and a != "hidden": continue
+                seen_a.add(a); keep.append(k)
+            if keep != TEAM:
+                TEAM[:] = _team_pick(keep)
+                log(f"Hugging Face team: keys on the same account replaced — now keys {', '.join(str(HF_KEYS.index(k) + 1) for k in TEAM)}")
+                if p is not None and p.poll() is None:
+                    p.terminate()
+                    try: p.wait(timeout=30)
+                    except subprocess.TimeoutExpired: p.kill(); p.wait()
+                    finish_parts(); p = None; RUNNING.clear(); hf_samples.clear(); team_samples.clear(); continue
+        if p is not None and p.poll() is None and len(TEAM) > 1 and run_hf:
+            # every key's bytes, side by side — per file it's fetching, so a key with more files doesn't look faster
+            per = {k: sum(on_disk(f) for f in run_hf if f.get("key") == k) for k in TEAM}
+            live = {k: sum(1 for f in run_hf if f.get("key") == k and not complete(f)) for k in TEAM}
+            team_samples.append((now, per, live)); del team_samples[:-120]
+            old_t = next(((t, x, n) for t, x, n in reversed(team_samples) if now - t >= ROT_WINDOW * 2), None)
+            if old_t and now - launched_at >= ROT_WARMUP + 20:
+                span = now - old_t[0]
+                rate = {k: max(0.0, (per[k] - old_t[1].get(k, per[k])) / 1048576 / span) for k in TEAM}
+                pf = {k: rate[k] / max(1, min(live[k], old_t[2].get(k, live[k]))) for k in TEAM if live[k] > 0 and old_t[2].get(k, 0) > 0}
+                ROT["team"] = [{"n": HF_KEYS.index(k) + 1, "mbps": round(rate[k]), "files": live[k], "account": _acct(k)} for k in TEAM]
+                ROT["hf_mbps"] = round(sum(rate.values()))
+                for k, v in rate.items(): ROT["best"][k] = max(ROT["best"].get(k, 0.0), v)
+                best_pf = max(pf.values(), default=0.0)
+                weak = [k for k, v in pf.items() if best_pf >= 5 and v < best_pf * TEAM_WEAK]
+                for k in TEAM:
+                    if k in weak: team_weak.setdefault(k, now)
+                    else: team_weak.pop(k, None)
+                out = [k for k, t in team_weak.items() if now - t >= ROT_SLOW_FOR]
+                if out and now - ROT["last_switch"] >= ROT_GAP:
+                    k = out[0]; team_weak.pop(k, None)
+                    _tire(k, now)
+                    rest = [x for x in TEAM if x != k]
+                    fresh = [x for x in _team_pick(rest) if x not in TEAM]
+                    TEAM[:] = rest + fresh[:1]
+                    if HF_TOKEN not in TEAM: HF_TOKEN = TEAM[0]
+                    msg = (f"key {HF_KEYS.index(k) + 1} benched ({pf.get(k, 0):.0f} MB/s per file vs {best_pf:.0f} on the best key)"
+                           + (f" → key {HF_KEYS.index(fresh[0]) + 1} joins" if fresh[:1] else " → its files go to the faster keys"))
+                    log(f"Hugging Face team: {msg}"); ROT["n"] += 1; ROT["last_switch"] = now; ROT["last"] = msg
+                    p.terminate()
+                    try: p.wait(timeout=30)
+                    except subprocess.TimeoutExpired: p.kill(); p.wait()
+                    finish_parts(); p = None; RUNNING.clear(); hf_samples.clear(); team_samples.clear(); continue
+        if p is not None and p.poll() is None and len(HF_KEYS) > 1 and len(TEAM) <= 1 and run_hf:
             hb = sum(on_disk(f) for f in run_hf)
             n_live = sum(1 for f in run_hf if not complete(f))
             hf_samples.append((now, hb, n_live))

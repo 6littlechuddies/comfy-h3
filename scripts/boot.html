@@ -314,10 +314,13 @@
         const real = acc ? [...new Set(acc.filter((n) => n && n !== "?" && !/^not accepted/.test(n)))] : [];
         const bad = acc ? acc.map((n, i) => /^not accepted/.test(n) ? `key ${i + 1}` : null).filter(Boolean) : [];
         const accName = (x) => String(x || "").startsWith("key:") ? "not looked up yet" : x === "hidden" ? "an account that isn't shown" : String(x).replace(/[<>&]/g, "");
-        $("keys").innerHTML = `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.account ? ` (${accName(k.account)})` : ""}${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`
+        $("keys").innerHTML = (k.team?.length > 1
+            ? `<b>Hugging Face: ${k.team.length} keys side by side</b>${k.mbps != null ? ` · ${k.mbps} MB/s together` : ""} · benched ${k.switches} time${k.switches === 1 ? "" : "s"}<br>`
+              + k.team.map((t) => `key ${t.n}${t.account ? ` (${accName(t.account)})` : ""}: <b>${t.mbps} MB/s</b> on ${t.files} file${t.files === 1 ? "" : "s"}`).join(" · ")
+            : `<b>Hugging Face key ${k.n} of ${k.of}</b>${k.account ? ` (${accName(k.account)})` : ""}${k.mbps != null ? ` · ${k.mbps} MB/s over the last minute` : ""} · switched ${k.switches} time${k.switches === 1 ? "" : "s"}`)
           + (k.tired_accounts?.length ? `<br>Slowed down, skipped for 30 min: ${k.tired_accounts.map(accName).join(", ")}` : "")
           + (k.last ? `<br>Last: ${k.last}` : "")
-          + (k.of > 1 ? `<br>Hugging Face slows an account down after a few GB; the downloader moves to a key on another account when that happens.` : "")
+          + (k.of > 1 ? (k.team?.length > 1 ? `<br>Each key (on its own account) fetches its share of the files; one that falls well behind the best is benched and a rested key takes its place.` : `<br>Hugging Face slows an account down after a few GB; the downloader moves to a key on another account when that happens.`) : "")
           + (bad.length ? `<br>Hugging Face didn't accept ${bad.join(", ")} for downloads — check them in your Vast template.` : "")
           + (acc && acc.some((n) => n === "works (account not shown)") ? `<br>${acc.map((n, i) => n === "works (account not shown)" ? `key ${i + 1}` : null).filter(Boolean).join(", ")}: work for downloads (fine-grained keys that don't show their account).` : "")
           + keyAsk(k);
