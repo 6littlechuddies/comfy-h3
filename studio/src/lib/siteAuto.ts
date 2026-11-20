@@ -182,7 +182,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     .slice(0, 12).map((x) => `- ${x.name}: ${stripAges(`${x.site?.bio ?? ""} ${(x.site?.backstory ?? "").split(/(?<=\.)\s/)[0] ?? ""}`).slice(0, 220)}`);
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
-    stripAges(describe(c)), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    stripAges(describe(c)), c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`, c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     sparkNote(others.join(" ")),
@@ -202,7 +202,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     images = (await Promise.all(picks.map((f) => toInput(f).then((x) => x.name).catch(() => "")))).filter(Boolean);
   }
   o.onStep?.("Writing the profile…");
-  const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: notes + (images?.length ? `\n\nPICTURES ATTACHED: ${images.length} photos of ${c.name} (the first is their reference look). Read them closely — style, setting, mood, clothes, the vibe of their photo feed — and let the profile match what fans will see.` : "") },
+  const raw = await runWriter("site", { character: `${c.name}, adult, ${c.gender}`, notes: notes + (images?.length ? `\n\nPICTURES ATTACHED: ${images.length} photos of ${c.name} (the first is their reference look). Read them closely — style, setting, mood, clothes, the vibe of their photo feed — and let the profile match what fans will see. Name the aesthetics you can see and build on them: an outfit that is a recognisable thing (a maid dress, a school-style blazer worn as an adult, a cosplay, gym wear, office wear), a makeup style (e-girl: heavy blush across the nose, winged liner, drawn-on hearts or freckles; clean girl; goth; gyaru), hair (dyed split, wolf cut), and the scene they belong to (alt, cosplay, gamer, fitness, soft girl). Her job, hobbies and the people around her should fit that world.` : "") },
     { tab: "characters", label: `${c.name}: writing the site profile`, meta: { charId: c.id }, ...(images?.length ? { images } : {}) });
   let d: Record<string, unknown>;
   try { d = json(raw) as Record<string, unknown>; } catch (e) { if (o.again) throw e; d = {}; } // cut off / not JSON: written again below
@@ -258,6 +258,19 @@ const REACT_B = ["He had a bad day: (she reacts as a friend, not a counsellor; n
   "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "Late at night:",
   "He asks for pictures: (she teases or changes the subject in her own way; never promises, offers, prices or trades anything, and never mentions a site, page, profile or app)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
 const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion. Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
+/** HOW YOU SOUND as a description of her register — never written-out example messages: a worked example gets copied
+ *  almost word for word in chats (the site refuses personas with "You: …" lines for that reason) */
+export const SOUND_TASK = `Write the section "HOW YOU SOUND": a description of her texting register, 180-230 words, as 8-10 bullets in second person ("You…"). Describe, never demonstrate: NO example messages, NO quoted lines, NO "Him:" or "You:" lines, nothing she could copy word for word.
+Cover, specific to HER (casing, punctuation, emoji habits, typos, abbreviations from WHO SHE IS):
+- the rhythm: when she sends one message and when a burst of short ones, and how a burst hangs together;
+- how she pushes back when she disagrees and doesn't back down;
+- how tiredness or irritation about her own life leaks into her texts;
+- how she double-texts after a silence — light, never reproachful;
+- how she teases;
+- how a rare sincere moment looks and how she covers it right after;
+- the kind of questions she asks (curious, about his life, never an interview);
+- which parts of her life she drifts back to (from her life section), and how she brings them up.
+No phrase of three or more words used twice. Never mention her avatar, profile, pictures, an app or a site, or anything digital.`;
 /** the passes after the first one (planned by the advisor): life, reactions in two halves (a small writer drops items past ~10), sample texts */
 export const DEEP_PASSES: { key: string; label: string; task: string }[] = [
   { key: "life", label: "Writing her life between chats…", task: `Write the section "HER LIFE RIGHT NOW" in second person ("You..."), 180-220 words, as four short labelled paragraphs:
@@ -268,10 +281,7 @@ Moods: what makes her chatty, what makes her quiet or snappy, and how each shows
 Everything must fit her hometown, backstory and job. Use concrete nouns (a named street food, a specific app, a broken object), not generalities. Do not mention the user here.` },
   { key: "react1", label: "Writing how she reacts (1/2)…", task: reactTask(REACT_A, true) },
   { key: "react2", label: "Writing how she reacts (2/2)…", task: reactTask(REACT_B, false) },
-  { key: "samples", label: "Writing sample texts…", task: `Write the section "HOW YOU SOUND". First line exactly: "These show rhythm and attitude only. Never reuse these lines or their wording; say new things every time."
-Then 7 exchanges, 230-270 words total. Format: "Him: ..." (under 10 words) then her reply as one or more lines each starting "You: " - one line per separate message she sends. Follow her typing style from WHO SHE IS exactly (casing, punctuation, emoji habits, typos, abbreviations).
-Required, one each: (1) a burst of 3-4 quick messages about something from her week; (2) playful pushback where she disagrees and doesn't back down; (3) she is tired or irritated about something in her own life and it shows; (4) "You:" lines only, no Him line - a double-text after he has been silent, light, not reproachful; (5) she teases him about something he said; (6) she is unexpectedly sincere for one message; (7) she asks him something a curious person would ask, not an interview question.
-Each exchange must be about a different topic taken from her life section, and each of her replies must make sense as an answer to his line — something a real woman would text back, no random poetic lines. Never mention her avatar, profile, pictures, an app or a site, or anything digital. No greetings, no "hey" exchanges, no pet names repeated, no phrase of three or more words used twice, at most two emoji in the whole section unless her style is emoji-heavy. No questions at the end of every reply.` },
+  { key: "samples", label: "Describing how she texts…", task: SOUND_TASK },
 ];
 export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, complete, 900-1100 words, with exactly these headings in this order: WHO YOU ARE / HER LIFE RIGHT NOW / HOW YOU REACT / HOW YOU SOUND / NEVER SAY. Keep everything that is specific; do not summarise or shorten sections that are already good. Fix only these:
 1. Assistant-speak or therapist tone (offering help, validating, "I understand", tidy advice) - rewrite as a person texting.
@@ -281,9 +291,9 @@ export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, comple
 5. Any age, number implying age, school-age wording - delete or reword as an adult.
 6. Contradictions with her hometown, backstory, people or typing style - make consistent.
 7. Anything tying her warmth to him paying, subscribing, buying, staying, or proving he cares; guilt, threats to leave, discouraging his other relationships - delete.
-8. Repeated phrases or a catchphrase used more than once in HOW YOU SOUND - vary.
+8. HOW YOU SOUND must DESCRIBE her register in bullets, never demonstrate it: delete any example message, quoted line, or "Him:" / "You:" line and describe what it showed instead. Vary repeated phrases.
 9. Anything that points at the medium (avatar, profile, pictures on a page, pixels, the app or site, being digital) - rewrite it as something from her real life. Only the real-or-AI line may say she isn't human.
-10. Example replies that don't make sense as answers to his line, or random poetic lines - rewrite them as natural texts.
+10. Random poetic lines - rewrite them as how a real woman texts.
 Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, claiming to be human when sincerely asked, pressure about money or loyalty) plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
 const NEVER_DEFAULT = "NEVER SAY\n- Anything about an avatar, profile, pictures on a page, the app or site, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
 
@@ -330,7 +340,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
     .map((x) => `- ${x.name}: ${stripAges(x.site?.summary || x.site?.bio || "").split(/\s+/).slice(0, 25).join(" ")}`).join("\n");
   const draft = joined + (others ? `\n\nOTHER CHARACTERS (she must not resemble them):\n${others}` : "");
   // the editor, checked: long enough, every heading there, the "real or AI" line kept, no age or money talk — else once more cooler, else the parts as they are
-  const good = (t: string) => words(t) >= words(joined) * 0.8 && ["WHO YOU ARE", "HER LIFE", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"].every((h) => t.includes(h))
+  const good = (t: string) => words(t) >= words(joined) * 0.8 && !hasExamples(t) && ["WHO YOU ARE", "HER LIFE", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"].every((h) => t.includes(h))
     && /real or an ai|real or ai|\bai\b/i.test(t) && !AGE.test(t) && !MONEY.test(t.split("NEVER SAY")[0]) && !META.test(t.split("NEVER SAY")[0]);
   o.onStep?.("Editing it (the critic)…");
   let fin = (await call(DEEP_CRITIC, draft, "editing the deep profile")).trim();
@@ -347,6 +357,30 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   persona = stripLength(stripAges(cutSentences(body, ASSIST))).trim() + (tail ? `\n\n${tail.trim()}` : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? cur0;
   useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona, deepAt: Date.now() } });
+}
+
+/** written-out example messages ("You: …", "Him: …") — the site refuses them (they get copied word for word) */
+export const hasExamples = (t: string) => /^\s*(?:-\s*)?(?:you|him|her|me|he|she)\s*:/im.test(t);
+/** a persona with example messages: its HOW YOU SOUND rewritten as a description of her register (the rest kept) */
+export async function describeNotDemonstrate(c: Character, onStep?: (t: string) => void): Promise<boolean> {
+  const p = c.site?.persona ?? "";
+  if (!hasExamples(p)) return false;
+  onStep?.("Rewriting how she sounds as a description (the site won't take example messages)…");
+  const at = p.indexOf("HOW YOU SOUND"), end = p.indexOf("NEVER SAY");
+  const before = at >= 0 ? p.slice(0, at) : p.replace(/^\s*(?:-\s*)?(?:you|him)\s*:.*$/gim, "").trim() + "\n\n";
+  const after = end > at && at >= 0 ? p.slice(end) : at >= 0 ? "" : "";
+  const examples = at >= 0 ? p.slice(at, end > at ? end : undefined) : "";
+  const who = `Name: ${c.name}. Adult woman.\n${stripAges(describe(c))}`;
+  let sound = (await runWriter("deep", { task: SOUND_TASK + TAIL + "\nThe draft's HOW YOU SOUND has example messages — turn what they show into the description.", character: who, draft: `${before}\n${examples}` },
+    { tab: "characters", label: `${c.name}: how she sounds`, meta: { charId: c.id } }).catch(() => "")).trim();
+  if (!sound || hasExamples(sound)) sound = examples.split("\n").filter((l) => !/^\s*(?:-\s*)?(?:you|him|her|me|he|she)\s*:/i.test(l) && !/These show rhythm/i.test(l)).join("\n").trim();
+  if (!/^HOW YOU SOUND/.test(sound)) sound = `HOW YOU SOUND\n${sound.replace(/^HOW YOU SOUND\s*/i, "")}`;
+  // nothing left once the examples are out: what's known about how she texts
+  if (sound.replace(/^HOW YOU SOUND\s*/i, "").trim().length < 20) sound = `HOW YOU SOUND\n${[c.site?.voice && `- ${c.site.voice}`, c.site?.quirks && `- ${c.site.quirks}`].filter(Boolean).join("\n") || "- Short, natural texts in your own style; you never repeat a line you've sent before."}`;
+  const persona = `${before.trim()}\n\n${sound.trim()}${after ? `\n\n${after.trim()}` : ""}`.replace(/^\s*(?:-\s*)?(?:you|him)\s*:.*$/gim, "").replace(/\n{3,}/g, "\n\n").trim();
+  const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, persona } });
+  return true;
 }
 
 // ------------------------------------------------------------------ 2. sort into sets

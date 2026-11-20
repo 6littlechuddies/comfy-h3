@@ -79,6 +79,8 @@ export async function resendIfSent(id: string): Promise<string | null> {
 
 /** send one character as a draft; returns the job's end state */
 async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
+  // example messages in the persona ("You: …") are refused by the site: described instead, before sending
+  { const { describeNotDemonstrate } = await import("../lib/siteAuto"); if (await describeNotDemonstrate(c, onStep).catch(() => false)) c = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; }
   const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id, short_persona: short }) })).json();
   const { watchServerJob } = await import("../lib/serverJob");
   type Push = { status: string; id: string; step?: string; total?: number; done?: number; uploaded?: number; error?: string };
