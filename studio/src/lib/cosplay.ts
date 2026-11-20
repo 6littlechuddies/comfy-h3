@@ -158,10 +158,23 @@ function dealer(posePicks: import("./posewear").PwPick[]) {
   let i = 0, li = 0;
   return (k: number): { brief: string; ref?: import("./posewear").PwPick } => {
     const n = i++;
-    const place = k % 2 === 1 ? WORLD : L[li++ % L.length];
+    // her own world for the close-up and the second shot (different for every character), a shared place only from the
+    // third on — shared places were what made a big batch look the same from character to character
+    const place = k < 2 || k % 2 === 1 ? WORLD : L[li++ % L.length];
     if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${place}`, ref }; }
     return { brief: `ANGLE: ${k === 0 ? CLOSE : A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${place}` };
   };
+}
+
+/** the writer sometimes drops the shot's setting (or blurs it into "a soft background"): when none of the place's words
+ *  made it into the prompt, the place is added plainly */
+const STOP = new Set(["with", "from", "under", "behind", "other", "their", "colour", "costume", "blurred", "light", "lights", "pick", "one", "the", "and"]);
+function withSetting(prompt: string, brief: string): string {
+  const place = /SETTING: ([^·]+)/.exec(brief)?.[1]?.trim();
+  if (!place || place.startsWith("a specific place")) return prompt;
+  const words = place.toLowerCase().match(/[a-z]{4,}/g)?.filter((w) => !STOP.has(w)) ?? [];
+  const low = prompt.toLowerCase();
+  return words.some((w) => low.includes(w)) ? prompt : `${prompt.replace(/\s*$/, "")} Set in ${place}, the place clearly visible behind her.`;
 }
 
 /** how people prompt this character's LoRA on Krea 2: the most-liked example posts' words (costume and trigger wording) */
@@ -201,7 +214,7 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   if (!d.allowed) return { status: "skipped", age: d.age || it.age, why: d.why || "Not an adult character" };
   // older prompt files answer with one "prompt": treat it as the only shot
   const got: { pose?: string; prompt?: string }[] = Array.isArray(d.shots) ? d.shots : d.prompt ? [{ pose: d.pose, prompt: d.prompt }] : [];
-  const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => ({ brief: briefs[i]?.brief ?? "", pose: String(x.pose ?? ""), prompt: String(x.prompt), ref: briefs[i]?.ref }));
+  const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => ({ brief: briefs[i]?.brief ?? "", pose: String(x.pose ?? ""), prompt: withSetting(String(x.prompt), briefs[i]?.brief ?? ""), ref: briefs[i]?.ref }));
   if (!shots.length) throw new Error("The writer answered without prompts — try again");
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
   // the writer's LoRA picks: only names from your library, strengths kept sensible
