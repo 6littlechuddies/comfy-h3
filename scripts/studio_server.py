@@ -5252,10 +5252,12 @@ async def site_test(req):
         except (OSError, ValueError):
             pass
         probes = [("root", ""), ("character", "/characters/h3-connection-test")] + ([("sent_character", f"/characters/{quote('h3-' + sent_id)}")] if sent_id else [])
+        # what the site offers for Live Action / Live Stream (whatever shape the developer gave it): its docs and the live pack
+        probes += [("openapi", "/openapi.json"), ("live_docs", "/live"), ("live_schema", "/live/schema")] + ([("sent_character_live", f"/characters/{quote('h3-' + sent_id)}/live")] if sent_id else [("test_character_live", "/characters/h3-connection-test/live")])
         for label, path in probes:
             try:
                 st, data = await _site_call(s, "GET", path)
-                out[label] = {"status": st, "body": data if isinstance(data, (dict, list)) and len(json.dumps(data)) < (20000 if label == "sent_character" else 3000) else str(data)[:600]}
+                out[label] = {"status": st, "body": data if isinstance(data, (dict, list)) and len(json.dumps(data)) < (20000 if label in ("sent_character", "openapi", "live_docs", "live_schema") or label.endswith("_live") else 3000) else str(data)[:600]}
             except RuntimeError as e:
                 out[label] = {"error": str(e)}
         # the upload path, end to end, with a REAL picture (a character's front picture, the way a send prepares it):
