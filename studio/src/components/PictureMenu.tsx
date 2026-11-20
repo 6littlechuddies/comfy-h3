@@ -455,7 +455,7 @@ export function PictureMenuHost() {
           const vis = items.filter((i) => !i.hide);
           const main = vis.filter((i) => isMain(i.key)), rest = vis.filter((i) => !isMain(i.key));
           const btn = (i: typeof vis[number]) => (
-            <button key={i.key} role="menuitem" disabled={!!busy} onClick={() => { noteMenuUse(i.key); act(i.key, i.run); }}
+            <button key={i.key} role="menuitem" disabled={!!busy} onClick={() => { noteMenuUse(i.key); import("../lib/promptBank").then(({ menuSignal }) => menuSignal(i.key, t.output)).catch(() => {}); act(i.key, i.run); }}
               className={cx("flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-hover disabled:opacity-50", busy === i.key && "text-accent")}>
               <Icon name={i.icon} size={13} className="text-muted" />{busy === i.key ? "Working…" : i.label}
             </button>);

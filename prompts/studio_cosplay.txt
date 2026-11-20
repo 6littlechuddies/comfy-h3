@@ -17,6 +17,7 @@ Then write ONE photo prompt for Krea 2 (a photographic model) in plain flowing E
 - Name the character once ("cosplaying Makima from Chainsaw Man") and otherwise describe what is seen. No drawing or anime style words: this is a photo.
 - If LORA TRIGGER WORDS are given, put them at the very start of the prompt, as given.
 - Never any childlike body, face or school setting.
+- THEIR TASTE (when given) is learned from the pictures this person kept and built on: write the prompt the way those prompts are written — the same structure, length, order, camera, lens, light and realism wording, and their recurring choices — and avoid what their notes say they delete. Take only the style from the examples, never their person, outfit or setting. The cosplay and adult rules above always win.
 
 Answer with ONE JSON object and nothing else:
 {"allowed": true, "age": "<what the source says>", "outfit": "<the costume, pieces in order>", "wig": "<wig>", "eyes": "<lens colour>", "props": "<props, or none>", "pose": "<pose and expression>", "prompt": "<the Krea 2 prompt>"}

@@ -106,8 +106,8 @@ export async function findLoras(it: CosItem): Promise<Candidate[]> {
 }
 
 /** step 4: the writer's adult check, costume and prompt */
-async function writePrompt(it: CosItem, cosplayer: string): Promise<Partial<CosItem>> {
-  const raw = await runWriter("cosplay", { character: it.name, series: it.series || "(not given)", cosplayer: cosplayer || "(none given: an adult woman in her twenties)", triggers: it.lora?.trigger || "(none)", notes: it.notes || "(nothing found — use what you know; if unsure about the age, it is NOT allowed)" },
+async function writePrompt(it: CosItem, cosplayer: string, taste: string): Promise<Partial<CosItem>> {
+  const raw = await runWriter("cosplay", { taste, character: it.name, series: it.series || "(not given)", cosplayer: cosplayer || "(none given: an adult woman in her twenties)", triggers: it.lora?.trigger || "(none)", notes: it.notes || "(nothing found — use what you know; if unsure about the age, it is NOT allowed)" },
     { tab: "batch", label: `Cosplay · ${it.name}`, images: it.picture ? [it.picture] : undefined, big: true });
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("The writer didn't answer in the expected format — try again");
@@ -119,17 +119,25 @@ async function writePrompt(it: CosItem, cosplayer: string): Promise<Partial<CosI
 }
 
 /** steps 1–4 for every character that isn't done; one at a time (CivitAI and the writer both like that better) */
+/** the writers working side by side (CivitAI and AniList are fine with this many) */
+export const WORKERS = 4;
+
+/** steps 1–4 for every character that isn't done — several at once, each its own writer job ("sub-agents"), all reading
+ *  the same learned taste (worked out once, before they start) */
 export async function researchAll(cosplayer: string, only?: string) {
   const st = useCosplay.getState();
-  for (const it0 of st.items) {
-    if (only ? it0.key !== only : it0.status === "ready" || it0.status === "skipped") continue;
-    const k = it0.key;
+  const todo = st.items.filter((it) => (only ? it.key === only : it.status !== "ready" && it.status !== "skipped")).map((it) => it.key);
+  if (!todo.length) return;
+  const { tasteBlock } = await import("./promptBank");
+  const who = st.opts.cosplayer === "one" ? st.opts.charId : null;
+  const taste = await tasteBlock(who).catch(() => "(nothing learned yet)");
+  const one = async (k: string) => {
     const up = (p: Partial<CosItem>) => useCosplay.getState().update(k, p);
     up({ status: "looking", why: undefined });
     try {
       const a = await lookUp(useCosplay.getState().items.find((x) => x.key === k)!);
       up(a);
-      if (a.status === "skipped") continue;
+      if (a.status === "skipped") return;
       let cur = useCosplay.getState().items.find((x) => x.key === k)!;
       if (cur.lora === undefined) {
         const loras = await findLoras(cur);
@@ -137,13 +145,17 @@ export async function researchAll(cosplayer: string, only?: string) {
         up({ loras, lora: o.auto ? (loras.find((l) => l.collected >= o.minCollected) ?? null) : undefined });
         cur = useCosplay.getState().items.find((x) => x.key === k)!;
       }
-      up(await writePrompt(cur, cosplayer));
+      up(await writePrompt(cur, cosplayer, taste));
     } catch (e) {
       const msg = (e as Error).message;
       // the writer's own age stop counts as a skip, not an error
       up(/under 18|minor|adult/i.test(msg) ? { status: "skipped", why: msg.slice(0, 160) } : { status: "error", why: msg.slice(0, 200) });
     }
-  }
+  };
+  let next = 0;
+  const { writerOutside } = await import("./outside");
+  const n = writerOutside() ? 1 : WORKERS; // the Grok tab answers one message at a time
+  await Promise.all(Array.from({ length: Math.min(n, todo.length) }, async () => { while (next < todo.length) await one(todo[next++]); }));
 }
 
 /** approve a LoRA for a character (or none); remembered for next time */

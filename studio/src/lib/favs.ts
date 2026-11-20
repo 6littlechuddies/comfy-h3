@@ -9,7 +9,9 @@ export const isFav = (s: Record<string, true>, f: FileRef) => !!s[key(f)];
 export function toggleFav(f: FileRef) {
   const cur = { ...useFavs.getState().set };
   const k = key(f);
-  if (cur[k]) delete cur[k]; else cur[k] = true;
+  const was = !!cur[k];
+  if (was) delete cur[k]; else cur[k] = true;
+  import("./promptBank").then(({ signal }) => signal(f, was ? "unstar" : "star")).catch(() => {});
   useFavs.setState({ set: cur });
   saveState("favorites", cur).catch(() => {});
 }

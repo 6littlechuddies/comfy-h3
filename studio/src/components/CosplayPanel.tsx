@@ -6,6 +6,25 @@ import { isAdult, looks, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { viewUrl } from "../lib/api";
 import { Btn, DropSelect, Icon, Seg, cx } from "./ui";
+import { examples, useBank } from "../lib/promptBank";
+
+/** what the writer has learned from what you keep (the prompt bank) — no typing: it comes from what you do */
+function Learned() {
+  const b = useBank();
+  const liked = Object.values(b.entries).filter((e) => e.score >= 3).length;
+  const del = Object.values(b.entries).filter((e) => e.score < 0).length;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-line pt-3 text-[12.5px]">
+      <div className="flex items-center gap-2"><span className="lbl">Learned taste</span><button onClick={() => setOpen(!open)} className="ml-auto text-dim hover:text-ink">{open ? "Hide" : "Show"}</button></div>
+      <p className="mt-1 leading-relaxed text-dim">{!b.loaded ? "Loading…" : liked ? `From ${liked} picture${liked > 1 ? "s" : ""} you kept and built on${del ? ` and ${del} you deleted` : ""}. New prompts follow it${b.taste ? "" : " (notes come once 6+ are kept)"}.` : "Nothing yet. Star pictures, make characters from them, animate, upscale or download them — the writer learns from what you keep, and from what you delete."}</p>
+      {open && <div className="mt-2 flex flex-col gap-2">
+        {b.taste?.notes && <pre className="whitespace-pre-wrap rounded-sm border border-line bg-black/20 p-2 font-sans text-[12px] text-muted">{b.taste.notes}</pre>}
+        {examples(3).map((e) => <p key={e.k} className="line-clamp-3 border-l-2 border-accent/40 pl-2 text-[11.5px] text-muted" title={e.prompt}><b className="text-ink">{e.score.toFixed(1)}</b> · {Object.keys(e.sig).join(", ")} — {e.prompt}</p>)}
+      </div>}
+    </div>
+  );
+}
 
 /** the drawer part: who wears the costumes, and how LoRAs are picked */
 export function CosplayOptions() {
@@ -27,6 +46,7 @@ export function CosplayOptions() {
       <label className="flex items-center gap-2 text-[13px]">Pictures per character
         <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 6].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
       <p className="text-[12px] leading-relaxed text-dim">Characters who are under 18, or drawn that way, are skipped and listed. Keep character names out of your site's titles: the site character is the cosplayer.</p>
+      <Learned />
     </div>
   );
 }

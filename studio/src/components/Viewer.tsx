@@ -12,6 +12,7 @@ import { HowMade } from "./Feed";
 /** tell the rental you opened ("open") or downloaded ("dl") these results — clean-up never suggests downloaded ones */
 export function noteSeen(files: FileRef[], how: "open" | "dl") {
   if (how === "dl") import("../lib/anon").then(({ keepAnon }) => files.forEach(keepAnon)).catch(() => {});
+  if (how === "dl") import("../lib/promptBank").then(({ signal }) => files.forEach((f) => signal(f, "download"))).catch(() => {});
   const out = files.filter((f) => f.type === "output").map((f) => ({ subfolder: f.subfolder, filename: f.filename }));
   if (out.length) fetch("/studio-api/catalog/seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: out, how }), keepalive: true }).catch(() => {});
 }

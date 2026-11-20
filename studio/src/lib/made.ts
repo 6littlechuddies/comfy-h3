@@ -11,6 +11,8 @@ const read = (): Record<string, string> => { try { return JSON.parse(localStorag
 export function noteOrigin(to: FileRef, from: FileRef) {
   if (from.type !== "output" || key(to) === key(from)) return;
   try { const m = read(); m[key(to)] = m[key(from)] ?? key(from); localStorage.setItem(KEY, JSON.stringify(m)); } catch { /* private mode */ }
+  // kept as a character's picture: the strongest "this one's good"
+  import("./promptBank").then(({ signal }) => signal(from, "character")).catch(() => {});
 }
 /** the job and output behind a file (following kept copies back to the original) — null when it isn't one of this browser's results */
 export function madeBy(f: FileRef | null): { j: Job; o: Output } | null {
