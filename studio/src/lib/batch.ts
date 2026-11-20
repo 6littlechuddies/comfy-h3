@@ -51,6 +51,8 @@ export interface Row {
   realistic?: boolean;
   /** copy a pose through its depth (PoseWear): the picture on the rental, how strongly, and whether its depth is worked out first */
   control?: { image: string; strength: number; estimate: boolean };
+  /** LoRAs you locked: kept at your strength (balancing fits the others around them) */
+  locked?: string[];
   /** this row's own Krea 2 checkpoint (a fine-tune's name, or "official"), instead of Create's */
   checkpoint?: string;
   /** the PoseWear pose (its picture, for a character made from her sheet: then the pose goes in as a reference picture) */
@@ -480,7 +482,15 @@ export async function queueAll(only?: string[]): Promise<number> {
           const ma = modelArgs(st.create, mi);
           const ckArgs = !anime && r.checkpoint ? (r.checkpoint === "official" ? { ...ma, unet: undefined } : { ...ma, unet: r.checkpoint }) : ma;
           let rowLoras = [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])];
-          if (!anime && r.loras?.length) { const bal = balanceLoras(rowLoras, await libOnce(), BUDGET.krea2); rowLoras = bal.loras; if (bal.changed.length) useBatch.getState().update(r.id, { note: `LoRAs balanced: ${bal.changed.join(", ")}` }); }
+          if (!anime && r.loras?.length) {
+            // the locked ones keep your strength; the rest are fitted into what's left of Krea 2's budget
+            const isLocked = (l: { name: string }) => !!r.locked?.includes(l.name);
+            const fixed = rowLoras.filter(isLocked), free = rowLoras.filter((l) => !isLocked(l));
+            const used = fixed.filter((l) => !l.off).reduce((n, l) => n + Math.abs(l.strength), 0);
+            const bal = balanceLoras(free, await libOnce(), Math.max(0.2, BUDGET.krea2 - used));
+            rowLoras = [...fixed, ...bal.loras];
+            if (bal.changed.length) useBatch.getState().update(r.id, { note: `LoRAs balanced around your locked ones: ${bal.changed.join(", ")}` });
+          }
           job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${named || "picture"}`, buildCreate({
             ...adv, seed: newSeed(), ...ckArgs, positive, negative: st.create.negative, loras: rowLoras,
             width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,

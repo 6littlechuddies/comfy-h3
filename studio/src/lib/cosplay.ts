@@ -28,6 +28,8 @@ export interface CosItem {
   ai?: LoraPick[];             // LoRAs from your library the writer picked and weighted for this character (you can change them)
   aiWhy?: Record<string, string>; // why it picked each one
   aiCheckpoint?: { name: string; why: string }; // the checkpoint it picked ("official" = Krea 2 as released); you can change it
+  aiLocked?: Record<string, true>; // LoRAs you locked: kept at your strength on every rewrite, never changed or balanced away
+  ckLocked?: boolean;          // the checkpoint is yours: a rewrite keeps it
   build?: string;              // its read of her build and figure (from the design, the LoRA's pictures and posts)
   files?: Record<number, LoraPick>; // approved LoRAs once on the rental, by version
   /** @deprecated one approved LoRA (older lists) — read through picksOf */
@@ -47,6 +49,8 @@ export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; aut
   look: string;
   /** the writer picks LoRAs from your library for each character and sets their strength (the locked ones stay as they are) */
   director: boolean;
+  /** one checkpoint for every cosplay picture (locked: DeepSeek doesn't pick one); empty = per character / Create's */
+  checkpoint?: string;
 }
 /** the approved LoRAs, whichever way they were stored */
 export const picksOf = (it: CosItem): Candidate[] | undefined => it.picks ?? (it.lora === undefined ? undefined : it.lora ? [it.lora] : []);
@@ -202,8 +206,8 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
   // the writer's LoRA picks: only names from your library, strengths kept sensible
   type Pick = { name: string; strength?: number; why?: string };
-  const chosen: Pick[] = libNames.size ? (Array.isArray(d.loras) ? d.loras : []).filter((l: Pick) => l?.name && libNames.has(l.name)).slice(0, 3) : [];
-  const ai: LoraPick[] | undefined = libNames.size ? chosen.map((l) => ({ name: l.name, strength: Math.round(Math.min(1.2, Math.max(0.1, Number(l.strength) || 0.6)) * 100) / 100 })) : undefined;
+  const chosen: Pick[] = libNames.size ? (Array.isArray(d.loras) ? d.loras : []).filter((l: Pick) => l?.name && libNames.has(l.name)).slice(0, 5) : [];
+  const ai: LoraPick[] | undefined = libNames.size ? chosen.map((l) => ({ name: l.name, strength: Math.round(Math.min(1.5, Math.max(-1.5, Number(l.strength) || 0.6)) * 100) / 100 })) : undefined;
   const aiWhy = libNames.size ? Object.fromEntries(chosen.map((l) => [l.name, String(l.why ?? "")])) : undefined;
   const ck = d.checkpoint && typeof d.checkpoint === "object" ? d.checkpoint as { name?: string; why?: string } : null;
   const aiCheckpoint = ckNames.size && ck?.name && (ckNames.has(ck.name) || ck.name === "official") ? { name: ck.name, why: String(ck.why ?? "") } : undefined;
@@ -261,7 +265,18 @@ export async function researchAll(cosplayer: string, only?: string) {
       const refPics = (await Promise.all(lp.pics.map((u) => fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
         .then((r) => (r.ok ? r.json() : null)).then((d) => d?.name as string | undefined).catch(() => undefined)))).filter((x): x is string => !!x);
       const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k));
-      up(await writePrompt(cur, cosplayer, taste, briefs, posts, library, locked, libNames, refPics, ckNames));
+      // your locked LoRAs for her (and every picture): the writer works around them and keeps their strength
+      const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
+      const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}`)].filter(Boolean).join(", ") || "(none)";
+      const ckHere = cur.ckLocked || o.checkpoint ? new Set<string>() : ckNames;
+      const lib = cur.ckLocked || o.checkpoint ? library.split("\nCHECKPOINTS")[0] : library;
+      const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere);
+      // a rewrite keeps what you locked: locked LoRAs first (your strength), then its new picks; your checkpoint stays
+      const keep = (cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name]);
+      if (w.ai) w.ai = [...keep, ...w.ai.filter((l) => !keep.some((k) => k.name === l.name) && !(cur.extra ?? []).some((k) => k.name === l.name))];
+      else if (keep.length) w.ai = keep;
+      if (cur.ckLocked) delete w.aiCheckpoint;
+      up(w);
     } catch (e) {
       const msg = (e as Error).message;
       // the writer's own age stop counts as a skip, not an error
@@ -315,7 +330,10 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
     onStep?.(picksOf(it)?.length ? `Getting ${it.name}'s LoRAs…` : `Adding ${it.name}…`);
     const civ = await lorasFor(it);
     const seen = new Set<string>();
-    const loras = [...civ, ...(it.extra ?? []), ...(st.opts.director ? it.ai ?? [] : []), ...st.opts.loras].filter((l) => !seen.has(l.name) && !!seen.add(l.name));
+    const ai = st.opts.director ? it.ai ?? [] : (it.ai ?? []).filter((l) => it.aiLocked?.[l.name]);
+    const loras = [...civ, ...(it.extra ?? []), ...ai, ...st.opts.loras].filter((l) => !seen.has(l.name) && !!seen.add(l.name));
+    // never balanced away: everything you chose yourself (locked for every picture, your LoRAs for her, the picks you locked)
+    const lockedNames = [...st.opts.loras, ...(it.extra ?? []), ...ai.filter((l) => it.aiLocked?.[l.name])].map((l) => l.name);
     const trig = loras.map((l) => l.trigger).filter((t): t is string => !!t);
     const shots: Shot[] = it.shots?.length ? it.shots : [{ brief: "", pose: it.pose ?? "", prompt: it.prompt! }];
     for (const [i, sh] of shots.entries()) {
@@ -325,8 +343,8 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;
-      const ckName = st.opts.director ? it.aiCheckpoint?.name : undefined;
-      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, ...(ckName ? { checkpoint: ckName } : {}),
+      const ckName = st.opts.checkpoint || (st.opts.director || it.ckLocked ? it.aiCheckpoint?.name : undefined);
+      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, locked: lockedNames, ...(ckName ? { checkpoint: ckName } : {}),
         charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras, control });
       n++;
     }

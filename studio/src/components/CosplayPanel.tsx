@@ -67,9 +67,10 @@ export function CosplayOptions() {
         <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
       <p className="-mt-2 text-[12px] leading-relaxed text-dim">Each picture is its own shot: a different camera angle, pose and place — never repeated across the batch.</p>
       <PoseSource />
-      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="Locked LoRAs (on every picture)" />
+      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="🔒 Locked LoRAs (every picture, your strength)" />
+      <LockedCheckpoint value={o.checkpoint ?? ""} onChange={(v) => set({ checkpoint: v || undefined })} />
       <label className="-mt-1 flex cursor-pointer items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5" checked={!!o.director} onChange={(e) => set({ director: e.target.checked })} />
-        <span>Let DeepSeek pick my LoRAs and checkpoint <span className="text-dim">— for each character it first works out her build (petite, athletic, hourglass…) from her official picture, two of her LoRA's most-liked CivitAI pictures and what people pair that LoRA with; then picks up to 3 of your Krea 2 LoRAs and one of your Krea 2 checkpoints to match, with a reason for each. Strengths are kept inside what Krea 2 holds (about 1.4 in total, counting her character LoRA and your locked ones), so nothing goes blotchy — and every row is balanced again before it's made. You can change any pick on each character.</span></span></label>
+        <span>Let DeepSeek pick my LoRAs and checkpoint <span className="text-dim">— for each character it first works out her build (petite, athletic, hourglass…) from her official picture, two of her LoRA's most-liked CivitAI pictures and what people pair that LoRA with; then picks up to 5 of your Krea 2 LoRAs — up to 2 for realism, up to 2 body-shape ones her build needs (waist, thighs…), 1 style — and one of your Krea 2 checkpoints, with a reason for each. 🔒 Lock any LoRA or checkpoint and it stays at your strength on every rewrite; the rest are picked around it. Strengths are kept inside what Krea 2 holds (about 1.4 in total, counting her character LoRA and your locked ones), so nothing goes blotchy — and every row is balanced again before it's made. You can change any pick on each character.</span></span></label>
       <p className="text-[12px] leading-relaxed text-dim">Characters who are under 18, or drawn that way, are skipped and listed. Keep character names out of your site's titles: the site character is the cosplayer.</p>
       <Learned />
     </div>
@@ -208,11 +209,32 @@ function DirectorView({ it }: { it: CosItem }) {
       <span className="lbl">DeepSeek's picks</span>
       {it.build && <p className="text-[12px] text-muted"><b className="text-ink">Her build:</b> {it.build}</p>}
       {cks && cks.length > 0 && <label className="flex items-center gap-2 text-[12px]"><b>Checkpoint</b>
-        <DropSelect value={it.aiCheckpoint?.name ?? ""} onChange={(e) => up({ aiCheckpoint: e.target.value ? { name: e.target.value, why: e.target.value === it.aiCheckpoint?.name ? it.aiCheckpoint.why : "your pick" } : undefined })} className="inset h-8 border px-2 text-[12px]">
+        <DropSelect value={it.aiCheckpoint?.name ?? ""} onChange={(e) => up({ aiCheckpoint: e.target.value ? { name: e.target.value, why: e.target.value === it.aiCheckpoint?.name ? it.aiCheckpoint.why : "your pick" } : undefined, ckLocked: !!e.target.value && e.target.value !== it.aiCheckpoint?.name ? true : it.ckLocked })} className="inset h-8 border px-2 text-[12px]">
           <option value="">Create's (as set there)</option><option value="official">Krea 2 official</option>
           {cks.map((m) => <option key={m.name} value={m.name}>{m.title}</option>)}
-        </DropSelect>{it.aiCheckpoint?.why && <span className="truncate text-dim" title={it.aiCheckpoint.why}>— {it.aiCheckpoint.why}</span>}</label>}
-      <LoraList value={it.ai ?? []} onChange={(v) => up({ ai: v })} family="krea2" label="LoRAs it picked (change or remove)" />
-      {(it.ai ?? []).filter((l) => it.aiWhy?.[l.name]).map((l) => <p key={l.name} className="text-[11.5px] text-dim"><b className="text-muted">{l.name.replace(/\.safetensors$/, "")} @{l.strength}</b> — {it.aiWhy![l.name]}</p>)}
+        </DropSelect><button onClick={() => up({ ckLocked: !it.ckLocked })} title={it.ckLocked ? "Locked: a rewrite keeps this checkpoint" : "Lock this checkpoint for her"} className={cx("press rounded-sm px-1", it.ckLocked ? "bg-accent/15 text-accent" : "text-dim hover:text-ink")}>{it.ckLocked ? "🔒" : "🔓"}</button>
+        {it.aiCheckpoint?.why && <span className="truncate text-dim" title={it.aiCheckpoint.why}>— {it.ckLocked ? "locked by you" : it.aiCheckpoint.why}</span>}</label>}
+      <LoraList value={it.ai ?? []} onChange={(v) => up({ ai: v, aiLocked: Object.fromEntries(Object.entries(it.aiLocked ?? {}).filter(([n]) => v.some((l) => l.name === n))) as Record<string, true> })} family="krea2" label="LoRAs (its picks and yours — 🔒 to lock)" />
+      {(it.ai ?? []).map((l) => {
+        const on = !!it.aiLocked?.[l.name];
+        return (
+          <div key={l.name} className="flex items-start gap-1.5 text-[11.5px]">
+            <button onClick={() => { const m = { ...(it.aiLocked ?? {}) }; if (on) delete m[l.name]; else m[l.name] = true; up({ aiLocked: m }); }} title={on ? "Locked: kept at this strength on every rewrite, never balanced down — click to let DeepSeek change it" : "Lock it: DeepSeek keeps it at this strength and picks the rest around it"}
+              className={cx("press shrink-0 rounded-sm px-1", on ? "bg-accent/15 text-accent" : "text-dim hover:text-ink")}>{on ? "🔒" : "🔓"}</button>
+            <span className="text-dim"><b className="text-muted">{l.name.replace(/\.safetensors$/, "")} @{l.strength}</b>{on ? " — locked by you" : it.aiWhy?.[l.name] ? ` — ${it.aiWhy[l.name]}` : ""}</span>
+          </div>);
+      })}
     </div>);
+}
+
+/** one checkpoint for every cosplay picture: DeepSeek then doesn't pick one */
+function LockedCheckpoint({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [cks, setCks] = useState<{ name: string; title: string }[]>([]);
+  useEffect(() => { void import("../lib/api").then(({ myModels }) => myModels().then((d) => setCks(d.items.filter((m) => m.family === "krea2" && m.here))).catch(() => {})); }, []);
+  return (
+    <label className="flex flex-col gap-1"><span className="lbl">🔒 Checkpoint for every picture</span>
+      <DropSelect value={value} onChange={(e) => onChange(e.target.value)} className="inset h-9 border px-2 text-[13px]">
+        <option value="">Not locked (DeepSeek picks per character, or Create's)</option><option value="official">Krea 2 official</option>
+        {cks.map((m) => <option key={m.name} value={m.name}>{m.title}</option>)}
+      </DropSelect></label>);
 }
