@@ -197,9 +197,9 @@ export function CosplayList() {
             </div>
           )}
           {waitingLora.length > 0 && <p className="flex items-center gap-2 border border-hot/40 bg-hot/5 px-3 py-2 text-[12.5px] text-hot"><Icon name="sparkle" size={13} />{waitingLora.length} character{waitingLora.length > 1 ? "s have" : " has"} CivitAI LoRAs to look at — open them and pick in the LoRAs tab.</p>}
-          <div className="flex flex-col divide-y divide-line border border-line">
+          {items.length > 0 && <div className="flex flex-col divide-y divide-line border border-line">
             {items.map((it) => <CosRow key={it.key} it={it} busy={!!busy} onRedo={() => research(it.key)} />)}
-          </div>
+          </div>}
         </div>
       )}
     </div>

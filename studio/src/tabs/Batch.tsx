@@ -165,47 +165,60 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
   const problem = rowProblem(r);
   const swap = !video && (useBatch.getState().take ?? "swap") === "swap";
   const status = r.status === "writing" ? "WRITING" : r.status === "queued" && (r.step || r.results) ? (r.step ? (r.step.startsWith("Waiting") ? "IN LINE" : "SWAPPING") : "DONE") : r.status === "queued" ? (jobs.every((j) => j.status === "done") && jobs.length ? "DONE" : jobs.some((j) => j.status === "running") ? "RUNNING" : "QUEUED") : r.status === "error" ? "ERROR" : problem ? "NEEDS INPUT" : "READY";
-  const tone = status === "READY" || status === "DONE" ? "text-good" : status === "ERROR" ? "text-bad" : status === "NEEDS INPUT" ? "text-dim" : "text-accent";
+  const tone = status === "READY" || status === "DONE" ? "border-good/40 text-good" : status === "ERROR" ? "border-bad/50 text-bad" : status === "NEEDS INPUT" ? "border-line text-dim" : "border-accent/50 text-accent";
   const locked = r.status === "queued" || r.status === "writing";
+  const who = r.charId ? useCharacters.getState().list.find((x) => x.id === r.charId)?.name ?? "?" : "";
+  const title = r.civit ? `Recreate post ${r.civit.id}` : r.idea.trim() || (r.imitate ? (video ? "Imitate this" : "Copy this picture") : `Row ${n + 1}`);
+  // what this row carries, as small labels
+  const tags = [who && `★ ${who}`, r.pose && `pose: ${r.pose.title.slice(0, 30)}`, r.control && !r.pose && "depth pose", r.loras?.length && `${r.loras.length} LoRA${r.loras.length > 1 ? "s" : ""}`,
+    r.checkpoint && `checkpoint: ${r.checkpoint === "official" ? "official" : r.checkpoint.split("/").pop()!.replace(/\.safetensors$/, "").slice(0, 22)}`,
+    r.toSet && `→ “${r.toSet.title}” ${r.toSet.tier}`, r.faceFix && "face pass", r.inspo && "saved scene", r.expression && r.expression.split(",")[0]].filter(Boolean) as string[];
   return (
-    <div className={cx("card grid grid-cols-[36px_150px_1fr_auto] gap-3 border p-3", r.status === "error" ? "border-bad/50" : "border-line")}>
-      <div className="flex flex-col items-center gap-1 pt-1"><span className="micro text-dim">#{String(n + 1).padStart(2, "0")}</span></div>
+    <div className={cx("card group flex gap-4 border p-3 transition-colors", r.status === "error" ? "border-bad/50" : "border-line hover:border-[#3a3e46]")}>
       {r.civit ? (
-        <button onClick={() => openViewer([{ url: r.civit!.url, kind: "image" as const, label: `CivitAI ${r.civit!.id}` }], 0)} className="press relative h-[150px] overflow-hidden border border-line bg-raised2 hover:border-accent" title="The post being recreated">
+        <button onClick={() => openViewer([{ url: r.civit!.url, kind: "image" as const, label: `CivitAI ${r.civit!.id}` }], 0)} className="press relative h-[160px] w-[120px] shrink-0 overflow-hidden border border-line bg-raised2 hover:border-accent" title="The post being recreated">
           <img src={r.civit.thumb || r.civit.url} alt="" className="h-full w-full object-cover" />
           <span className="micro absolute bottom-1 left-1 bg-black/75 px-1 text-accent">CIVITAI</span>
         </button>
-      ) : <Slot className="h-[150px]" value={r.imitate} onChange={(m) => update(r.id, { imitate: m, prompt: m === r.imitate ? r.prompt : "", status: "new" })} accept={["image", "video"]} label={video ? "Clip or picture to imitate" : "Picture to copy"} />}
-      <div className="flex min-w-0 flex-col gap-2">
-        {r.control && <span className="text-[11.5px] text-muted" title="The body position is copied from this pose's depth (Krea 2 depth control)">Pose copied from its depth · strength {r.control.strength.toFixed(2)}{r.loras?.length ? ` · ${r.loras.length} LoRA${r.loras.length > 1 ? "s" : ""}` : ""}</span>}
-        {r.civit && <span className="text-[11.5px] text-muted">Recreate <a href={r.civit.page} target="_blank" rel="noreferrer" className="underline hover:text-ink">post {r.civit.id}</a> · {recreateLine(r.civit)}</span>}
-        {(r.charId || r.toSet || r.inspo) && <span className="text-[11.5px] text-muted">{r.charId ? useCharacters.getState().list.find((x) => x.id === r.charId)?.name ?? "?" : ""}{r.toSet ? ` → “${r.toSet.title}” ${r.toSet.tier} set` : ""}{r.faceFix ? " · face pass" : ""}{r.inspo ? " · from a saved scene" : ""}{r.expression ? ` · ${r.expression.split(",")[0]}` : ""}</span>}
-        {!r.civit && <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
+      ) : r.pose && !r.imitate ? (
+        <span className="relative h-[160px] w-[120px] shrink-0 overflow-hidden border border-line bg-black/40" title={r.pose.title}>
+          <img src={r.pose.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-contain" />
+          <span className="micro absolute bottom-1 left-1 bg-black/75 px-1 text-cyan">POSE</span>
+        </span>
+      ) : <Slot className="h-[160px] w-[120px] shrink-0" value={r.imitate} onChange={(m) => update(r.id, { imitate: m, prompt: m === r.imitate ? r.prompt : "", status: "new" })} accept={["image", "video"]} label={video ? "Clip or picture to imitate" : "Picture to copy"} />}
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex items-start gap-2">
+          <span className="micro mt-1 shrink-0 text-dim">#{String(n + 1).padStart(2, "0")}</span>
+          <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink" title={title}>{title}</span>
+          <span className={cx("micro shrink-0 rounded-full border px-2 py-[3px]", tone)}>{status}</span>
+          <button aria-label={`Remove row ${n + 1}`} onClick={() => remove(r.id)} className="-mr-1 shrink-0 text-dim opacity-60 hover:text-bad group-hover:opacity-100"><Icon name="x" size={15} /></button>
+        </div>
+        {tags.length > 0 && <div className="flex flex-wrap gap-1">{tags.map((t) => <span key={t} className="inline-flex h-5 items-center rounded-full border border-line px-2 text-[11px] text-muted">{t}</span>)}</div>}
+        {r.civit && <span className="text-[11.5px] text-muted"><a href={r.civit.page} target="_blank" rel="noreferrer" className="underline hover:text-ink">post {r.civit.id}</a> · {recreateLine(r.civit)}</span>}
+        {!r.civit && (!r.prompt.trim() || video || r.imitate) && <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
           placeholder={video ? (r.imitate ? "Anything to change? e.g. on a beach at sunset (optional)" : "The idea, e.g. she twirls in the rain and laughs") : (r.imitate ? (swap ? "Which person if there are several (“the woman on the left”), or a change — optional" : "What to change (optional)") : "Describe the picture")}
           className="inset h-9 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none disabled:opacity-60" />}
         {r.civit && <RecreateRow r={r} locked={locked} />}
         {(video || (!r.civit && !r.imitate && (r.prompt.trim() || r.status === "writing"))) && (
-          <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={4}
-            placeholder={r.status === "writing" ? (writerOutside() ? "Waiting for your Grok answer…" : "The writer is on it…") : r.civit ? "Its prompt — change any of it, or leave it as posted" : !video ? "The Krea 2 prompt" : "The H3 prompt — press Write prompts to have it written from the clip/picture and idea, or type your own"}
-            className={cx("inset min-h-[92px] flex-1 resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70", r.status === "writing" && "shimmer")} />
+          <textarea value={r.prompt} disabled={locked} onChange={(e) => update(r.id, { prompt: e.target.value, status: e.target.value.trim() ? "ready" : "new" })} rows={3}
+            placeholder={r.status === "writing" ? (writerOutside() ? "Waiting for your Grok answer…" : "The writer is on it…") : !video ? "The Krea 2 prompt" : "The H3 prompt — press Write prompts to have it written from the clip/picture and idea, or type your own"}
+            className={cx("inset min-h-[76px] flex-1 resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70", r.status === "writing" && "shimmer")} />
         )}
-        <div className="flex items-center gap-2 text-[12px]">
-          <span className={cx("micro", tone)}>{status}</span>
+        <div className="mt-auto flex flex-wrap items-center gap-2 text-[12px]">
+          <label className="flex items-center gap-1.5 text-muted">Takes
+            <DropSelect value={r.takes} disabled={locked} onChange={(e) => update(r.id, { takes: Number(e.target.value) })} className="inset h-7 border px-1.5 text-[12.5px]">
+              {(r.civit ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4]).map((k) => <option key={k} value={k}>×{k}</option>)}
+            </DropSelect></label>
           {r.step && <span className="truncate text-accent">{r.step}</span>}
           {r.note && !r.error && <span className="truncate text-muted" title={r.note}>{r.note}</span>}
-          {(r.error || (problem && r.status !== "queued")) && <span className="truncate text-muted">{r.error ?? problem}</span>}
-          {!!r.results?.length && <span className="ml-auto flex gap-1">{r.results.map((u, i) => <button key={u} title={r.idea || `Row ${n + 1}`} onClick={() => openViewer(r.results!.map((x) => ({ url: x, kind: "image" as const, label: r.idea || `Row ${n + 1}` })), i)} className="press h-12 w-9 overflow-hidden border border-line hover:border-accent"><img src={u} alt="" className="h-full w-full object-cover" /></button>)}</span>}
-          {jobs.length > 0 && <span className="ml-auto flex gap-1">{jobs.map((j) => <span key={j.id} title={`${j.label}: ${j.status}`} className={cx("h-1.5 w-6", j.status === "done" ? "bg-good" : j.status === "running" ? "stripes" : j.status === "error" ? "bg-bad" : "bg-raised2")} />)}</span>}
+          {(r.error || (problem && r.status !== "queued")) && <span className="truncate text-muted" title={r.error ?? problem}>{r.error ?? problem}</span>}
+          <span className="ml-auto flex items-center gap-2">
+            {jobs.length > 0 && <span className="flex gap-1">{jobs.map((j) => <span key={j.id} title={`${j.label}: ${j.status}`} className={cx("h-1.5 w-6", j.status === "done" ? "bg-good" : j.status === "running" ? "stripes" : j.status === "error" ? "bg-bad" : "bg-raised2")} />)}</span>}
+            {!!r.results?.length && <span className="flex gap-1">{r.results.map((u, i) => <button key={u} title={r.idea || `Row ${n + 1}`} onClick={() => openViewer(r.results!.map((x) => ({ url: x, kind: "image" as const, label: r.idea || `Row ${n + 1}` })), i)} className="press h-12 w-9 overflow-hidden border border-line hover:border-accent"><img src={u} alt="" className="h-full w-full object-cover" /></button>)}</span>}
+            {r.debug && <button onClick={() => copyText(debugText([r]), "Debug copied — paste it to Claude")} title="What this row sent (path, pose, depth, LoRAs, likeness reference) — to paste to Claude" className="text-dim hover:text-ink">Copy debug</button>}
+            {r.status === "queued" && !r.step && <button onClick={() => update(r.id, { status: r.prompt ? "ready" : "new", jobIds: [], results: undefined })} className="text-muted hover:text-ink">Run again</button>}
+          </span>
         </div>
-      </div>
-      <div className="flex flex-col items-end gap-2">
-        <button aria-label={`Remove row ${n + 1}`} onClick={() => remove(r.id)} className="text-muted hover:text-bad"><Icon name="x" size={15} /></button>
-        <label className="flex flex-col items-end gap-1"><span className="micro text-dim">TAKES</span>
-          <DropSelect value={r.takes} disabled={locked} onChange={(e) => update(r.id, { takes: Number(e.target.value) })} className="inset h-8 border px-1.5 text-[13px]">
-            {(r.civit ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4]).map((k) => <option key={k} value={k}>×{k}</option>)}
-          </DropSelect></label>
-        {r.status === "queued" && !r.step && <button onClick={() => update(r.id, { status: r.prompt ? "ready" : "new", jobIds: [], results: undefined })} className="mt-auto text-[12px] text-muted hover:text-ink">Run again</button>}
-        {r.debug && <button onClick={() => copyText(debugText([r]), "Debug copied — paste it to Claude")} title="What this row sent (path, pose, depth, LoRAs, likeness reference) — to paste to Claude" className="text-[11.5px] text-dim hover:text-ink">Copy debug</button>}
       </div>
     </div>
   );

@@ -129,22 +129,23 @@ export function PromptBar({ value, onChange, placeholder, chips, action, minRows
         <textarea ref={ta} value={value} onChange={(e) => { onChange(e.target.value); requestAnimationFrame(at.sync); }} onKeyDown={at.onKeyDown} onKeyUp={(e) => { if (e.key.startsWith("Arrow") && !at.menu) at.sync(); }} onClick={at.sync} onFocus={() => setFocused(true)} onBlur={() => { at.close(); setFocused(false); }} onContextMenu={rw.onContextMenu} placeholder={placeholder} rows={minRows} aria-label={placeholder}
           className={cx("w-full min-w-0 resize-none bg-transparent px-5 pb-1 pt-4 text-[15px] leading-6 text-ink placeholder:text-dim focus:outline-none", !!lead && "pl-3", mono && "font-mono text-[13.5px]")} />
       </div>
-      <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-1.5">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{chips}</div>
+      {/* the choices (model, shape, count…) on their own row, then a footer: tools on the left, the go button on the right */}
+      {chips && <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-4 pb-3 pt-2">{chips}</div>}
+      <div className="flex items-center gap-1 border-t border-line2 px-3 py-2">
         <button type="button" onClick={() => setBig((v) => !v)} aria-pressed={big} title={big ? "Smaller box" : "Bigger box — for long prompts"}
-          className={cx("press inline-flex h-8 items-center rounded-sm px-2 text-[12px]", big ? "text-accent" : "text-muted hover:text-ink")}>
+          className={cx("press inline-flex h-8 w-8 items-center justify-center rounded-sm", big ? "text-accent" : "text-muted hover:bg-hover hover:text-ink")}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>{big ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}</svg></button>
         {rewrite && <PromptHistoryButton tab={rewrite} value={value} onChange={onChange} />}
         {rewrite && value.trim() && <button type="button" onClick={rw.openWhole} title="Say what to change in this prompt — only that changes, the rest stays word for word (or highlight a part and right-click it)"
-          className="press inline-flex h-8 items-center gap-1 rounded-sm px-2 text-[12px] text-muted hover:text-ink"><Icon name="brush" size={13} />Change it</button>}
+          className="press inline-flex h-8 items-center gap-1.5 rounded-sm px-2 text-[12px] text-muted hover:bg-hover hover:text-ink"><Icon name="brush" size={13} />Change it</button>}
         {pose && <PosePicker value={value} onChange={onChange} mode={pose} />}
         {at.enabled && <MentionButton onClick={at.start} />}
         <button type="button" onClick={() => txt.current?.click()} title="Load a .txt file into this box (replaces what's there) — or drag the file onto the box"
-          className="press inline-flex h-8 items-center gap-1 rounded-sm px-2 text-[12px] text-muted hover:text-ink"><Icon name="script" size={13} />.txt</button>
+          className="press inline-flex h-8 items-center gap-1.5 rounded-sm px-2 text-[12px] text-muted hover:bg-hover hover:text-ink"><Icon name="script" size={13} />.txt</button>
         <button type="button" onClick={mic.toggle} disabled={mic.state === "working"} title={mic.state === "recording" ? "Stop — your words go into the box" : "Talk instead of typing (turned into text on your rental)"}
-          className={cx("press inline-flex h-8 items-center gap-1 rounded-sm px-2 text-[12px]", mic.state === "recording" ? "text-bad pulse" : "text-muted hover:text-ink")}><Icon name="mic" size={13} />{mic.state === "recording" ? "Stop" : mic.state === "working" ? "…" : ""}</button>
+          className={cx("press inline-flex h-8 items-center gap-1 rounded-sm px-2 text-[12px]", mic.state === "recording" ? "text-bad pulse" : "text-muted hover:bg-hover hover:text-ink")}><Icon name="mic" size={13} />{mic.state === "recording" ? "Stop" : mic.state === "working" ? "…" : ""}</button>
         <input ref={txt} type="file" accept=".txt,.md,text/plain,text/markdown" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; loadText(f); }} />
-        <div className="flex shrink-0 items-center gap-2">{action}</div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">{action}</div>
       </div>
       {below}
       {rw.menu}
