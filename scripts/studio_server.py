@@ -252,6 +252,25 @@ def _public_host(host: str) -> bool:
         return False
 
 
+async def _read_upto(r, limit: int) -> bytes:
+    """the whole body, up to limit+1 bytes (aiohttp's read(n) hands back only what's arrived so far — often just the first chunk)"""
+    buf = bytearray()
+    async for chunk in r.content.iter_chunked(1 << 16):
+        buf += chunk
+        if len(buf) > limit: break
+    return bytes(buf)
+
+
+def _image_ok(path: str) -> bool:
+    """the file decodes all the way through (not cut short, not a web page saved as .jpg)"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im: im.load()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def fetch_image(req):
     """POST {url} → a picture dragged in from another tab (Pinterest, Instagram, any site): the image itself, or the page's
     main picture (og:image) when the link is a page like a Pinterest pin. Saved as an input file."""
@@ -271,13 +290,18 @@ async def fetch_image(req):
                     raise web.HTTPBadGateway(text=f"The site answered {r.status} for that picture")
                 ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 if ct.startswith("image/"):
-                    body = await r.content.read(30 * 1024 * 1024 + 1)
+                    body = await _read_upto(r, 30 * 1024 * 1024)
+                    if r.content_length and len(body) < r.content_length: raise web.HTTPBadGateway(text="The picture came through cut short — try again")
                     if len(body) > 30 * 1024 * 1024: raise web.HTTPRequestEntityTooLarge(max_size=30 * 1024 * 1024, actual_size=len(body))
                     ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif", "image/avif": ".avif"}.get(ct, ".jpg")
                     name = f"web_{hashlib.sha1(body).hexdigest()[:12]}{ext}"
                     dest = os.path.join(INPUT, name)
-                    if not os.path.isfile(dest):
+                    if not os.path.isfile(dest) or not _image_ok(dest):
                         with open(dest, "wb") as f: f.write(body)
+                    if not _image_ok(dest):
+                        try: os.remove(dest)
+                        except OSError: pass
+                        raise web.HTTPBadGateway(text="That picture came through broken (cut short or not really a picture) — try again")
                     if ext in (".webp", ".avif", ".gif"):  # one plain format for every model
                         from PIL import Image
                         png = os.path.splitext(dest)[0] + ".png"
@@ -287,7 +311,7 @@ async def fetch_image(req):
                         except Exception: pass  # noqa: BLE001
                     return web.json_response({"name": name, "kind": "image"})
                 if ct in ("text/html", "application/xhtml+xml") and hop < 3:
-                    page = (await r.content.read(3 * 1024 * 1024)).decode(errors="ignore")
+                    page = (await _read_upto(r, 3 * 1024 * 1024)).decode(errors="ignore")
                     m = re.search(r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)(?::src)?["\'][^>]+content=["\']([^"\']+)', page, re.I) \
                         or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:image|twitter:image)', page, re.I)
                     if not m: raise web.HTTPBadRequest(text="That page has no main picture — open the picture itself and drag that")
@@ -977,6 +1001,32 @@ BASE_OK: dict[str, bool] = {}  # which base-model names CivitAI's search accepts
 
 ANILIST_Q = """query ($s: String) { Page(perPage: 6) { characters(search: $s) { name { full native alternative } age gender description(asHtml: false)
   image { large } favourites media(perPage: 4, sort: POPULARITY_DESC) { nodes { title { romaji english } } } } } }"""
+
+
+POSEWEAR = "https://posewear.pages.dev/"
+POSEWEAR_FILES = {"pose": "poses.json", "depth": "depths.json", "costume": "costumes.json", "anime": "anime.json", "portrait": "portraits.json"}
+
+
+async def posewear_list(req):
+    """PoseWear's galleries (posewear.pages.dev — MIT index of @giaaibusi's pose / depth pose / outfit galleries and CC0
+    portraits): the list as it publishes it, kept for a day. Pictures stay on their sites until you use one."""
+    lib = req.match_info["lib"]
+    if lib not in POSEWEAR_FILES: raise web.HTTPNotFound()
+    cache = os.path.join(WORK, "posewear", POSEWEAR_FILES[lib])
+    if not (os.path.isfile(cache) and time.time() - os.path.getmtime(cache) < 86400):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
+                async with s.get(POSEWEAR + POSEWEAR_FILES[lib], headers={"User-Agent": "H3 Studio"}) as r:
+                    if r.status != 200: raise RuntimeError(f"PoseWear answered {r.status}")
+                    body = await r.read()
+            json.loads(body)
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache + ".tmp", "wb") as f: f.write(body)
+            os.replace(cache + ".tmp", cache)
+        except Exception as e:  # noqa: BLE001
+            if not os.path.isfile(cache): return web.json_response({"error": f"Couldn't reach PoseWear ({e})"}, status=502)
+    with open(cache, "rb") as f: raw = json.loads(f.read())
+    return web.json_response({"base": POSEWEAR, "data": raw})
 
 
 async def cosplay_lookup(req):
@@ -2833,11 +2883,15 @@ def _img_url(path: str, max_side: int = 1536) -> str:
     import base64, io
     try:
         from PIL import Image
-        im = Image.open(path); im = im.convert("RGB"); im.thumbnail((max_side, max_side))
+        im = Image.open(path); im.load(); im = im.convert("RGB"); im.thumbnail((max_side, max_side))
         b = io.BytesIO(); im.save(b, "JPEG", quality=88); data = b.getvalue()
-    except Exception:  # noqa: BLE001
-        with open(path, "rb") as f: data = f.read()
+    except Exception as e:  # noqa: BLE001 — a broken file would only get the whole request refused ("invalid image")
+        raise _BadPicture(os.path.basename(path)) from e
     return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+
+
+class _BadPicture(Exception):
+    pass
 
 
 def _input_path(name: str) -> str:
@@ -2886,7 +2940,10 @@ async def deepseek_graph(request: web.Request) -> web.Response:
 
     async def images(link) -> list[str]:
         nid = link[0]; n = g.get(nid) or {}; c = n.get("class_type"); i = n.get("inputs") or {}
-        if c == "LoadImage": return [_img_url(_input_path(i.get("image")))]
+        if c == "LoadImage":
+            try: return [_img_url(_input_path(i.get("image")))]
+            except _BadPicture as e:  # write from the words alone rather than fail
+                print(f"[deepseek] skipped a broken picture: {e}", flush=True); return []
         if c == "BatchImagesNode":
             out = []
             for k in sorted(i, key=lambda k: int(re.sub(r"\D", "", k) or 0)):
@@ -4954,7 +5011,7 @@ async def import_latest(req):
 LATER_FILE = os.path.join(STATE, "download_later.json")
 H3_RUN = os.environ.get("H3_RUN", "/opt/h3/run")
 # groups that only work with another one in (Krea 2 RAW uses the Krea 2 text encoder and VAE)
-NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"]}
+NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"], "kdepth": ["image"]}
 
 
 async def downloads_later(req):
@@ -6024,7 +6081,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
