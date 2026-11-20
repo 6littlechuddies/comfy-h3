@@ -1,6 +1,6 @@
 // Your own checkpoints: Krea 2 / Anima / Illustrious fine-tunes from CivitAI (Muse, gonzaLomo…), picked per model.
 // Added by link, kept in your models library and re-downloaded on every rental (like LoRAs).
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { installLora, myModels, type LoraJob, type MyModel } from "../lib/api";
 import { useJobs } from "../lib/jobs";
@@ -21,8 +21,12 @@ const GROUP: Record<string, string> = { krea2: "Realistic · Krea 2", anima: "An
 
 /** "Checkpoint": the official model or one of your own fine-tunes for it; "+ Add" takes a CivitAI link.
  *  With onModel, every model's checkpoints are listed together and picking one of another model switches to that model. */
-export function CheckpointPicker({ model, value, onChange, onModel, models = ["krea2", "anima", "noob"] }: { model: string; value: string | undefined; onChange: (v: string) => void;
-  onModel?: (model: string, ckpt: string) => void; models?: string[] }) {
+export function CheckpointPicker({ model, value, onChange, onModel, models = ["krea2", "anima", "noob"], follow, right }: { model: string; value: string | undefined; onChange: (v: string) => void;
+  onModel?: (model: string, ckpt: string) => void; models?: string[];
+  /** an option above the official one that follows another setting (Batch: "Same as 03 Create" → value "@create") */
+  follow?: string;
+  /** something beside the label (Batch: the lock) */
+  right?: ReactNode }) {
   const all = useMyModels();
   const fam = FAMILY_OF[model];
   const mine = all.filter((m) => m.family === fam);
@@ -51,7 +55,7 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
         <span className="lbl">Checkpoint<Help text="The official model, or your own fine-tune of it from CivitAI (e.g. a Krea 2 or Anima merge). Your own ones download once and come back on every rental." /></span>
-        <button className="micro text-muted hover:text-ink" onClick={() => setAdding((a) => !a)}>{adding ? "CANCEL" : "+ ADD FROM CIVITAI"}</button>
+        <span className="flex items-center gap-2">{right}<button className="micro text-muted hover:text-ink" onClick={() => setAdding((a) => !a)}>{adding ? "CANCEL" : "+ ADD FROM CIVITAI"}</button></span>
       </div>
       {onModel ? (
         <DropSelect value={`${model}|${cur ? cur.name : ""}`} aria-label="Checkpoint"
@@ -65,13 +69,14 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
           ))}
         </DropSelect>
       ) : (
-        <DropSelect value={cur ? cur.name : ""} onChange={(e) => onChange(e.target.value)} aria-label="Checkpoint"
+        <DropSelect value={follow && value === "@create" ? "@create" : cur ? cur.name : ""} onChange={(e) => onChange(e.target.value)} aria-label="Checkpoint"
           className="inset h-9 border border-line bg-raised px-2.5 text-[13px] focus:border-accent focus:outline-none">
+          {follow && <option value="@create">{follow}</option>}
           <option value="">{OFFICIAL[model]} (official)</option>
           {mine.map((m) => <option key={m.name} value={m.name} disabled={!m.here}>{m.title}{m.version ? ` · ${m.version}` : ""}{m.here ? "" : " (downloading…)"}</option>)}
         </DropSelect>
       )}
-      {value && !cur && <p className="text-[11.5px] text-bad">That checkpoint isn't in your models any more — using the official one.</p>}
+      {value && value !== "@create" && !cur && <p className="text-[11.5px] text-bad">That checkpoint isn't in your models any more — using the official one.</p>}
       {adding && (
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">

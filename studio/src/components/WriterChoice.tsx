@@ -17,8 +17,19 @@ export function WriterChoice() {
   const linked = useGrokLink(w === "outside");
   const ds = useDeepseek();
   const local = !bigWriterFits() ? "This card is smaller than the 27B writer likes (~28 GB): it works, but slowly — the Grok tab is quicker here." : "";
+  // all set (DeepSeek on, or the Grok tab connected): one line; the choices open on Change
+  const [more, setMore] = useState(false);
+  const settled = (w === "big" && ds.on) || (w === "outside" && linked);
+  if (settled && !more) return (
+    <div className="flex items-center gap-2 border border-line bg-raised/40 px-3 py-2 text-[12.5px]">
+      <span className="h-2 w-2 shrink-0 rounded-full bg-good" />
+      <span className="min-w-0 flex-1 truncate"><span className="text-dim">Writer · </span>{w === "big" ? `DeepSeek ${modelName(ds.model)}` : "your Grok tab"}</span>
+      <button onClick={() => setMore(true)} className="press text-[12px] text-muted hover:text-ink">Change</button>
+    </div>
+  );
   return (
     <div className="flex flex-col gap-1">
+      {settled && <button onClick={() => setMore(false)} className="self-end text-[11.5px] text-dim hover:text-ink">Done</button>}
       <Seg label="Prompt writer (everywhere)" value={w} onChange={pick}
         options={[{ value: "big", label: ds.on ? "DeepSeek" : "On the rental · 27B" }, { value: "outside", label: "Grok tab", title: "Your own Grok tab in your browser writes them — no keys" }]} />
       {w === "big" && <DeepseekKey />}

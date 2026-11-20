@@ -102,12 +102,12 @@ export function CosplayOptions() {
           locks={o.lockedAll ?? {}} onLock={(n, on) => { const m = { ...(o.lockedAll ?? {}) }; if (on) m[n] = true; else delete m[n]; set({ lockedAll: m }); }} />
       </Section>
 
-      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${o.poses === "posewear" ? `${nPoses} PoseWear poses` : "varied poses"}`}>
+      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${o.poses === "posewear" ? `${nPoses} picked poses` : o.poses === "mix" ? "poses in words" : "PoseWear auto"}`}>
         <label className="flex items-center justify-between gap-2 text-[13px]">Pictures per character
           <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
         <p className="-mt-2 text-[11.5px] leading-snug text-dim">The first is a close-up; every one gets its own angle, pose and place.</p>
-        <Seg value={o.poses ?? "mix"} onChange={(v) => set({ poses: v })} options={[{ value: "mix", label: "Varied by the writer" }, { value: "posewear", label: `PoseWear${nPoses ? ` · ${nPoses}` : ""}` }]} />
-        {(o.poses ?? "mix") === "posewear" && <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{nPoses ? "Each picture takes the next pose; Krea 2 copies its body position from its depth." : "No poses picked yet."}</p>}
+        <Seg wrap value={o.poses ?? "library"} onChange={(v) => set({ poses: v })} options={[{ value: "library", label: "PoseWear · auto" }, { value: "posewear", label: `My picks${nPoses ? ` · ${nPoses}` : ""}` }, { value: "mix", label: "Words only" }]} />
+        <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{(o.poses ?? "library") === "library" ? "DeepSeek picks poses from the PoseWear depth library that suit each character — no pose used twice in a batch (your ★ first, your hidden ones never). Krea 2 copies each one's body position." : o.poses === "posewear" ? (nPoses ? "Each picture takes the next of your picks; Krea 2 copies its body position from its depth." : "No poses picked yet.") : "The writer describes the poses in words (nothing copied)."}</p>
         <button onClick={() => import("./PoseWear").then(({ openPoseWear }) => openPoseWear("many", "depths"))} className="press btn-raised flex h-9 items-center justify-center gap-1.5 text-[13px]"><Icon name="user" size={14} className="text-muted" />Browse poses</button>
       </Section>
 

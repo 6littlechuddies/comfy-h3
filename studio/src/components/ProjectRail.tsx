@@ -220,11 +220,13 @@ export function ProjectRail() {
       </div>
       <QueuePanel />
       <div className="flex gap-1.5 border-t border-line2 p-2.5">
-        <button onClick={() => zipIn.current?.click()} disabled={importing} className="press flex h-8 flex-1 items-center justify-center gap-1.5 border border-line text-[12px] text-muted hover:text-ink disabled:opacity-50" title="Bring back an Export all .zip: characters, results, settings, presets, prompt files, LoRAs — everything"><Icon name="up" size={12} />{importing ? "Importing…" : "Import"}</button>
-        <input ref={zipIn} type="file" accept=".zip,application/zip,application/x-zip-compressed" hidden onChange={async (e) => {
-          const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
+        <button onClick={() => zipIn.current?.click()} disabled={importing} className="press flex h-8 flex-1 items-center justify-center gap-1.5 border border-line text-[12px] text-muted hover:text-ink disabled:opacity-50" title="Bring back Export all .zip files — several at once, old ones too: they're merged with what's here (newer copies win, nothing of today's is lost): characters, pictures, videos, how each was made, presets, LoRAs"><Icon name="up" size={12} />{importing ? "Importing…" : "Import"}</button>
+        <input ref={zipIn} type="file" multiple accept=".zip,application/zip,application/x-zip-compressed" hidden onChange={async (e) => {
+          // several exports at once (older ones too): each is merged in turn — newer copies of a character win, files
+          // already here are kept, older pictures, videos and how-it-was-made records come back alongside today's
+          const fs = Array.from(e.target.files ?? []).sort((a, b) => a.lastModified - b.lastModified); e.target.value = ""; if (!fs.length) return;
           setImporting(true);
-          try { await importCharacters(f); } catch { /* the import card shows progress, the result and any error */ }
+          try { for (const f of fs) { try { await importCharacters(f); } catch { /* the import card shows the error; go on with the next */ } } }
           finally { setImporting(false); }
         }} />
         <button onClick={() => exportCharacters()} disabled={!list.length} className="press flex h-8 flex-1 items-center justify-center gap-1.5 border border-line text-[12px] text-muted hover:text-ink disabled:opacity-40" title="Everything — characters, scenes, presets, prompt files and your preferences — as one .zip"><Icon name="down" size={12} />Export all</button>

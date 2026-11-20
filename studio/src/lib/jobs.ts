@@ -230,7 +230,7 @@ function recordTiming(key: string, ms: number) {
 }
 
 // ------------------------------------------------------------------ results
-/** what's kept: up to 1200 results (jobs that made pictures or videos, in every project) and only the latest 60 helper
+/** what's kept: up to 6000 results (jobs that made pictures or videos, in every project) and only the latest 60 helper
  *  jobs (the writer, face checks, drafts) — before, 120 jobs of ANY kind were kept, so a busy session with one character
  *  pushed every other character's results out of the feeds and the tray (the files were always still on disk; see Catalog) */
 export function trimJobs(jobs: Job[]): Job[] {
@@ -238,7 +238,7 @@ export function trimJobs(jobs: Job[]): Job[] {
   return jobs.filter((j) => {
     if (j.status === "running" || j.status === "queued") return true;
     const made = !j.meta?.quiet && !j.meta?.noTray && j.outputs?.some((o) => o.type === "output" && (o.kind === "image" || o.kind === "video"));
-    return made ? ++results <= 1200 : ++helpers <= 60;
+    return made ? ++results <= 6000 : ++helpers <= 60;
   });
 }
 

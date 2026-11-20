@@ -41,7 +41,7 @@ export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; aut
   /** LoRAs on every cosplay picture (a realism or skin LoRA, say) */
   loras: LoraPick[];
   /** where the poses come from: the writer's mix, or your PoseWear picks (copied through their depth) */
-  poses: "mix" | "posewear";
+  poses: "mix" | "posewear" | "library";
   /** read the character LoRA's own Krea 2 posts for its costume wording */
   posts: boolean;
   collapsed: boolean;
@@ -62,7 +62,12 @@ const keyOf = (name: string, series: string) => `${name}|${series}`.toLowerCase(
 
 export const useCosplay = create<{ items: CosItem[]; opts: CosOpts; set: (p: Partial<{ items: CosItem[]; opts: CosOpts }>) => void; update: (key: string, p: Partial<CosItem>) => void }>((set, get) => ({
   items: load<{ items: CosItem[] }>(KEY, { items: [] }).items,
-  opts: { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "mix", posts: true, collapsed: false, look: "", director: false, ...load<Partial<CosOpts>>(KEY + ".opts", {}) },
+  opts: (() => {
+    const saved = load<Partial<CosOpts> & { v?: number }>(KEY + ".opts", {});
+    // v2: the PoseWear library is the default pose source (older saved settings had "words only")
+    if ((saved.v ?? 1) < 2) { if (saved.poses === "mix") saved.poses = "library"; saved.v = 2; }
+    return { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "library", posts: true, collapsed: false, look: "", director: false, ...saved } as CosOpts;
+  })(),
   set: (p) => { set(p); save(); },
   update: (key, p) => { set({ items: get().items.map((x) => (x.key === key ? { ...x, ...p } : x)) }); save(); },
 }));
@@ -153,17 +158,39 @@ const CLOSE = "close-up portrait, head and shoulders, 85 mm, the wig, makeup and
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 /** a dealer of shots for one run: angle, pose and place each walk their own shuffled list, so neighbours never match.
  *  Each character's first shot is a close-up; every other shot is set in the character's own world */
-function dealer(posePicks: import("./posewear").PwPick[]) {
-  const A = shuffle(ANGLES.filter((a) => !/close-up/.test(a))), P = shuffle(POSES), L = shuffle(PLACES), R = shuffle(posePicks);
-  let i = 0, li = 0;
-  return (k: number): { brief: string; ref?: import("./posewear").PwPick } => {
+type PwPick = import("./posewear").PwPick;
+export interface Brief { brief: string; ref?: PwPick; options?: PwPick[] }
+/** a dealer of shots for one run. Angles and generic poses walk their own shuffled lists; every place is from the
+ *  character's own world (the writer names them). With the PoseWear library, each character gets 8 poses no other
+ *  character in the run gets, and the writer picks the ones that suit her — so no pose repeats across the batch */
+function dealer(posePicks: PwPick[], library: PwPick[]) {
+  const A = shuffle(ANGLES.filter((a) => !/close-up/.test(a))), P = shuffle(POSES), R = shuffle(posePicks);
+  let i = 0, cur = 0;
+  const OPTS = 8;
+  return (k: number, shared?: PwPick[]): Brief => {
     const n = i++;
-    // her own world for the close-up and the second shot (different for every character), a shared place only from the
-    // third on — shared places were what made a big batch look the same from character to character
-    const place = k < 2 || k % 2 === 1 ? WORLD : L[li++ % L.length];
-    if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${place}`, ref }; }
-    return { brief: `ANGLE: ${k === 0 ? CLOSE : A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${place}` };
+    if (k === 0) return { brief: `ANGLE: ${CLOSE} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
+    if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${WORLD}`, ref }; }
+    if (library.length && shared) return { brief: `POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${WORLD}`, options: shared };
+    void cur; void OPTS;
+    return { brief: `ANGLE: ${A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
   };
+}
+/** the next poses from the library for one character (none of them dealt to anyone else in this run) */
+function poseOptions(library: PwPick[], at: { i: number }, n: number): PwPick[] {
+  // the next n in the shuffled library; it only comes round again once every pose has been handed out
+  const out: PwPick[] = [];
+  for (let j = 0; j < Math.min(n, library.length); j++) out.push(library[(at.i + j) % library.length]);
+  at.i += out.length;
+  return out;
+}
+
+/** wig words get drawn literally (a bald cap, a lace edge showing): her hair is just her hair */
+export function cleanHair(p: string): string {
+  return p.replace(/\s*(?:lace[- ]front(?:ed)?|wig cap|hairnet)\b/gi, "")
+    .replace(/,?\s*(?:and\s+|with\s+)?(?:a\s+)?natural\s+(?:lace\s+)?hairline\b/gi, "")
+    .replace(/\b(a|an|her|the)\s+((?:[\w-]+\s+){0,6})wig\b/gi, "$1 $2hair").replace(/\bwig\b/gi, "hair")
+    .replace(/\s{2,}/g, " ").replace(/\s+([,.])/g, "$1").replace(/,\s*,/g, ",");
 }
 
 /** the writer sometimes drops the shot's setting (or blurs it into "a soft background"): when none of the place's words
@@ -203,9 +230,14 @@ async function lorasPosts(it: CosItem): Promise<{ text: string; pics: string[] }
 const usableNotes = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).filter((x) => !minorWords(x).length).join(" ").trim();
 
 /** step 4: the writer's adult check, costume and one prompt per shot */
-async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string, library: string, locked: string, libNames: Set<string>, refPics: string[] = [], ckNames: Set<string> = new Set()): Promise<Partial<CosItem>> {
-  const triggers = [...(picksOf(it) ?? []).map((l) => l.trigger), ...(it.extra ?? []).map((l) => l.trigger ?? "")].filter(Boolean).join(", ");
-  const raw = await runWriter("cosplay", { taste, posts, library, locked, shots: briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n"), character: it.name, series: it.series || "(not given)",
+async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: Brief[], posts: string, library: string, locked: string, libNames: Set<string>, refPics: string[] = [], ckNames: Set<string> = new Set()): Promise<Partial<CosItem>> {
+  const charT = (picksOf(it) ?? []).map((l) => l.trigger).filter(Boolean).join(", ");
+  const otherT = (it.extra ?? []).map((l) => l.trigger ?? "").filter(Boolean).join(", ");
+  const triggers = [charT && `CHARACTER (start of the prompt): ${charT}`, otherT && `OTHER (woven into her body / the photo's look): ${otherT}`].filter(Boolean).join(" · ");
+  const opts = briefs.find((b) => b.options?.length)?.options ?? [];
+  const shotsText = (opts.length ? `HER POSE OPTIONS (real pose references: the picture copies the chosen one's body position exactly — pick the ones that suit her personality and the place; never two shots with the same number):\n${opts.map((p, i) => `  ${i + 1}. ${p.words}${p.cat ? ` [${p.cat}]` : ""}`).join("\n")}\n\n` : "")
+    + briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n");
+  const raw = await runWriter("cosplay", { taste, posts, library, locked, shots: shotsText, character: it.name, series: it.series || "(not given)",
     cosplayer: cosplayer || `(none given: an adult woman, about 25 years old${useCosplay.getState().opts.look?.trim() ? `, ${useCosplay.getState().opts.look.trim()} — vary her face, hair and build from shot to shot within that` : ""})`, triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
     { tab: "batch", label: `Cosplay · ${it.name}`, images: [it.picture, ...refPics].filter((x): x is string => !!x).length ? [it.picture, ...refPics].filter((x): x is string => !!x) : undefined, big: true });
   const m = raw.match(/\{[\s\S]*\}/);
@@ -213,8 +245,20 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   const d = JSON.parse(m[0]);
   if (!d.allowed) return { status: "skipped", age: d.age || it.age, why: d.why || "Not an adult character" };
   // older prompt files answer with one "prompt": treat it as the only shot
-  const got: { pose?: string; prompt?: string }[] = Array.isArray(d.shots) ? d.shots : d.prompt ? [{ pose: d.pose, prompt: d.prompt }] : [];
-  const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => ({ brief: briefs[i]?.brief ?? "", pose: String(x.pose ?? ""), prompt: withSetting(String(x.prompt), briefs[i]?.brief ?? ""), ref: briefs[i]?.ref }));
+  const got: { pose?: string; prompt?: string; pose_id?: unknown }[] = Array.isArray(d.shots) ? d.shots : d.prompt ? [{ pose: d.pose, prompt: d.prompt }] : [];
+  // the poses it chose from her options (a number it didn't give, or one already taken: the next unused option)
+  const taken = new Set<number>();
+  const refFor = (b: Brief | undefined, id: unknown): PwPick | undefined => {
+    if (b?.ref) return b.ref;
+    if (!b?.options?.length) return undefined;
+    let n = Number(id) - 1;
+    if (!(n >= 0 && n < b.options.length) || taken.has(n)) n = b.options.findIndex((_, j) => !taken.has(j));
+    if (n < 0) return undefined;
+    taken.add(n); return b.options[n];
+  };
+  const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => { const g = x as { pose?: string; prompt?: string; pose_id?: unknown };
+    const ref = refFor(briefs[i], g.pose_id);
+    return { brief: ref && briefs[i]?.options ? `POSE: ${ref.title} · SETTING: her world` : briefs[i]?.brief ?? "", pose: String(g.pose ?? ""), prompt: cleanHair(withSetting(String(g.prompt), briefs[i]?.brief ?? "")), ref }; });
   if (!shots.length) throw new Error("The writer answered without prompts — try again");
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
   // the writer's LoRA picks: only names from your library, strengths kept sensible
@@ -243,7 +287,20 @@ export async function researchAll(cosplayer: string, only?: string) {
   const { posePicks } = await import("./posewear");
   const picksNow = st.opts.poses === "posewear" ? posePicks() : [];
   if (st.opts.poses === "posewear" && !picksNow.length) throw new Error("Poses are set to your PoseWear picks, but none are picked — Browse PoseWear first");
-  const deal = dealer(picksNow);
+  // the PoseWear library (depth poses: Krea 2 copies them exactly): one person, your NSFW switch, never your hidden ones,
+  // your starred ones first, the rest shuffled — and the kind of framing a cosplay photo uses
+  let poseLib: PwPick[] = [];
+  if (st.opts.poses === "library") {
+    const pw = await import("./posewear");
+    try {
+      const ps = pw.usePoseWear.getState();
+      const items = (await pw.loadLib("depths")).filter((x) => !x.couple && (ps.adult || !x.adult) && !ps.hidden[x.key]);
+      const pick = (x: (typeof items)[number]) => pw.pickOf(x, Math.floor(Math.random() * Math.max(1, x.angles?.length ?? 1)));
+      poseLib = [...shuffle(items.filter((x) => ps.favs[x.key])).map(pick), ...shuffle(items.filter((x) => !ps.favs[x.key])).map(pick)];
+    } catch (e) { (await import("./jobs")).useJobs.getState().toast(`PoseWear library didn't load (${(e as Error).message}) — poses are written in words this time`, "bad", "batch"); }
+  }
+  const deal = dealer(picksNow, poseLib);
+  const libAt = { i: 0 };
   // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
   let library = "(not used)", libNames = new Set<string>(), ckNames = new Set<string>();
   const locked = st.opts.loras?.length ? st.opts.loras.map((l) => `${l.name} @${l.strength}${st.opts.lockedAll?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`).join(", ") : "(none)";
@@ -277,7 +334,8 @@ export async function researchAll(cosplayer: string, only?: string) {
       const posts = o.posts ? lp.text : "(not used)";
       const refPics = (await Promise.all(lp.pics.map((u) => fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
         .then((r) => (r.ok ? r.json() : null)).then((d) => d?.name as string | undefined).catch(() => undefined)))).filter((x): x is string => !!x);
-      const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k));
+      const shared = poseLib.length ? poseOptions(poseLib, libAt, 8) : undefined;
+      const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k, shared));
       // your locked LoRAs for her (and every picture): the writer works around them and keeps their strength
       const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
       const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}${cur.aiLocked?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`)].filter(Boolean).join(", ") || "(none)";
@@ -351,11 +409,17 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
     // only what you locked keeps its strength; everything else may be turned down to fit
     const lockedNames = [...st.opts.loras.filter((l) => st.opts.lockedAll?.[l.name]), ...[...(it.extra ?? []), ...ai].filter((l) => it.aiLocked?.[l.name])].map((l) => l.name);
     const trig = loras.map((l) => l.trigger).filter((t): t is string => !!t);
+    const civTrig = civ.map((l) => l.trigger).filter((t): t is string => !!t);
     const shots: Shot[] = it.shots?.length ? it.shots : [{ brief: "", pose: it.pose ?? "", prompt: it.prompt! }];
     for (const [i, sh] of shots.entries()) {
-      // trigger words lead the prompt (LoRAs approved after the prompt was written)
-      const missing = trig.filter((t) => !sh.prompt.toLowerCase().includes(t.toLowerCase()));
-      const prompt = missing.length ? `${missing.join(", ")}, ${sh.prompt}` : sh.prompt;
+      // trigger words the prompt doesn't have yet (LoRAs picked after it was written): her character LoRA's lead the
+      // prompt; body, realism and style ones go in after the first sentence, as a phrase — not a pile at the front
+      const has = (t: string) => cleanHair(sh.prompt).toLowerCase().includes(t.toLowerCase());
+      const lead = [...new Set(civTrig.filter((t) => !has(t)))];
+      const rest = [...new Set(trig.filter((t) => !civTrig.includes(t) && !has(t)))];
+      let prompt = cleanHair(sh.prompt);
+      if (rest.length) { const m = /^(.+?[.!?])\s+(.*)$/s.exec(prompt); prompt = m ? `${m[1]} Her figure and look: ${rest.join(", ")}. ${m[2]}` : `${prompt} ${rest.join(", ")}.`; }
+      if (lead.length) prompt = `${lead.join(", ")}, ${prompt}`;
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;

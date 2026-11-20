@@ -107,6 +107,7 @@ function Body({ mode, first, onPick }: { mode: Mode; first: PwLib; onPick: OnPic
                 className="h-full min-w-0 flex-1 bg-transparent text-[14.5px] placeholder:text-dim focus:outline-none" />
               {q && <button aria-label="Clear search" onClick={() => setQ("")} className="text-muted hover:text-ink"><Icon name="x" size={14} /></button>}
             </label>
+            <TestButton />
             <button aria-label="Close" onClick={close} className="press btn-raised flex h-10 w-10 shrink-0 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={16} /></button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -211,3 +212,27 @@ function Peek({ it, ai, setAi, picked, onPick, onClose }: { it: PwItem; ai: numb
 }
 
 const shortAngle = (en: string) => /front/.test(en) ? "Front" : /above/.test(en) ? "Above" : /below/.test(en) ? "Below" : /three-quarter/.test(en) ? "¾" : /side/.test(en) ? "Side" : en;
+
+/** checks everything PoseWear needs on this rental (lists, pictures, a saved depth pose, the depth nodes and models) and
+ *  copies the report for Claude */
+function TestButton() {
+  const [busy, setBusy] = useState(false);
+  const toast = useJobs((s) => s.toast);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch("/studio-api/posewear-test");
+      const txt = await r.text();
+      let d: Record<string, unknown> = {};
+      try { d = JSON.parse(txt); } catch { d = { error: `the rental answered ${r.status}: ${txt.slice(0, 200)} — restart it to get the newest code` }; }
+      const libs = ["depths", "poses", "costumes", "anime", "portraits"].map((l) => { const x = d[l] as { count?: number; error?: string } | undefined; return `${l}: ${x?.count != null ? x.count : `✗ ${x?.error ?? "?"}`}`; });
+      const nodes = d.comfy_nodes as Record<string, unknown> | undefined;
+      const models = d.models as Record<string, boolean> | undefined;
+      const okNodes = nodes && Object.values(nodes).every((v) => v === true);
+      const okModels = models && Object.values(models).every(Boolean);
+      await copyText(`PoseWear test · ${new Date().toISOString()}\n${JSON.stringify(d, null, 1)}`, "Report copied — paste it to Claude");
+      toast(`${libs.join(" · ")} · depth nodes ${okNodes ? "✓" : "✗"} · depth models ${okModels ? "✓" : "not downloaded yet"}. The full report is copied.`, libs.some((l) => l.includes("✗")) || !okNodes ? "bad" : "good");
+    } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
+  };
+  return <button onClick={run} disabled={busy} title="Check everything PoseWear needs on this rental and copy a report for Claude" className="press btn-raised flex h-10 shrink-0 items-center gap-1.5 px-3 text-[12.5px] text-muted hover:text-ink">{busy ? "Testing…" : "Test"}</button>;
+}

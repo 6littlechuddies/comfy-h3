@@ -1072,6 +1072,67 @@ async def posewear_list(req):
     return web.json_response({"base": POSEWEAR, "data": raw})
 
 
+async def posewear_test(req):
+    """GET → everything PoseWear needs, checked one by one (for "Test PoseWear" → Copy for Claude): where the site keeps
+    its lists, each list (count, a sample item), a thumbnail and a full picture from each site, saving one depth pose
+    the way a batch row does (and that it opens), the depth nodes in ComfyUI and the depth models on disk"""
+    out: dict = {"site": POSEWEAR}
+    hdr = {"User-Agent": "Mozilla/5.0 (H3 Studio)"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40)) as s:
+        try:
+            try: os.remove(os.path.join(WORK, "posewear", "paths.json"))
+            except OSError: pass
+            out["paths"] = await _posewear_paths(s) or "none found on the page — the site changed its layout"
+        except Exception as e:  # noqa: BLE001
+            out["paths"] = f"error: {e}"
+        sample_urls: list = []
+        for lib in ("depths", "poses", "costumes", "anime", "portraits"):
+            r = await posewear_list(type("R", (), {"match_info": {"lib": lib}})())
+            try: d = json.loads(r.body)
+            except Exception:  # noqa: BLE001
+                out[lib] = {"error": f"not JSON ({r.status})"}; continue
+            if r.status != 200 or d.get("error"):
+                out[lib] = {"status": r.status, "error": d.get("error")}; continue
+            items = d["data"] if isinstance(d["data"], list) else (d["data"] or {}).get("items") or []
+            first = items[0] if items else {}
+            out[lib] = {"count": len(items), "adult": sum(1 for x in items if isinstance(x, dict) and x.get("a")),
+                        "keys": sorted(first.keys()) if isinstance(first, dict) else None,
+                        "sample": {k: first.get(k) for k in ("id", "en", "line", "lineEn", "cat", "catEn", "t", "i") if isinstance(first, dict) and k in first}}
+            if isinstance(first, dict):
+                ang = (first.get("angles") or [{}])[0] if first.get("angles") else first
+                for k in ("t", "i"):
+                    u = ang.get(k)
+                    if u: sample_urls.append((lib, k, u if u.startswith("http") else POSEWEAR + u.lstrip("/")))
+        pics = {}
+        for lib, k, u in sample_urls[:8]:
+            try:
+                async with s.get(u, headers=hdr) as r:
+                    body = await r.read()
+                    pics[f"{lib}.{'thumb' if k == 't' else 'image'}"] = {"url": u, "status": r.status, "type": r.headers.get("Content-Type"), "bytes": len(body)}
+            except Exception as e:  # noqa: BLE001
+                pics[f"{lib}.{k}"] = {"url": u, "error": str(e)[:200]}
+        out["pictures"] = pics
+        # a depth pose saved the way a batch row saves it, and opened
+        dep = next((u for lib, k, u in sample_urls if lib == "depths" and k == "i"), None)
+        if dep:
+            try:
+                async with s.get(dep, headers=hdr) as r: body = await r.read()
+                path = os.path.join(INPUT, "posewear_test" + os.path.splitext(urlparse(dep).path)[1])
+                with open(path, "wb") as f: f.write(body)
+                out["save_depth"] = {"ok": _image_ok(path), "bytes": len(body)}
+            except Exception as e:  # noqa: BLE001
+                out["save_depth"] = {"error": str(e)[:200]}
+        nodes = {}
+        for n in ("Krea2ControlLoRALoader", "Krea2ControlImageEncode", "Krea2ControlApply", "DownloadAndLoadDepthAnythingV2Model", "DepthAnything_V2"):
+            try:
+                async with s.get(f"{COMFY}/object_info/{n}") as r: nodes[n] = r.status == 200 and n in (await r.json(content_type=None) or {})
+            except Exception as e:  # noqa: BLE001
+                nodes[n] = f"error: {str(e)[:80]}"
+        out["comfy_nodes"] = nodes
+    out["models"] = {name: os.path.isfile(os.path.join(MODELS, sub, name)) for sub, name in (("loras", "depth-control-lora.safetensors"), ("depthanything", "depth_anything_v2_vits_fp16.safetensors"))}
+    return web.json_response(out)
+
+
 async def cosplay_lookup(req):
     """GET ?name=&series= → the character from AniList (age, gender, description, official picture, series) for the cosplay
     writer — the best match whose series fits. {found: false} when there's none (games, Western shows: the writer goes on
@@ -3690,7 +3751,8 @@ def _save_packs(d: dict):
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
             "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {})), "template": TEMPLATES[stage],
-            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias")}
+            # the cosplay planner thinks first (who she is, her world, her build) — DeepSeek's reasoning, kept short
+            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "on" if stage == "cosplay" else "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias")}
 
 
 def _pack_text(p: dict) -> str:
@@ -4729,6 +4791,9 @@ def _export_results(z, files: bool = True):
     walk(_state_json("edit_chats", {}))  # the pictures your edit chats use
 
 
+JOBS_KEEP = 6000  # result records kept (how each picture was made); the Studio keeps the same number
+
+
 def _merge_list(have: list, incoming: list, key: str = "id") -> int:
     """add / update items by id (new ones go first, in their order); returns how many came in"""
     fresh, n = [], 0
@@ -4811,7 +4876,9 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
         known = {x.get("id") for x in have if isinstance(x, dict)}
         new = [x for x in jb if isinstance(x, dict) and x.get("id") and x["id"] not in known and x.get("status") in ("done", "error", "cancelled")]
         if new:
-            _state_write("jobs", sorted(have + new, key=lambda x: -(x.get("queuedAt") or 0))[:1200]); got["results"] = len(new)
+            # an older export brings its jobs back too (how each picture was made — its prompt, LoRAs, settings): kept
+            # alongside today's, not pushed out by them
+            _state_write("jobs", sorted(have + new, key=lambda x: -(x.get("queuedAt") or 0))[:JOBS_KEEP]); got["results"] = len(new)
     for info in z.infolist():  # result files
         parts = info.filename.split("/")
         if len(parts) >= 3 and parts[0] == "results" and not info.is_dir() and tick: tick()
@@ -4821,8 +4888,9 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
             if os.path.exists(dest): continue  # already here (never written over)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with z.open(info) as src, open(dest, "wb") as f: shutil.copyfileobj(src, f, 1 << 20)
+    # your settings only come from the file when this rental has none yet — an older export must not undo today's
     st = rd("settings.json") if "settings.json" in names else None
-    if isinstance(st, dict): _state_write("settings", st); got["settings"] = True
+    if isinstance(st, dict) and not _state_json("settings"): _state_write("settings", st); got["settings"] = True
     pk = rd("packs.json") if "packs.json" in names else None
     if isinstance(pk, dict) and isinstance(pk.get("packs"), list):
         d = _load_packs()
@@ -6171,7 +6239,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear-test", posewear_test), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),

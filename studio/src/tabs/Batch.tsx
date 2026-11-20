@@ -472,17 +472,13 @@ function debugText(rows: Row[]): string {
 function BatchCheckpoint() {
   const ck = useBatch((s) => s.ck) ?? { mode: "create" as const, name: "", locked: false };
   const set = (p: Partial<typeof ck>) => useBatch.getState().set({ ck: { ...ck, ...p } });
+  const value = ck.mode === "create" ? "@create" : ck.name;
   return (
-    <div className="flex flex-col gap-2">
-      <Seg label="Checkpoint (realistic)" value={ck.mode} onChange={(v) => set({ mode: v })} options={[{ value: "create", label: "Same as 03 Create" }, { value: "pick", label: "Pick one" }]} />
-      {ck.mode === "pick" && <>
-        <CheckpointPicker model="krea2" value={ck.name} onChange={(v) => set({ name: v })} models={["krea2"]} />
-        <button onClick={() => set({ locked: !ck.locked })} aria-pressed={ck.locked}
-          className={cx("press flex items-center gap-2 border px-2.5 py-2 text-left text-[12.5px]", ck.locked ? "border-accent/60 bg-accent/10" : "border-line hover:border-muted")}>
-          <Icon name={ck.locked ? "lock" : "unlock"} size={14} className={ck.locked ? "text-accent" : "text-muted"} />
-          <span className="flex flex-col"><b className="font-medium">{ck.locked ? "Locked for every picture" : "Not locked"}</b>
-            <span className="text-[11.5px] text-dim">{ck.locked ? "Every row uses it; Cosplay's DeepSeek won't pick another" : "Rows without their own use it; DeepSeek may still pick one per cosplay character"}</span></span>
-        </button>
-      </>}
-    </div>);
+    <CheckpointPicker model="krea2" models={["krea2"]} follow="Same as 03 Create" value={value}
+      onChange={(v) => set(v === "@create" ? { mode: "create", locked: false } : { mode: "pick", name: v })}
+      right={ck.mode === "pick" && <button onClick={() => set({ locked: !ck.locked })} aria-pressed={ck.locked}
+        title={ck.locked ? "Locked: every row uses it, and Cosplay's DeepSeek won't pick another. Click to unlock" : "Not locked: rows without their own use it, and DeepSeek may still pick one per cosplay character. Click to lock"}
+        className={cx("press flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10.5px]", ck.locked ? "border-accent/60 bg-accent/15 text-accent" : "border-line text-dim hover:text-ink")}>
+        <Icon name={ck.locked ? "lock" : "unlock"} size={10} />{ck.locked ? "Locked" : "Auto"}</button>} />
+  );
 }

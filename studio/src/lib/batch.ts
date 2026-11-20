@@ -366,6 +366,8 @@ export async function queueAll(only?: string[]): Promise<number> {
   const st = useSettings.getState().s;
   const ids: string[] = [];
   const ready = b.rows.filter((r) => r.status !== "queued" && !rowProblem(r) && (!only || only.includes(r.id)));
+  // rows that copy a pose need the depth models: checked once up front (starting their download) — not 150 rows failing one by one
+  if (b.target === "image" && ready.some((r) => r.control)) await (await import("./posewear")).depthReady();
   // Swap in: the Edit chat pipeline (Qwen + Krea + face pass) for each picture, run one by one from this page
   const swaps: import("./batchSwap").SwapItem[] = [];
   const swapping = b.target === "image" && (b.take ?? "swap") === "swap";
