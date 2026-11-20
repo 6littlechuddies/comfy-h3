@@ -42,6 +42,10 @@ export interface Row {
   civit?: import("./api").CivitGen;
   /** a line under the row (e.g. which LoRAs were turned down) */
   note?: string;
+  /** this row's own LoRAs (Cosplay: the character's approved LoRA), on top of Create's / the star's */
+  loras?: import("./graphs").LoraPick[];
+  /** never the batch's Star (Cosplay: a new woman in each picture) */
+  noStar?: boolean;
 }
 export interface BatchOpts {
   target: "video" | "image";
@@ -141,7 +145,7 @@ export const useBatch = create<BatchState>((set) => ({
   clearDone: () => set((s) => ({ rows: s.rows.filter((r) => r.status !== "queued") })),
 }));
 
-const character = (r?: Row) => { const id = r?.charId ?? useBatch.getState().characterId; const c = useCharacters.getState().list.find((x) => x.id === id) ?? null; return c && isAdult(c) ? c : null; };
+const character = (r?: Row) => { if (r?.noStar) return null; const id = r?.charId ?? useBatch.getState().characterId; const c = useCharacters.getState().list.find((x) => x.id === id) ?? null; return c && isAdult(c) ? c : null; };
 const rowSeconds = (r: Row) => (r.imitate?.kind === "video" && r.imitate.duration ? Math.min(15, Math.max(2, Math.round(r.imitate.duration))) : useBatch.getState().seconds);
 
 /** the character's sheet views (front, face) + the row's thing to imitate, as references */
@@ -420,14 +424,14 @@ export async function queueAll(only?: string[]): Promise<number> {
             // theirs and the pose, angle and expression are the row's own — not a description-only guess at them
             const shot = r.prompt.trim() || [text, r.expression].filter(Boolean).join(". ");
             const { characterShot } = await import("./make");
-            const cs = await characterShot(c, shot, shot, b.aspect, [], null);
+            const cs = await characterShot(c, shot, shot, b.aspect, r.loras ?? [], null);
             job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name} · ${cs.view}`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
               images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: "studio/batch/create" }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
             rowIds.push(job.id); ids.push(job.id);
             continue;
           }
           job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · picture`, buildCreate({
-            ...adv, seed: newSeed(), ...modelArgs(st.create, mi), positive, negative: st.create.negative, loras: [...(c?.loras ?? []), ...mi.loras],
+            ...adv, seed: newSeed(), ...modelArgs(st.create, mi), positive, negative: st.create.negative, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])],
             width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create",
           }), `create:${anime ? "anime" : "realistic"}:portrait:1`, { batchRow: r.id, kind: "make", ...extra(r, c) });
         }

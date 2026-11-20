@@ -967,12 +967,45 @@ def _lora_item_(m: dict, have: set[str]) -> dict | None:
     return {"model_id": m.get("id"), "version_id": v.get("id"), "name": m.get("name", ""), "version": v.get("name", ""),
             "creator": creator.get("username", "") if isinstance(creator, dict) else str(creator or ""), "base": v.get("baseModel", ""), "family": family(v.get("baseModel", "")),
             "trigger": triggers_from(v.get("trainedWords"), v.get("description") or "", m.get("description") or ""), "size_mb": round((f.get("sizeKB") or f.get("sizeKb") or 0) / 1000),
-            "downloads": st.get("downloadCount", 0), "likes": st.get("thumbsUpCount", st.get("favoriteCount", 0)),
+            "downloads": st.get("downloadCount", 0), "likes": st.get("thumbsUpCount", st.get("favoriteCount", 0)), "collected": st.get("collectedCount", 0),
             "images": imgs, "installed": str(v.get("id")) in have, "tags": [t if isinstance(t, str) else str((t or {}).get("name", "")) for t in (m.get("tags") or [])][:6],
             "versions": [{"id": x.get("id"), "name": x.get("name", ""), "base": x.get("baseModel", "")} for x in vs[:12]]}
 
 
 BASE_OK: dict[str, bool] = {}  # which base-model names CivitAI's search accepts (learned when it refuses one)
+
+
+ANILIST_Q = """query ($s: String) { Page(perPage: 6) { characters(search: $s) { name { full native alternative } age gender description(asHtml: false)
+  image { large } favourites media(perPage: 4, sort: POPULARITY_DESC) { nodes { title { romaji english } } } } } }"""
+
+
+async def cosplay_lookup(req):
+    """GET ?name=&series= → the character from AniList (age, gender, description, official picture, series) for the cosplay
+    writer — the best match whose series fits. {found: false} when there's none (games, Western shows: the writer goes on
+    what it knows)."""
+    name = (req.query.get("name") or "").strip()[:80]
+    series = (req.query.get("series") or "").strip().lower()[:80]
+    if not name: raise web.HTTPBadRequest(text="no name")
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+            async with s.post("https://graphql.anilist.co", json={"query": ANILIST_Q, "variables": {"s": re.sub(r"\s*\(.*?\)", "", name)}},
+                              headers={"Content-Type": "application/json", "Accept": "application/json"}) as r:
+                d = await r.json() if r.status == 200 else {}
+    except Exception as e:  # noqa: BLE001
+        return web.json_response({"found": False, "error": f"couldn't reach AniList ({type(e).__name__})"})
+    chars = (((d or {}).get("data") or {}).get("Page") or {}).get("characters") or []
+    if not chars: return web.json_response({"found": False})
+    def titles(c): return [t for n in ((c.get("media") or {}).get("nodes") or []) for t in ((n.get("title") or {}).get("english"), (n.get("title") or {}).get("romaji")) if t]
+    def score(c):
+        ts = " ".join(titles(c)).lower()
+        words = [w for w in re.findall(r"[a-z0-9]+", series) if len(w) > 2]
+        return (sum(w in ts for w in words), c.get("favourites") or 0)
+    c = max(chars, key=score)
+    if series and score(c)[0] == 0: return web.json_response({"found": False, "error": "no character of that name in that series"})
+    desc = re.sub(r"~!.*?!~", "", c.get("description") or "", flags=re.S)  # AniList spoiler blocks out
+    desc = re.sub(r"__|\*\*|<[^>]+>", "", desc).strip()[:2500]
+    return web.json_response({"found": True, "name": (c.get("name") or {}).get("full"), "age": c.get("age") or "", "gender": c.get("gender") or "",
+                              "description": desc, "image": (c.get("image") or {}).get("large"), "series": titles(c)[:4]})
 
 
 async def civitai_search(req):
@@ -3482,10 +3515,10 @@ STAGES = {"look": "Look block writer", "krea": "Krea 2 frame builder", "context"
           "describe": "Character description (Krea 2)", "tags": "Plain words → anime tags", "chat": "Studio assistant",
           "plan": "Plan a video writer (Animate + Plan a video)", "site": "Site profile writer (Your site)",
           "changes": "Picture changes (Create with pictures)", "remix": "Remix merger (Create)", "read": "Picture → prompt (Create)", "match": "Face match check (training set)", "likeness": "Carry a likeness into a prompt (Edit)",
-          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)"}
+          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)"}
 BUILTIN_FILE = {"krea": "studio_krea.txt", "context": "studio_context.txt", "compiler": "studio_compiler.txt", "look": "studio_look.txt", "tweak": "studio_tweak.txt",
                 "describe": "studio_describe.txt", "tags": "studio_tags.txt", "chat": "studio_chat.txt", "plan": "studio_plan.txt", "site": "studio_site.txt",
-                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt"}
+                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt"}
 TEMPLATES = {
     "context": "{seconds} second {mode}. {description}\nCharacters: {characters}",
     "compiler": "We are doing {MODE}. {seconds} seconds, {aspect}.\nReferences: {references}\n\n{blueprint}",
@@ -3506,6 +3539,7 @@ TEMPLATES = {
     "sort": "CHARACTER: {character}\nSETS SO FAR: {existing}\n\nPICTURES:\n{pictures}",
     "deep": "TASK:\n{task}\n\nWHO SHE IS:\n{character}\n\nWRITTEN SO FAR:\n{draft}",
     "name": "TAKEN: {taken}\n\nCHARACTERS:\n{characters}",
+    "cosplay": "CHARACTER: {character}\nSERIES: {series}\nCOSPLAYER: {cosplayer}\nLORA TRIGGER WORDS: {triggers}\n\nREFERENCE NOTES:\n{notes}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }
 PARAMS = {"temperature": 0.6, "top_p": 0.9, "top_k": 40, "repeat_penalty": 1.05, "max_tokens": 8192}
@@ -5989,7 +6023,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),

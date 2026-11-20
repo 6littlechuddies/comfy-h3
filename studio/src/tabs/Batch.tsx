@@ -20,6 +20,7 @@ import { ContentPlan } from "../components/ContentPlan";
 import { PhotoSet } from "../components/PhotoSet";
 import { RecipePanel } from "../components/MyRecipes";
 import "../lib/faceDetail";
+import { CosplayList, CosplayOptions } from "../components/CosplayPanel";
 
 export default function BatchTab() {
   const b = useBatch();
@@ -30,7 +31,7 @@ export default function BatchTab() {
   const [busy, setBusy] = useState<"" | "write" | "queue">("");
   const video = b.target === "video";
   // Pictures: one way at a time, so the sidebar only shows what that way uses
-  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
+  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes" | "cosplay">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
   const pickWay = (v: typeof way) => { setWay(v); try { localStorage.setItem("h3.batch.way", v); } catch { /* */ } if (v === "swap") useBatch.getState().set({ take: useBatch.getState().take === "face" || useBatch.getState().take === "person" ? useBatch.getState().take : "swap" }); };
 
   useHandoffInto("batch", (items) => items.forEach(({ media }) => useBatch.getState().add({ imitate: media })));
@@ -93,9 +94,10 @@ export default function BatchTab() {
     <Workspace needs={video ? "video" : "edit"} tab="batch" title="Batch" sub="many at once, runs while you're away" bar={bar}
       drawer={<>
         <Seg label="Make" value={b.target} onChange={(v) => b.set({ target: v })} options={[{ value: "video", label: "Videos" }, { value: "image", label: "Pictures" }]} />
-        {!video && <Seg label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }]} />}
+        {!video && <Seg label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }]} />}
         {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
-        {(video || way === "plan") && <WriterChoice />}
+        {(video || way === "plan" || way === "cosplay") && <WriterChoice />}
+        {!video && way === "cosplay" && <CosplayOptions />}
         {(video || way === "plan") && <label className="flex flex-col gap-1.5"><span className="lbl">Star (optional)</span>
           <DropSelect value={b.characterId ?? ""} onChange={(e) => b.set({ characterId: e.target.value || null })} className="inset h-10 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none">
             <option value="">No character</option>
@@ -129,6 +131,7 @@ export default function BatchTab() {
         <details className="border-t border-line pt-3 text-[13px]"><summary className="cursor-pointer text-muted hover:text-ink">Phone alerts</summary><div className="mt-2"><PhoneAlerts /></div></details>
       </>}>
       <div className="flex flex-col gap-2.5 pt-1">
+        {!video && way === "cosplay" && <CosplayList />}
         {b.rows.map((r, i) => (!video && way === "recreate" && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : <RowCard key={r.id} r={r} n={i} video={video} />))}
         {!video && way === "recreate" && !b.rows.some((r) => r.civit || r.imitate || r.idea.trim() || r.prompt.trim()) && (
           <button onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }} className="hatch flex h-28 flex-col items-center justify-center gap-1 border border-dashed border-line text-[13.5px] text-muted hover:border-accent hover:text-ink">
