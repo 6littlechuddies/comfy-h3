@@ -20,7 +20,7 @@ const NONE: Record<string, Picked> = {};
 export interface Item { o: Output; j: Job }
 /** what a picture was made with, kept on its job: shown full screen under "How it was made" */
 export interface SentInfo { prompt: string; words?: string; negative?: string; model: string; checkpoint?: string; loras: { name: string; strength: number }[]; size: string; seed: number;
-  steps?: number; cfg?: number; sampler?: string; scheduler?: string; character?: string }
+  steps?: number; cfg?: number; sampler?: string; scheduler?: string; character?: string; /** a PoseWear pose and how it was used */ pose?: string }
 type Act = { label: string; icon: string; run: () => void; primary?: boolean; danger?: boolean };
 
 /** Brush / painted edits happen in Edit: the picture goes in as Picture 1 with the LoRAs it was made with */
@@ -386,7 +386,7 @@ export function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; 
         <p className="max-h-60 overflow-y-auto whitespace-pre-wrap border border-white/10 bg-white/[.03] p-2 font-mono text-[11.5px] leading-relaxed text-white/90">{sent.prompt}</p>
         {sent.words && sent.words !== sent.prompt && <p className="mt-1.5 text-[11.5px] text-white/50">Your words: “{sent.words}”</p>}
         <dl className="mt-3">
-          {row("Model", sent.model)}{row("Checkpoint", sent.checkpoint?.split("/").pop())}{row("Character", sent.character)}
+          {row("Model", sent.model)}{row("Checkpoint", sent.checkpoint?.split("/").pop())}{row("Character", sent.character)}{row("Pose", sent.pose)}
           {row("LoRAs", sent.loras.length ? sent.loras.map((l) => `${l.name.split("/").pop()?.replace(/\.safetensors$/, "")} @ ${l.strength}`).join(", ") : "none")}
           {row("Negative", sent.negative)}{row("Size", sent.size)}{row("Seed", sent.seed)}
           {row("Sampler", [sent.sampler, sent.scheduler].filter(Boolean).join(" · "))}{row("Steps", sent.steps)}{row("CFG", sent.cfg)}

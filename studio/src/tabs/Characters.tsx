@@ -365,15 +365,17 @@ function SheetMaker({ c, back }: { c: Character; back: () => void }) {
 
 // ------------------------------------------------------------------ new character from a picture
 /** a picture sent here from anywhere (a CivitAI post, a result): "New character from this picture" */
-export const useNewFromPicture = create<{ pic: Media | null; gen?: CivitGen | null }>(() => ({ pic: null }));
+export const useNewFromPicture = create<{ pic: Media | null; gen?: CivitGen | null; name?: string; siteName?: string; source?: string }>(() => ({ pic: null }));
 
 function FromPicture() {
   const handed = useNewFromPicture((s) => s.pic);
   const [pic, setPic] = useState<Media | null>(null);
   // the picture's generation data (a CivitAI post or one of your results): its LoRAs come along to the new character
   const [gen, setGen] = useState<CivitGen | null>(null);
-  useEffect(() => { if (handed) { setPic(handed); setGen(useNewFromPicture.getState().gen ?? GEN_OF.get(handed.name) ?? null); useNewFromPicture.setState({ pic: null, gen: null }); } }, [handed]);
   const [name, setName] = useState("");
+  const [siteName, setSiteName] = useState("");
+  const [source, setSource] = useState<string | undefined>();
+  useEffect(() => { if (handed) { const st = useNewFromPicture.getState(); setPic(handed); setGen(st.gen ?? GEN_OF.get(handed.name) ?? null); if (st.name) setName(st.name); setSiteName(st.siteName ?? ""); setSource(st.source); useNewFromPicture.setState({ pic: null, gen: null, name: undefined, siteName: undefined, source: undefined }); } }, [handed]);
   const [busy, setBusy] = useState(false);
   const [needAge, setNeedAge] = useState<Partial<Character> | null>(null);
   const [age, setAge] = useState("");
@@ -396,6 +398,8 @@ function FromPicture() {
     }
     // how their picture was made comes along (the CivitAI post), so "How it was made" / RECIPE work on their front picture
     if (gen && (gen.page || gen.prompt)) c.from = { page: gen.page, prompt: gen.prompt };
+    if (siteName.trim()) c.site = { ...c.site, name: siteName.trim() };
+    if (source) c.source = source;
     useCharacters.getState().save(c);
     await useCharacters.getState().setView(c.id, "front", { filename: pic!.name, subfolder: "", type: "input" }, { yours: true });
     useCharacters.getState().select(c.id);
@@ -403,7 +407,7 @@ function FromPicture() {
     const postId = gen?.page?.includes("civitai") ? gen.id : null;
     if (postId) { const k = await (await import("../lib/batch")).postToCharacter(postId, c.id); if (k) loraNote += ` ${k} picture${k > 1 ? "s" : ""} recreated from this post moved into ${c.name}'s project.`; }
     toast(isAdult(c) ? `${c.name} is in, with your picture as their look.${loraNote} Next: Open sheet maker → Make full sheet.` : `${c.name} is in. Their age couldn't be read from the picture — type it in Looks → Age (18 or older) to start using them.`, isAdult(c) ? "good" : "info", "characters");
-    setPic(null); setGen(null); setName(""); setNeedAge(null); setAge("");
+    setPic(null); setGen(null); setName(""); setSiteName(""); setSource(undefined); setNeedAge(null); setAge("");
   };
   const read = async () => {
     if (!pic) return;
@@ -428,10 +432,11 @@ function FromPicture() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="lbl">New character from a picture<Help text="Drop a picture of your character (art you made, a render, a design). Its look is read from the picture — hair, eyes, outfit, details — and the picture itself becomes their front view, so the reference sheet matches it exactly." /></p>
+      <p className="lbl">New character from a picture<Help text="Drop a picture of your character (art you made, a render, a design). Read the picture: the writer looks at it and writes down their hair, eyes, body, outfit and details — their description, used whenever they're made again. The picture itself becomes their front view, so the reference sheet matches it exactly, and how it was made (its prompt and LoRAs) stays with them. To make several at once: pick results (tick them) → New characters." /></p>
       <Slot className="h-52" value={pic} onChange={setPic} label="Drop their picture" hint="full body works best" />
       <button className="-mt-1.5 flex items-center gap-1 self-start text-[12px] text-accent hover:underline" onClick={() => pickFromCivitai({ kind: "new" })}><Icon name="link" size={12} />Or pick one from CivitAI (your collections or a link)</button>
       <TextIn label="Name" value={name} onChange={setName} placeholder="e.g. Rin" />
+      {(siteName || source) && <TextIn label="Name on your site (a near-twin — change it if you like)" value={siteName} onChange={setSiteName} placeholder={name} />}
       {needAge ? (
         <div className="flex flex-col gap-2 border border-accent/50 p-3 text-[13px]">
           <span className="text-muted">Their age can't be told from the picture. How old is this character? (18 or older)</span>

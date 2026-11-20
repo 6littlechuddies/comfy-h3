@@ -1004,14 +1004,15 @@ ANILIST_Q = """query ($s: String) { Page(perPage: 6) { characters(search: $s) { 
 
 
 POSEWEAR = "https://posewear.pages.dev/"
-POSEWEAR_FILES = {"pose": "poses.json", "depth": "depths.json", "costume": "costumes.json", "anime": "anime.json", "portrait": "portraits.json"}
+POSEWEAR_FILES = {"pose": "poses.json", "depth": "depths.json", "costume": "costumes.json", "anime": "anime.json", "portrait": "portraits.json",
+                  "poses": "poses.json", "depths": "depths.json", "costumes": "costumes.json", "portraits": "portraits.json"}
 
 
 async def posewear_list(req):
     """PoseWear's galleries (posewear.pages.dev — MIT index of @giaaibusi's pose / depth pose / outfit galleries and CC0
     portraits): the list as it publishes it, kept for a day. Pictures stay on their sites until you use one."""
     lib = req.match_info["lib"]
-    if lib not in POSEWEAR_FILES: raise web.HTTPNotFound()
+    if lib not in POSEWEAR_FILES: return web.json_response({"error": f"No PoseWear list called {lib}"}, status=404)
     cache = os.path.join(WORK, "posewear", POSEWEAR_FILES[lib])
     if not (os.path.isfile(cache) and time.time() - os.path.getmtime(cache) < 86400):
         try:
@@ -3572,10 +3573,10 @@ STAGES = {"look": "Look block writer", "krea": "Krea 2 frame builder", "context"
           "describe": "Character description (Krea 2)", "tags": "Plain words → anime tags", "chat": "Studio assistant",
           "plan": "Plan a video writer (Animate + Plan a video)", "site": "Site profile writer (Your site)",
           "changes": "Picture changes (Create with pictures)", "remix": "Remix merger (Create)", "read": "Picture → prompt (Create)", "match": "Face match check (training set)", "likeness": "Carry a likeness into a prompt (Edit)",
-          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)", "taste": "Learn what you keep: liked vs deleted prompts → notes"}
+          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)", "taste": "Learn what you keep: liked vs deleted prompts → notes", "alias": "Site name: a near-twin of a character's name (Your site)"}
 BUILTIN_FILE = {"krea": "studio_krea.txt", "context": "studio_context.txt", "compiler": "studio_compiler.txt", "look": "studio_look.txt", "tweak": "studio_tweak.txt",
                 "describe": "studio_describe.txt", "tags": "studio_tags.txt", "chat": "studio_chat.txt", "plan": "studio_plan.txt", "site": "studio_site.txt",
-                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt"}
+                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt", "alias": "studio_alias.txt"}
 TEMPLATES = {
     "context": "{seconds} second {mode}. {description}\nCharacters: {characters}",
     "compiler": "We are doing {MODE}. {seconds} seconds, {aspect}.\nReferences: {references}\n\n{blueprint}",
@@ -3596,8 +3597,9 @@ TEMPLATES = {
     "sort": "CHARACTER: {character}\nSETS SO FAR: {existing}\n\nPICTURES:\n{pictures}",
     "deep": "TASK:\n{task}\n\nWHO SHE IS:\n{character}\n\nWRITTEN SO FAR:\n{draft}",
     "name": "TAKEN: {taken}\n\nCHARACTERS:\n{characters}",
-    "cosplay": "CHARACTER: {character}\nSERIES: {series}\nCOSPLAYER: {cosplayer}\nLORA TRIGGER WORDS: {triggers}\n\nREFERENCE NOTES:\n{notes}\n\nHOW THIS CHARACTER'S LORA IS PROMPTED (its creator's and users' Krea 2 posts — costume and trigger wording only):\n{posts}\n\nSHOTS (write one prompt per shot, in this order — each its own pose, camera angle and setting):\n{shots}\n\nTHEIR TASTE (wording style only):\n{taste}",
+    "cosplay": "CHARACTER: {character}\nSERIES: {series}\nCOSPLAYER: {cosplayer}\nLORA TRIGGER WORDS: {triggers}\n\nREFERENCE NOTES:\n{notes}\n\nHOW THIS CHARACTER'S LORA IS PROMPTED (its creator's and users' Krea 2 posts — costume and trigger wording only):\n{posts}\n\nSHOTS (write one prompt per shot, in this order — each its own pose, camera angle and setting):\n{shots}\n\nLORAS YOU MAY ADD (their library — pick by the character's body, build and look; empty or \"(not used)\" = pick none):\n{library}\nLOCKED LORAS (always on, don't list them):\n{locked}\n\nTHEIR TASTE (wording style only):\n{taste}",
     "taste": "LIKED:\n{liked}\n\nDISLIKED:\n{disliked}",
+    "alias": "NAMES:\n{names}\n\nTAKEN (don't use):\n{taken}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }
 PARAMS = {"temperature": 0.6, "top_p": 0.9, "top_k": 40, "repeat_penalty": 1.05, "max_tokens": 8192}
@@ -3625,8 +3627,8 @@ def _save_packs(d: dict):
 
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
-            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {})), "template": TEMPLATES[stage],
-            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste")}
+            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {})), "template": TEMPLATES[stage],
+            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias")}
 
 
 def _pack_text(p: dict) -> str:
@@ -5555,7 +5557,7 @@ async def _site_push(job: dict, d: dict):
             gen = ["Krea 2", "MiniMax H3"] if c.get("style") == "realistic" else ["Anima / Illustrious", "MiniMax H3"]
             appearance = {k: c.get(k, "") for k in ("hair", "eyes", "body", "outfit", "details")}
             manifest = {
-                "external_id": ext, "name": c.get("name"), "age": int(age), "gender": c.get("gender"), "style": c.get("style"),
+                "external_id": ext, "name": (str(site.get("name") or "").strip() or c.get("name")), "age": int(age), "gender": c.get("gender"), "style": c.get("style"),
                 "tags": site.get("tags") or [],
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
                             "greeting": site.get("greeting", ""), "appearance": appearance, "description": c.get("block") or ""},

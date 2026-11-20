@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { DEFAULT_REC, FRAMES, picturesToWrite, postCharacter, queueAll, rowProblem, useBatch, writePicturePrompts, writePrompts, type RecreatePrefs, type Row } from "../lib/batch";
+import { addGroups, clearWaiting, removeDuplicates, undoGroup, DEFAULT_REC, FRAMES, picturesToWrite, postCharacter, queueAll, rowProblem, useBatch, writePicturePrompts, writePrompts, type RecreatePrefs, type Row } from "../lib/batch";
 import { writerOutside } from "../lib/outside";
 import { WriterChoice } from "../components/WriterChoice";
 import { isAdult, useCharacters } from "../lib/characters";
@@ -20,6 +20,7 @@ import { ContentPlan } from "../components/ContentPlan";
 import { PhotoSet } from "../components/PhotoSet";
 import { RecipePanel } from "../components/MyRecipes";
 import "../lib/faceDetail";
+import { copyText } from "../lib/copy";
 import { CosplayList, CosplayOptions } from "../components/CosplayPanel";
 import { usePoseWear } from "../lib/posewear";
 
@@ -136,6 +137,7 @@ export default function BatchTab() {
       </>}>
       <div className="flex flex-col gap-2.5 pt-1">
         {!video && way === "cosplay" && <CosplayList />}
+        <RowTools />
         <ChangeAll />
         {b.rows.length > 3 && <div className="flex items-center gap-2 text-[12px] text-muted">
           <button onClick={() => setCompact(!compact)} className="press flex items-center gap-1 hover:text-ink"><Icon name="chev" size={13} className={cx("transition-transform", compact && "-rotate-90")} />{compact ? "Show rows in full" : "Fold rows to one line each"}</button>
@@ -201,6 +203,7 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
             {(r.civit ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4]).map((k) => <option key={k} value={k}>×{k}</option>)}
           </DropSelect></label>
         {r.status === "queued" && !r.step && <button onClick={() => update(r.id, { status: r.prompt ? "ready" : "new", jobIds: [], results: undefined })} className="mt-auto text-[12px] text-muted hover:text-ink">Run again</button>}
+        {r.debug && <button onClick={() => copyText(debugText([r]), "Debug copied — paste it to Claude")} title="What this row sent (path, pose, depth, LoRAs, likeness reference) — to paste to Claude" className="text-[11.5px] text-dim hover:text-ink">Copy debug</button>}
       </div>
     </div>
   );
@@ -413,4 +416,38 @@ function PosesPanel() {
       <Btn onClick={add} disabled={!poses.length || !!busy} why={busy || "Pick poses first"}><Icon name="plus" size={14} /> Add {poses.length * Math.max(1, wear.length) || ""} to batch</Btn>
       <span className="text-[11.5px] leading-relaxed text-dim">Realistic (Krea 2) pictures only. With a Star picked, her picture is made from her sheet and the pose goes in as words — the depth copy works on pictures made from words.</span>
     </div>);
+}
+
+/** take back an "Add to batch" press, drop copies, or clear everything that's still waiting */
+function RowTools() {
+  const rows = useBatch((s) => s.rows);
+  const toast = useJobs((s) => s.toast);
+  const [sure, setSure] = useState(false);
+  const waiting = rows.filter((r) => r.status !== "queued" && (r.prompt.trim() || r.idea.trim() || r.imitate || r.civit));
+  if (waiting.length < 2) return null;
+  const groups = addGroups();
+  const dupes = (() => { const seen = new Set<string>(); let n = 0; for (const r of waiting) { const k = `${r.idea}\n${r.prompt}\n${r.imitate?.url ?? ""}\n${r.civit?.id ?? ""}`; if (seen.has(k)) n++; else seen.add(k); } return n; })();
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+      {groups.slice(-3).map((g) => (
+        <button key={g.id} onClick={() => { undoGroup(g.id); toast(`Took back ${g.n} ${g.label.toLowerCase()} row${g.n === 1 ? "" : "s"}`, "info"); }} title="Remove the rows this press added (ones already queued stay)"
+          className="press btn-raised flex h-8 items-center gap-1.5 px-2.5"><Icon name="back" size={13} className="text-muted" />Undo “{g.label}” · {g.n}</button>))}
+      {dupes > 0 && <button onClick={() => { const n = removeDuplicates(); toast(`Removed ${n} duplicate row${n === 1 ? "" : "s"}`, "good"); }} className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-hot"><Icon name="trash" size={13} />Remove {dupes} duplicate{dupes === 1 ? "" : "s"}</button>}
+      {rows.some((r) => r.debug) && <button onClick={() => copyText(debugText(useBatch.getState().rows.filter((r) => r.debug)), "Debug report copied — paste it to Claude")} title="What every queued row sent, with its jobs' results — to paste to Claude"
+        className="press btn-raised flex h-8 items-center gap-1.5 px-2.5"><Icon name="script" size={13} className="text-muted" />Copy debug report</button>}
+      {sure
+        ? <span className="flex items-center gap-1.5">Remove all {waiting.length} waiting rows?<button onClick={() => { clearWaiting(); setSure(false); toast("Cleared the waiting rows", "info"); }} className="press text-bad hover:underline">Yes, clear</button><button onClick={() => setSure(false)} className="press text-muted hover:text-ink">No</button></span>
+        : <button onClick={() => setSure(true)} className="press ml-auto text-dim hover:text-bad">Clear {waiting.length} waiting rows</button>}
+    </div>);
+}
+
+/** what rows sent and how their jobs went, as text to paste to Claude */
+function debugText(rows: Row[]): string {
+  const jobs = useJobs.getState().jobs;
+  return [`H3 Studio batch debug · ${new Date().toISOString()} · ${rows.length} row${rows.length === 1 ? "" : "s"}`,
+    ...rows.map((r, i) => {
+      const js = jobs.filter((j) => r.jobIds.includes(j.id));
+      return [`--- row ${i + 1}: ${r.idea || "(no title)"}`, ...Object.entries(r.debug ?? {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v ?? "—"}`),
+        ...js.map((j) => `job ${j.id}: ${j.status}${j.error ? ` — ${String(j.error).slice(0, 300)}` : ""}${j.outputs?.length ? ` · ${j.outputs.map((o) => o.filename).join(", ")}` : ""}`)].join("\n");
+    })].join("\n\n");
 }

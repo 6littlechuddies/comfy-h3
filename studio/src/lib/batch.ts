@@ -50,7 +50,35 @@ export interface Row {
   realistic?: boolean;
   /** copy a pose through its depth (PoseWear): the picture on the rental, how strongly, and whether its depth is worked out first */
   control?: { image: string; strength: number; estimate: boolean };
+  /** the PoseWear pose (its picture, for a character made from her sheet: then the pose goes in as a reference picture) */
+  pose?: import("./posewear").PwPick;
+  /** which "Add to batch" press made this row (so one press can be taken back) */
+  group?: { id: string; label: string };
+  /** what this row actually sent last time (Copy debug) */
+  debug?: Record<string, unknown>;
 }
+let groupN = 0;
+export const newGroup = (label: string) => ({ id: `g${Date.now().toString(36)}${groupN++}`, label });
+/** the presses that added rows, newest last (Undo takes back the newest that still has waiting rows) */
+export function addGroups(): { id: string; label: string; n: number }[] {
+  const m = new Map<string, { id: string; label: string; n: number }>();
+  for (const r of useBatch.getState().rows) if (r.group && r.status !== "queued") { const g = m.get(r.group.id) ?? { ...r.group, n: 0 }; g.n++; m.set(r.group.id, g); }
+  return [...m.values()];
+}
+export function undoGroup(id: string) { useBatch.setState((s) => ({ rows: s.rows.filter((r) => !(r.group?.id === id && r.status !== "queued")) })); }
+/** waiting rows that are exact copies of an earlier one (same prompt and words) */
+export function removeDuplicates(): number {
+  const seen = new Set<string>(); let n = 0;
+  useBatch.setState((s) => ({ rows: s.rows.filter((r) => {
+    if (r.status === "queued") return true;
+    const k = `${r.idea}\n${r.prompt}\n${r.imitate?.url ?? ""}\n${r.civit?.id ?? ""}`;
+    if (!r.prompt.trim() && !r.idea.trim() && !r.imitate && !r.civit) return true;
+    if (seen.has(k)) { n++; return false; }
+    seen.add(k); return true;
+  }) }));
+  return n;
+}
+export function clearWaiting() { useBatch.setState((s) => ({ rows: s.rows.filter((r) => r.status === "queued") })); }
 export interface BatchOpts {
   target: "video" | "image";
   characterId: string | null;
@@ -258,6 +286,7 @@ export function rowProblem(r: Row): string | undefined {
 /** step 2: queue everything on the instance; returns the number of jobs */
 /** a content-plan row's extras on its jobs: the face pass (as that character) and the site set the results go into */
 const extra = (r: Row, c: { id: string } | null) => ({
+  ...(r.idea ? { idea: r.idea } : {}),
   ...(r.faceFix ? { faceFix: { character: c?.id ?? null, strength: 0.45 } } : {}),
   ...(r.toSet && c ? { toSet: { charId: c.id, ...r.toSet } } : {}),
 });
@@ -429,8 +458,14 @@ export async function queueAll(only?: string[]): Promise<number> {
             const shot = r.prompt.trim() || [text, r.expression].filter(Boolean).join(". ");
             const { characterShot } = await import("./make");
             const cs = await characterShot(c, shot, shot, b.aspect, r.loras ?? [], null);
-            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name} · ${cs.view}`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
-              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: "studio/batch/create" }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
+            // a PoseWear pose: its depth steers her body on the blank canvas (experimental — see Copy debug)
+            if (r.control) await (await import("./posewear")).depthReady();
+            const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 50);
+            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name}${named ? ` · ${named}` : ""} · ${cs.view}`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
+              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: "studio/batch/create", control: r.control }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
+            useBatch.getState().update(r.id, { debug: { path: "character sheet (Krea 2 Identity Edit on a blank canvas)", character: c.name, view: cs.view, reference: cs.ref.name, pose: r.pose?.title ?? null,
+              poseImage: r.control?.image ?? null, poseDepth: r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : null, poseStrength: r.control?.strength ?? null,
+              loras: cs.loras.map((l) => `${l.name} @${l.strength}`), instruction: cs.instruction.slice(0, 600), canvas: `${cs.canvas.width}×${cs.canvas.height}` } });
             rowIds.push(job.id); ids.push(job.id);
             continue;
           }
@@ -440,6 +475,9 @@ export async function queueAll(only?: string[]): Promise<number> {
             ...adv, seed: newSeed(), ...modelArgs(st.create, mi), positive, negative: st.create.negative, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])],
             width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,
           }), `create:${anime ? "anime" : "realistic"}:portrait:1`, { batchRow: r.id, kind: "make", ...extra(r, c) });
+          useBatch.getState().update(r.id, { debug: { path: anime ? "anime text-to-picture" : "Krea 2 text-to-picture", character: c?.name ?? null, model: mi.label, size: `${w}×${h}`,
+            pose: r.pose?.title ?? null, poseImage: !anime && r.control ? r.control.image : null, poseDepth: !anime && r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : r.control ? "skipped (anime)" : null,
+            poseStrength: !anime && r.control ? r.control.strength : null, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])].map((l) => `${l.name} @${l.strength}`), prompt: positive.slice(0, 900) } });
         }
         rowIds.push(job.id); ids.push(job.id);
       }

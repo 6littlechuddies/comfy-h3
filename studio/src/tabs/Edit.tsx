@@ -226,6 +226,18 @@ function ClassicEdit() {
       <Chip title="How many" value={e.count} onChange={(v) => set({ count: v })} options={[1, 2, 3, 4].map((n) => ({ value: n, label: `×${n}` }))} />
       <Chip title="Size" value={e.resolution >= 1400 ? 1448 : 1024} onChange={(v) => set({ resolution: v })} options={[{ value: 1448, label: "Full · ~2 MP (like Create)" }, { value: 1024, label: "Draft · ~1 MP, faster" }]} />
       <FourKChip />
+      {!anime && <button type="button" title="Pick a pose from PoseWear: it goes in as Picture 1 (the pose to copy) and your person moves to Picture 2"
+        onClick={() => import("../components/PoseWear").then(({ openPoseWear }) => openPoseWear("one", "poses", async (p) => {
+          try {
+            toast("Getting the pose picture…", "info");
+            const m = await useTray.getState().addUrl(p.image);
+            setMask(null);
+            setPics((cur) => { const person = cur[1] ?? cur[0]; return [m, person ?? null, ...cur.slice(2)]; });
+            set({ mode: "pose", instruction: TEMPLATES(engine).pose });
+            toast(`Pose “${p.title}” is Picture 1 — put your person in Picture 2 (if they aren't already), then Make edit`, "good");
+          } catch (err) { toast((err as Error).message, "bad"); }
+        }))}
+        className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name="user" size={13} className="text-muted" />Pose (PoseWear)</button>}
       {pics[0] && <span className={cx("inline-flex h-8 items-stretch overflow-hidden rounded-sm border text-[12.5px] font-medium", mask ? "border-bad/70 bg-bad/10 text-ink" : "border-line bg-raised2/70 text-ink")}>
         <button onClick={() => setPainting(true)} className="press inline-flex items-center gap-1.5 px-3 hover:bg-hover" title={mask ? "Change the painted area" : "Paint the part to change — only that part is redrawn"}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 2l4 4-12 12H6v-4z" /><path d="M3 22h6" /></svg>{mask ? "Painted area ✓" : "Paint area"}</button>

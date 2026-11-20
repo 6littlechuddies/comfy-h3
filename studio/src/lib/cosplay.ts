@@ -25,6 +25,7 @@ export interface CosItem {
   loras?: Candidate[];         // CivitAI candidates, most collected first
   picks?: Candidate[];         // the approved CivitAI LoRAs — several allowed ([] = none, undefined = not decided yet)
   extra?: LoraPick[];          // your own LoRAs for this character (library, a link, Browse)
+  ai?: LoraPick[];             // LoRAs from your library the writer picked and weighted for this character (you can change them)
   files?: Record<number, LoraPick>; // approved LoRAs once on the rental, by version
   /** @deprecated one approved LoRA (older lists) — read through picksOf */
   lora?: Candidate | null;
@@ -39,6 +40,10 @@ export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; aut
   /** read the character LoRA's own Krea 2 posts for its costume wording */
   posts: boolean;
   collapsed: boolean;
+  /** how the cosplayers look when "A new woman each" (e.g. "East Asian — Japanese, Korean or Chinese") */
+  look: string;
+  /** the writer picks LoRAs from your library for each character and sets their strength (the locked ones stay as they are) */
+  director: boolean;
 }
 /** the approved LoRAs, whichever way they were stored */
 export const picksOf = (it: CosItem): Candidate[] | undefined => it.picks ?? (it.lora === undefined ? undefined : it.lora ? [it.lora] : []);
@@ -50,7 +55,7 @@ const keyOf = (name: string, series: string) => `${name}|${series}`.toLowerCase(
 
 export const useCosplay = create<{ items: CosItem[]; opts: CosOpts; set: (p: Partial<{ items: CosItem[]; opts: CosOpts }>) => void; update: (key: string, p: Partial<CosItem>) => void }>((set, get) => ({
   items: load<{ items: CosItem[] }>(KEY, { items: [] }).items,
-  opts: { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "mix", posts: true, collapsed: false, ...load<Partial<CosOpts>>(KEY + ".opts", {}) },
+  opts: { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "mix", posts: true, collapsed: false, look: "", director: false, ...load<Partial<CosOpts>>(KEY + ".opts", {}) },
   set: (p) => { set(p); save(); },
   update: (key, p) => { set({ items: get().items.map((x) => (x.key === key ? { ...x, ...p } : x)) }); save(); },
 }));
@@ -129,19 +134,26 @@ const ANGLES = ["eye-level full-body shot, straight on", "three-quarter view fro
 const POSES = ["standing confidently, one hand on her hip", "walking toward the camera mid-stride", "sitting on steps, leaning forward on her knees", "leaning back against a wall, arms crossed",
   "the character's signature action pose with her prop", "kneeling on one knee", "turning, the costume and wig in motion", "reaching one hand toward the lens", "crouching low, ready to spring",
   "sitting sideways on a chair, legs crossed", "laughing, playing with a strand of her wig", "arms raised, stretching", "resting her chin on her hand, thoughtful", "back to a railing, elbows on it"];
-const PLACES = ["a location from the character's own world (pick one)", "a convention hall, other cosplayers blurred behind", "a seamless studio backdrop in a colour from her costume", "a city street at night under neon signs",
+const PLACES = ["a convention hall, other cosplayers blurred behind", "a seamless studio backdrop in a colour from her costume", "a city street at night under neon signs",
   "a rooftop at golden hour", "an abandoned industrial building with broken windows", "a forest path in dappled sunlight", "a shrine with red torii gates", "a train platform at dusk", "a rainy alley with reflections",
-  "a sunlit beach boardwalk", "a library with tall wooden shelves", "a cosy apartment by a big window", "a park under cherry blossoms", "a bare concrete stairwell in hard light", "a neon-lit arcade", "a desert road at sunset"];
+  "a sunlit beach boardwalk", "a library with tall wooden shelves", "a cosy apartment by a big window", "a park under cherry blossoms", "a bare concrete stairwell in hard light", "a neon-lit arcade", "a desert road at sunset",
+  "a snowy mountain trail", "a greenhouse full of plants", "an old European street with cobblestones", "a hotel corridor with warm lamps", "a subway car at night", "a field of tall grass at dawn", "a gothic church interior",
+  "a harbour with boats and fog", "a karaoke room with coloured lights", "a ruined castle wall", "a misty bamboo grove", "a car park rooftop under sodium lights", "a laundromat at night", "a lakeside dock at sunrise",
+  "a cluttered artist's studio", "a stadium tunnel", "a sunflower field", "a dim jazz bar", "a hospital-white minimalist room", "a carnival with lights at dusk", "a waterfall pool", "a rooftop garden in the city"];
+/** half the shots are a place from the character's own world (named by the writer, a different spot each time) */
+const WORLD = "a specific place from the character's own world — name it, and make it a different spot from the other shots (a room, street, landmark or landscape from their story), recreated as a real location";
+const CLOSE = "close-up portrait, head and shoulders, 85 mm, the wig, makeup and lenses in sharp detail";
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
-/** a dealer of shots for one run: angle, pose and place each walk their own shuffled list, so neighbours never match */
+/** a dealer of shots for one run: angle, pose and place each walk their own shuffled list, so neighbours never match.
+ *  Each character's first shot is a close-up; every other shot is set in the character's own world */
 function dealer(posePicks: import("./posewear").PwPick[]) {
-  const A = shuffle(ANGLES), P = shuffle(POSES), L = shuffle(PLACES), R = shuffle(posePicks);
-  let i = 0;
-  return (): { brief: string; ref?: import("./posewear").PwPick } => {
+  const A = shuffle(ANGLES.filter((a) => !/close-up/.test(a))), P = shuffle(POSES), L = shuffle(PLACES), R = shuffle(posePicks);
+  let i = 0, li = 0;
+  return (k: number): { brief: string; ref?: import("./posewear").PwPick } => {
     const n = i++;
-    const place = L[n % L.length];
+    const place = k % 2 === 1 ? WORLD : L[li++ % L.length];
     if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${place}`, ref }; }
-    return { brief: `ANGLE: ${A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${place}` };
+    return { brief: `ANGLE: ${k === 0 ? CLOSE : A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${place}` };
   };
 }
 
@@ -164,10 +176,10 @@ async function lorasPosts(it: CosItem): Promise<string> {
 const usableNotes = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).filter((x) => !minorWords(x).length).join(" ").trim();
 
 /** step 4: the writer's adult check, costume and one prompt per shot */
-async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string): Promise<Partial<CosItem>> {
+async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string, library: string, locked: string, libNames: Set<string>): Promise<Partial<CosItem>> {
   const triggers = [...(picksOf(it) ?? []).map((l) => l.trigger), ...(it.extra ?? []).map((l) => l.trigger ?? "")].filter(Boolean).join(", ");
-  const raw = await runWriter("cosplay", { taste, posts, shots: briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n"), character: it.name, series: it.series || "(not given)",
-    cosplayer: cosplayer || "(none given: an adult woman, about 25 years old)", triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
+  const raw = await runWriter("cosplay", { taste, posts, library, locked, shots: briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n"), character: it.name, series: it.series || "(not given)",
+    cosplayer: cosplayer || `(none given: an adult woman, about 25 years old${useCosplay.getState().opts.look?.trim() ? `, ${useCosplay.getState().opts.look.trim()} — vary her face, hair and build from shot to shot within that` : ""})`, triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
     { tab: "batch", label: `Cosplay · ${it.name}`, images: it.picture ? [it.picture] : undefined, big: true });
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("The writer didn't answer in the expected format — try again");
@@ -178,7 +190,10 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => ({ brief: briefs[i]?.brief ?? "", pose: String(x.pose ?? ""), prompt: String(x.prompt), ref: briefs[i]?.ref }));
   if (!shots.length) throw new Error("The writer answered without prompts — try again");
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
-  return { status: "ready", age: d.age || it.age, outfit: d.outfit, wig: d.wig, eyes: d.eyes, props: d.props, pose: shots[0].pose, prompt: shots[0].prompt, shots };
+  // the writer's LoRA picks: only names from your library, strengths kept sensible
+  const ai: LoraPick[] | undefined = libNames.size ? (Array.isArray(d.loras) ? d.loras : []).filter((l: { name?: string }) => l?.name && libNames.has(l.name))
+    .slice(0, 4).map((l: { name: string; strength?: number; why?: string }) => ({ name: l.name, strength: Math.round(Math.min(1.3, Math.max(0.1, Number(l.strength) || 0.6)) * 100) / 100 })) : undefined;
+  return { status: "ready", age: d.age || it.age, outfit: d.outfit, wig: d.wig, eyes: d.eyes, props: d.props, pose: shots[0].pose, prompt: shots[0].prompt, shots, ...(ai ? { ai } : {}) };
 }
 
 /** the writers working side by side (CivitAI and AniList are fine with this many) */
@@ -197,6 +212,15 @@ export async function researchAll(cosplayer: string, only?: string) {
   const picksNow = st.opts.poses === "posewear" ? posePicks() : [];
   if (st.opts.poses === "posewear" && !picksNow.length) throw new Error("Poses are set to your PoseWear picks, but none are picked — Browse PoseWear first");
   const deal = dealer(picksNow);
+  // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
+  let library = "(not used)", libNames = new Set<string>();
+  const locked = st.opts.loras?.length ? st.opts.loras.map((l) => `${l.name} @${l.strength}`).join(", ") : "(none)";
+  if (st.opts.director) {
+    const { loraLibrary } = await import("./api");
+    const lib = (await loraLibrary()).filter((l) => l.family === "krea2" && l.role !== "character" && !st.opts.loras?.some((x) => x.name === l.name));
+    libNames = new Set(lib.map((l) => l.name));
+    library = lib.length ? lib.map((l) => `- ${l.name} | ${l.title}${l.role ? ` | ${l.role}` : ""}${l.trigger ? ` | trigger: ${l.trigger}` : ""}${l.tips?.weight != null ? ` | creator's strength ${l.tips.weight_range ?? l.tips.weight}` : ""}`).join("\n") : "(no Krea 2 LoRAs downloaded)";
+  }
   const one = async (k: string) => {
     const up = (p: Partial<CosItem>) => useCosplay.getState().update(k, p);
     up({ status: "looking", why: undefined });
@@ -213,8 +237,8 @@ export async function researchAll(cosplayer: string, only?: string) {
       }
       const o = useCosplay.getState().opts;
       const posts = o.posts ? await lorasPosts(cur) : "(not used)";
-      const briefs = Array.from({ length: Math.max(1, o.takes) }, deal);
-      up(await writePrompt(cur, cosplayer, taste, briefs, posts));
+      const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k));
+      up(await writePrompt(cur, cosplayer, taste, briefs, posts, library, locked, libNames));
     } catch (e) {
       const msg = (e as Error).message;
       // the writer's own age stop counts as a skip, not an error
@@ -257,15 +281,18 @@ async function lorasFor(it: CosItem): Promise<LoraPick[]> {
 
 /** step 5: one Batch row per shot of every ready character — its LoRAs, yours, the batch-wide ones, and the pose's depth */
 export async function toBatch(onStep?: (m: string) => void): Promise<number> {
-  const { useBatch } = await import("./batch");
+  const { useBatch, newGroup } = await import("./batch");
   const { controlFor } = await import("./posewear");
   const st = useCosplay.getState();
+  const group = newGroup("Cosplay");
+  // pressing Add twice doesn't double the batch: a shot already waiting in the batch isn't added again
+  const waiting = new Set(useBatch.getState().rows.filter((r) => r.status !== "queued").map((r) => r.idea));
   let n = 0;
   for (const it of st.items.filter((x) => x.status === "ready" && (x.shots?.length || x.prompt))) {
     onStep?.(picksOf(it)?.length ? `Getting ${it.name}'s LoRAs…` : `Adding ${it.name}…`);
     const civ = await lorasFor(it);
     const seen = new Set<string>();
-    const loras = [...civ, ...(it.extra ?? []), ...st.opts.loras].filter((l) => !seen.has(l.name) && !!seen.add(l.name));
+    const loras = [...civ, ...(it.extra ?? []), ...(st.opts.director ? it.ai ?? [] : []), ...st.opts.loras].filter((l) => !seen.has(l.name) && !!seen.add(l.name));
     const trig = loras.map((l) => l.trigger).filter((t): t is string => !!t);
     const shots: Shot[] = it.shots?.length ? it.shots : [{ brief: "", pose: it.pose ?? "", prompt: it.prompt! }];
     for (const [i, sh] of shots.entries()) {
@@ -273,7 +300,9 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       const missing = trig.filter((t) => !sh.prompt.toLowerCase().includes(t.toLowerCase()));
       const prompt = missing.length ? `${missing.join(", ")}, ${sh.prompt}` : sh.prompt;
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
-      useBatch.getState().add({ prompt, idea: `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`, takes: 1, status: "ready",
+      const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
+      if (waiting.has(idea)) continue;
+      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref,
         charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras, control });
       n++;
     }

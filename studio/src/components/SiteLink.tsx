@@ -28,7 +28,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.quirks, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
+const fp = (c: Character) => JSON.stringify([c.name, c.site?.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.quirks, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -604,6 +604,11 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           {!!site.persona && <Btn onClick={deep} disabled={writing || !!step} title="Her life, how she reacts in 15 situations, sample texts in her style, then an editor pass — from her current profile, about 2–3 minutes"><Icon name="sparkle" size={14} /> {site.deepAt ? "Redo deep" : "Make it deep"}</Btn>}
         </div>
         {step && <p className="border border-accent/40 bg-accent/5 px-3 py-2 text-[12.5px]"><span className="pulse text-accent">●</span> {step}</p>}
+        <div className="flex items-end gap-2">
+          <TextIn className="flex-1" label={`Name on the site · blank = “${c.name}”`} value={site.name ?? ""} onChange={(v) => up({ name: v })} placeholder={c.name} />
+          <Btn small onClick={async () => { try { const { siteAlias } = await import("../lib/newChar"); const a = await siteAlias([c.name]); if (a[0]) { up({ name: a[0] }); toast(`Site name: ${a[0]}`, "good"); } } catch (e) { toast((e as Error).message, "bad"); } }}
+            title="A name nearly the same as theirs — a few letters changed, still natural">Near-twin name</Btn>
+        </div>
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />

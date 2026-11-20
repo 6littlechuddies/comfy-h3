@@ -182,9 +182,11 @@ export function PictureMenuHost() {
       key: "newc", icon: "user", label: "New character from this picture", hide: isVideo, run: async () => {
         // its own project: the picture becomes their look, so it doesn't mix into the character you're on
         const m = await toMedia(t);
-        const [{ useNewFromPicture }, gen] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null)]);
+        const [{ useNewFromPicture }, gen, { madeBy }, { cosplayOf, siteAlias }] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null), import("../lib/made"), import("../lib/newChar")]);
         useCharacters.getState().select(null);
-        useNewFromPicture.setState({ pic: m, gen });
+        // a cosplay result: named after the character, with a near-twin name for your site
+        const cos = cosplayOf(t.output ? madeBy(t.output)?.j.meta?.idea : undefined);
+        useNewFromPicture.setState({ pic: m, gen, name: cos?.name, siteName: cos ? (await siteAlias([cos.name]).catch(() => []))[0] : undefined, source: cos ? `Cosplay of ${cos.name}${cos.series ? ` (${cos.series})` : ""}` : undefined });
         useSettings.getState().setTab("characters");
         await closeWindows();
         return "On the right: name them and press Read the picture — they get their own project";

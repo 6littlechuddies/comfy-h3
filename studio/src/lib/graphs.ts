@@ -300,6 +300,8 @@ export interface EditOpts extends SamplerOpts {
   /** Krea 2: start from a blank white canvas of this size as picture 1 (the shape of the result), with `images` as the subject(s) —
    *  e.g. a landscape turnaround sheet from one portrait picture */
   blank?: { width: number; height: number };
+  /** blank canvas only: the new picture follows this pose's depth (Krea 2 depth control on the edit model — experimental) */
+  control?: { image: string; strength: number; estimate?: boolean };
   /** Krea 2: redraw only this rectangle of picture 1 (cropped, worked on at full size, pasted back with soft edges) — e.g. the face */
   region?: { x: number; y: number; width: number; height: number; feather?: number };
   instruction: string;
@@ -385,6 +387,14 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   const two = rest.length > 0;
   const subject = two ? g.add("ImageScaleToTotalPixels", { image: o(rest[0]), upscale_method: "lanczos", megapixels: p.blank ? Math.min(mp, 1.2) : mp, resolution_steps: 16 }) : null;
   const subjectLat = subject ? g.add("VAEEncode", { pixels: o(subject), vae: o(vae) }) : null;
+  if (p.control && p.blank) {
+    // a character from her sheet in a PoseWear pose: the depth steers the body position, the sheet keeps the likeness
+    let ci: Link = o(g.add("LoadImage", { image: p.control.image }));
+    if (p.control.estimate) { const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything }); ci = o(g.add("DepthAnything_V2", { da_model: o(da), images: ci })); }
+    model = o(g.add("Krea2ControlLoRALoader", { model, lora_name: M.kreaDepth, strength: p.control.strength }));
+    const enc = g.add("Krea2ControlImageEncode", { control_image: ci, vae: o(vae), resize: "match_latent_size", upscale_method: "lanczos", crop: "center", channel_mode: "grayscale", normalize: "per_image_minmax", invert: false, batch_mode: "independent_images", latent: o(target) });
+    model = o(g.add("Krea2ControlApply", { model, control_latent: o(enc, 0) }));
+  }
   const patched = g.add("Krea2EditModelPatch", {
     // the hold: v1.2's 4 = strong likeness; V2 Identity reaches that at about 2 (its creator's setting), V2 General stays at 4
     model, source_latent: o(target), ref_boost: v2 && identity ? Math.max(1, (p.refBoost ?? 4) / 2) : p.refBoost ?? 4, ref_boost_a: p.sceneBoost ?? 1, fit_mode: "fit",

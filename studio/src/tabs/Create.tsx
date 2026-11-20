@@ -218,7 +218,7 @@ export default function CreateTab() {
     // what was actually sent, shown with the picture (full screen → How it was made)
     const sent: SentInfo = { prompt: withTriggers(positiveSent, allLs), words: c.extra, negative: c.negative, model: m.label, checkpoint: c.checkpoint?.[m.model as "krea2"] || "official",
       loras: allLs.filter((l) => !l.off).map((l) => ({ name: l.name, strength: l.strength })),
-      size: `${w}×${h}${hires ? ` → ${r16(w * up)}×${r16(h * up)}` : ""}`, seed, steps: adv.steps, cfg: adv.cfg, sampler: adv.sampler, scheduler: adv.scheduler, character: person && ch ? ch.name : undefined };
+      size: `${w}×${h}${hires ? ` → ${r16(w * up)}×${r16(h * up)}` : ""}`, pose: dpose && control ? `${dpose.title} — ${control.estimate ? "depth worked out from the pose picture" : "depth map"} at ${control.strength}` : undefined, seed, steps: adv.steps, cfg: adv.cfg, sampler: adv.sampler, scheduler: adv.scheduler, character: person && ch ? ch.name : undefined };
     await run("create", label, graph, over.sweep ? `create:${m.model}:${c.shape}:1` : etaKey, { sent, ...(remixed ? { stack: trayIdOf(remixed.out) } : {}), sweep: over.sweep, ...(c.faceFix && !over.sweep && person && c.make !== "background" ? { faceFix: { character: ch?.id ?? null, strength: c.faceStrength ?? 0.45 } } : {}), snapshot: { section: "create", settings: { ...c, [lorasKey]: ls, [advKey]: { ...adv, seed, lockSeed: true } } } });
   };
   const go = async () => {

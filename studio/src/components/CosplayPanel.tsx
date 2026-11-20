@@ -54,7 +54,10 @@ export function CosplayOptions() {
           <option value="">Pick a character…</option>
           {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </DropSelect>)}
-      <p className="-mt-1 text-[12px] leading-relaxed text-dim">{o.cosplayer === "one" ? "She wears every costume: her face and body come from her pictures." : "Each costume is worn by a different adult woman the writer describes."}</p>
+      <p className="-mt-1 text-[12px] leading-relaxed text-dim">{o.cosplayer === "one" ? "She wears every costume: her face and body come from her pictures." : "Each costume is worn by a different adult woman (about 25) the writer describes."}</p>
+      {o.cosplayer === "each" && <label className="flex flex-col gap-1"><span className="lbl">Cosplayers look</span>
+        <input value={o.look ?? ""} onChange={(e) => set({ look: e.target.value })} placeholder="e.g. East Asian — Japanese, Korean or Chinese" className="inset h-9 border px-2.5 text-[13px] focus:border-accent focus:outline-none" />
+        <span className="text-[11.5px] text-dim">Every cosplayer gets this look (faces still vary). Blank: the writer decides.</span></label>}
       <label className="flex cursor-pointer items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5" checked={o.auto} onChange={(e) => set({ auto: e.target.checked })} />
         <span>Approve LoRAs automatically <span className="text-dim">— off: you tick them yourself on each character (several allowed). On: the most collected Krea 2 LoRA, if it has at least</span></span></label>
       {o.auto && <label className="-mt-1 flex items-center gap-2 pl-6 text-[12.5px] text-muted"><input type="number" min={0} step={10} value={o.minCollected} onChange={(e) => set({ minCollected: Math.max(0, Number(e.target.value) || 0) })} className="inset h-8 w-20 border px-2" /> collections</label>}
@@ -64,7 +67,9 @@ export function CosplayOptions() {
         <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
       <p className="-mt-2 text-[12px] leading-relaxed text-dim">Each picture is its own shot: a different camera angle, pose and place — never repeated across the batch.</p>
       <PoseSource />
-      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="LoRAs on every picture" />
+      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="Locked LoRAs (on every picture)" />
+      <label className="-mt-1 flex cursor-pointer items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5" checked={!!o.director} onChange={(e) => set({ director: e.target.checked })} />
+        <span>Let DeepSeek pick from my LoRAs <span className="text-dim">— for each character it chooses up to 3 of your downloaded Krea 2 LoRAs that suit her body and look, and sets their strength. The locked ones above always stay, at your strength. You can change its picks on each character.</span></span></label>
       <p className="text-[12px] leading-relaxed text-dim">Characters who are under 18, or drawn that way, are skipped and listed. Keep character names out of your site's titles: the site character is the cosplayer.</p>
       <Learned />
     </div>
@@ -140,7 +145,7 @@ function CosRow({ it, busy, onRedo }: { it: CosItem; busy: boolean; onRedo: () =
   const tone = it.status === "ready" ? "text-good" : it.status === "skipped" ? "text-dim" : it.status === "error" ? "text-bad" : "text-muted";
   const label = it.status === "ready" ? `ready · ${it.shots?.length || 1} picture${(it.shots?.length || 1) > 1 ? "s" : ""}` : it.status === "skipped" ? "skipped" : it.status === "looking" ? "researching…" : it.status === "error" ? "error" : "to research";
   const loraLine = picks === undefined ? (it.loras?.length ? `${it.loras.length} LoRA${it.loras.length > 1 ? "s" : ""} to look at` : it.status === "ready" ? "no LoRA found" : "") : picks.length ? `LoRA${picks.length > 1 ? "s" : ""}: ${picks.map((l) => l.name).join(", ")}` : "no CivitAI LoRA";
-  const extra = it.extra?.length ? ` + ${it.extra.length} of yours` : "";
+  const extra = `${it.extra?.length ? ` + ${it.extra.length} of yours` : ""}${it.ai?.length && useCosplay.getState().opts.director ? ` + ${it.ai.length} picked by DeepSeek` : ""}`;
   const findMore = async () => { setFinding(true); try { const loras = await findLoras(it); useCosplay.getState().update(it.key, { loras }); if (!loras.length) toast(`No Krea 2 LoRA names ${it.name} on CivitAI — add one of yours below`, "info"); } finally { setFinding(false); } };
   const canPick = it.status !== "skipped";
   return (
@@ -173,6 +178,7 @@ function CosRow({ it, busy, onRedo }: { it: CosItem; busy: boolean; onRedo: () =
             {[...(it.loras ?? []), ...(picks ?? []).filter((p) => !(it.loras ?? []).some((l) => l.version_id === p.version_id))].map((l) => <LoraCard key={l.version_id} l={l} on={!!picks?.some((p) => p.version_id === l.version_id)} pick={() => approve(it.key, l)} />)}
           </div> : <p className="text-dim">{it.status === "new" ? "Research finds them." : "None found by name."}</p>}
           <LoraList value={it.extra ?? []} onChange={(v) => useCosplay.getState().update(it.key, { extra: v })} family="krea2" label={`Your LoRAs for ${it.name}`} />
+          {useCosplay.getState().opts.director && it.ai && <LoraList value={it.ai} onChange={(v) => useCosplay.getState().update(it.key, { ai: v })} family="krea2" label="Picked by DeepSeek (change or remove)" />}
           {it.status === "ready" && <p className="text-[11.5px] text-dim">Changed the LoRAs? Press Redo so the prompts use their trigger words and costume wording (or just Add — triggers are put in front either way).</p>}
         </div>)}
     </div>
