@@ -36,6 +36,7 @@ import { SpeedHost, openSpeed } from "./components/SpeedPanel";
 import { setHistoryProject } from "./lib/promptHistory";
 import { useImport } from "./lib/importer";
 import { LoraBrowser, openLoraBrowser } from "./components/LoraBrowser";
+import { PoseWearBrowser, openPoseWear } from "./components/PoseWear";
 import { dropPacks, STAGE_INFO } from "./lib/packs";
 import ScenesTab from "./tabs/Scenes";
 import { ImageImport, openFileMeta, openImageImport } from "./components/ImageImport";
@@ -203,6 +204,7 @@ export default function App() {
       <OutsideHost />
       <SweepHost />
       <LoraBrowser />
+      <PoseWearBrowser />
       <ImageImport />
       <LibraryPick />
       <AnonFrame />
@@ -345,6 +347,7 @@ function MoreMenu() {
     ["comfy", <a className={item} href="/" target="_blank" rel="noreferrer"><Icon name="layers" size={15} className="text-muted" />ComfyUI node editor<Icon name="external" size={13} className="ml-auto text-dim" /></a>],
     ["secure", https && <a className={item} href={`${https}/studio/`}><Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>Secure link</span><span className="text-[12px] text-dim">Needed for the microphone</span></span></a>],
     ["loras", <button className={item} onClick={() => openLoraBrowser()}><Icon name="search" size={15} className="text-muted" />Browse LoRAs</button>],
+    ["posewear", <button className={item} onClick={() => openPoseWear()}><Icon name="user" size={15} className="text-muted" /><span className="flex flex-col"><span>Poses &amp; outfits</span><span className="text-[12px] text-dim">PoseWear: depth poses, outfits · tick many → Batch</span></span></button>],
     ["civit", <button className={item} onClick={() => openImageImport()}><Icon name="link" size={15} className="text-muted" />CivitAI: collections, links, files</button>],
     ["civkey", <button className={item} onClick={() => askCivitKey().then((ok) => { if (ok) civitKeyStatus().then(setKey); })}>
             <Icon name="lock" size={15} className="text-muted" /><span className="flex flex-col"><span>CivitAI key</span><span className="text-[12px] text-dim">{key.set ? `${ks.length ? (badKeys.length ? `${ks.length - badKeys.length} of ${ks.length} work (key ${badKeys.map((x) => x.n).join(", ")} refused) · ` : `${ks.length === 1 ? "works" : `all ${ks.length} work`} · `) : (key.count ?? 1) > 1 ? `${key.count} keys, tried in turn · ` : ""}${key.source === "template" ? "from your Vast template" : key.source === "drive" ? "from your Google Drive" : "saved — press to replace"}` : "Needed for many LoRAs"}</span></span>
@@ -710,6 +713,7 @@ function commandsFor(setTab: (t: Tab) => void): Command[] {
     { id: "act:civitlink", group: "Actions", title: "Read a CivitAI image link", hint: "prompt, settings, LoRAs, workflow", icon: "link", run: () => openImageImport("", "link") },
     { id: "act:filemeta", group: "Actions", title: "How was this made? (a file)", hint: "reads prompts and workflows inside pictures", icon: "search", run: () => openImageImport("", "file") },
     { id: "act:loramgr", group: "Actions", title: "LoRA Manager page", hint: "opens a new tab", icon: "link", run: () => window.open("/loras", "_blank") },
+    { id: "act:posewear", group: "Actions", title: "Browse poses & outfits (PoseWear)", hint: "depth poses, poses, outfits — tick many, send to Batch", icon: "user", run: () => openPoseWear() },
     { id: "act:loras", group: "Actions", title: "Browse LoRAs", hint: "scroll CivitAI and add with one click", icon: "search", run: () => { const s = useSettings.getState().s; openLoraBrowser(s.tab === "create" ? modelOf(s.create).family : s.tab === "animate" ? "h3" : s.tab === "edit" ? "krea2" : "any"); } },
     { id: "act:comfy", group: "Actions", title: "Open ComfyUI (node editor)", icon: "arrow", run: () => window.open("/", "_blank") },
   );

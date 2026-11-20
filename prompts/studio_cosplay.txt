@@ -9,15 +9,16 @@ If NOT ALLOWED, answer only: {"allowed": false, "age": "<what the source says>",
 
 If ALLOWED, describe the costume as a real, wearable cosplay, piece by piece, from the design: garments with their colours and materials, how they layer, trims and seams, emblems or patterns, gloves, legwear, shoes or boots, jewellery, accessories and props (made of foam, resin or worbla, as real cosplay props are). The wig: colour, length, cut, bangs, how it's styled. The eyes: colour, as coloured contact lenses. Keep only what defines the character; don't add things that aren't in the design.
 
-Then write ONE photo prompt for Krea 2 (a photographic model) in plain flowing English, 90 to 160 words:
-- It is a photograph of a real adult woman cosplaying the character: say "an adult woman in her twenties" (or the COSPLAYER's own description when one is given — use it word for word for her face, skin, body and build), wearing the costume and wig you described.
+Then write ONE photo prompt for Krea 2 (a photographic model) FOR EACH SHOT listed under SHOTS, in the same order, in plain flowing English, 90 to 160 words each:
+- It is a photograph of a real adult woman cosplaying the character: say "an adult woman in her twenties" (or the COSPLAYER's own description when one is given — use it word for word for her face, skin, body and build), wearing the costume and wig you described. The costume, wig and eyes are the same in every shot.
+- Each shot's POSE, CAMERA ANGLE and SETTING come from that shot's line under SHOTS — follow them exactly, and make every shot clearly different from the others: a different pose, a different camera angle and distance, a different place and light. When a shot's setting is "fits the character", pick a location that echoes the character's world and that no other shot uses. Never repeat a background, pose or angle between shots.
 - Real-cosplay realism: a lace-front wig with a natural hairline, visible fabric texture and stitching, a handmade prop, light makeup that suits the character, natural skin texture.
-- A setting that fits: a convention hall, a photo studio backdrop, or an outdoor location shoot that echoes the character's world. A pose and expression that suit the character.
-- Camera and light like a professional cosplay photographer: lens, depth of field, lighting.
-- Name the character once ("cosplaying Makima from Chainsaw Man") and otherwise describe what is seen. No drawing or anime style words: this is a photo.
-- If LORA TRIGGER WORDS are given, put them at the very start of the prompt, as given.
+- Camera and light like a professional cosplay photographer: lens, depth of field, lighting — chosen for that shot.
+- Name the character once per prompt ("cosplaying Makima from Chainsaw Man") and otherwise describe what is seen. No drawing or anime style words: this is a photo.
+- If LORA TRIGGER WORDS are given, put them at the very start of every prompt, as given.
+- HOW THIS CHARACTER'S LORA IS PROMPTED (when given) shows real Krea 2 prompts made with this character's LoRA. Use their costume words, names for costume parts and trigger phrasing — the LoRA was trained on that wording. Never copy their people, poses, settings or anything explicit.
 - Never any childlike body, face or school setting.
-- THEIR TASTE (when given) is learned from the pictures this person kept and built on: write the prompt the way those prompts are written — the same structure, length, order, camera, lens, light and realism wording, and their recurring choices — and avoid what their notes say they delete. Take only the style from the examples, never their person, outfit or setting. The cosplay and adult rules above always win.
+- THEIR TASTE (when given) is learned from pictures this person kept: copy only their WORDING STYLE — structure, length, order, how camera, lens, light and realism are written — and avoid what their notes say they delete. Their taste NEVER decides the pose, the angle or the background: SHOTS do. If the taste names recurring settings or poses, ignore those parts. The cosplay and adult rules above always win.
 
 Answer with ONE JSON object and nothing else:
-{"allowed": true, "age": "<what the source says>", "outfit": "<the costume, pieces in order>", "wig": "<wig>", "eyes": "<lens colour>", "props": "<props, or none>", "pose": "<pose and expression>", "prompt": "<the Krea 2 prompt>"}
+{"allowed": true, "age": "<what the source says>", "outfit": "<the costume, pieces in order>", "wig": "<wig>", "eyes": "<lens colour>", "props": "<props, or none>", "shots": [{"pose": "<this shot's pose and expression>", "prompt": "<the Krea 2 prompt for this shot>"}, ...one per shot]}

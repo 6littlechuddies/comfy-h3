@@ -48,6 +48,8 @@ export interface Row {
   noStar?: boolean;
   /** always a photo (Krea 2), whatever Create's style is (Cosplay) */
   realistic?: boolean;
+  /** copy a pose through its depth (PoseWear): the picture on the rental, how strongly, and whether its depth is worked out first */
+  control?: { image: string; strength: number; estimate: boolean };
 }
 export interface BatchOpts {
   target: "video" | "image";
@@ -432,9 +434,11 @@ export async function queueAll(only?: string[]): Promise<number> {
             rowIds.push(job.id); ids.push(job.id);
             continue;
           }
-          job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · picture`, buildCreate({
+          if (r.control && !anime) await (await import("./posewear")).depthReady();
+          const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 60);
+          job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${named || "picture"}`, buildCreate({
             ...adv, seed: newSeed(), ...modelArgs(st.create, mi), positive, negative: st.create.negative, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])],
-            width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create",
+            width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,
           }), `create:${anime ? "anime" : "realistic"}:portrait:1`, { batchRow: r.id, kind: "make", ...extra(r, c) });
         }
         rowIds.push(job.id); ids.push(job.id);

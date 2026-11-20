@@ -108,13 +108,13 @@ export function Label({ children, help, htmlFor, right }: { children: ReactNode;
   );
 }
 
-export function Seg<T extends string | number>({ value, options, onChange, label, help, className }: {
-  value: T; options: { value: T; label: ReactNode; title?: string }[]; onChange: (v: T) => void; label?: string; help?: string; className?: string;
+export function Seg<T extends string | number>({ value, options, onChange, label, help, className, wrap }: {
+  value: T; options: { value: T; label: ReactNode; title?: string }[]; onChange: (v: T) => void; label?: string; help?: string; className?: string; /** several rows of 3 when there are many */ wrap?: boolean;
 }) {
   return (
     <div className={className}>
       {label && <Label help={help}>{label}</Label>}
-      <div role="radiogroup" aria-label={label} className="seg-track flex gap-[3px] rounded-lg border border-line2 p-[3px]">
+      <div role="radiogroup" aria-label={label} className={cx("seg-track gap-[3px] rounded-lg border border-line2 p-[3px]", wrap ? "grid grid-cols-3" : "flex")}>
         {options.map((o) => (
           <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} title={o.title} onClick={() => onChange(o.value)}
             className={cx("press h-[34px] min-w-0 flex-auto truncate rounded-md px-2 text-[13px] font-medium", o.value === value ? "seg-on text-white" : "text-muted hover:text-ink")}>

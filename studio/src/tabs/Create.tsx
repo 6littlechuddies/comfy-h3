@@ -1,3 +1,4 @@
+import { usePoseWear } from "../lib/posewear";
 import { useEffect, useState } from "react";
 import { animeEngine, charLoras, followFor, makeWithRefs, mergeRemix, readPicture, type Take, looksPlain, mergeLoras, polishKrea, SHEET_DEFAULT, TAKES, toTags, useMakeRefs } from "../lib/make";
 import { useHandoffInto } from "../App";
@@ -203,8 +204,13 @@ export default function CreateTab() {
     const positiveSent = polished ? `${polished}${bgLine}` : positiveFor(extra);
     // several cards: a single Krea 2 picture split across them (×2/×4 takes go one per card instead — faster for a batch)
     const ray = !anime && count === 1 && !over.take && !over.sweep && c.splitCards !== false ? rayCards() : 1;
+    // a PoseWear depth pose: Krea 2 copies its body position (realistic pictures only)
+    const pw = (await import("../lib/posewear"));
+    const dpose = !anime ? pw.usePoseWear.getState().create : null;
+    if (dpose) await pw.depthReady();
+    const control = dpose ? await pw.controlFor(dpose) : undefined;
     const graph = buildCreate({
-      ...adv, seed, ...modelArgs(c, m), positive: positiveSent, negative: c.negative, loras: allLs, width: w, height: h, count, hires, ray,
+      ...adv, seed, ...modelArgs(c, m), positive: positiveSent, negative: c.negative, loras: allLs, width: w, height: h, count, hires, ray: control ? 1 : ray, control,
       cutout: !c.raw && person && c.make === "character" && c.cutout, prefix: `studio/create/${c.style}`,
     });
     const label = over.label ?? `${count} ${anime ? "anime" : "realistic"} ${c.make === "background" ? "background" : c.make === "scene" ? "scene" : "character"}${count > 1 ? "s" : ""}`;
@@ -299,6 +305,7 @@ export default function CreateTab() {
             }))}
           className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name={k === "pose" ? "user" : "image"} size={13} className="text-muted" />{k === "pose" ? "Saved poses" : "Backgrounds"}</button>
       ))}
+      <DepthPoseChip />
       {ch && person && !c.raw && <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 px-3 text-[12.5px]">{ch.name}<button aria-label="Stop using this character" className="text-muted hover:text-ink" onClick={() => set({ characterId: null })}>×</button></span>}
     </>
   );
@@ -683,4 +690,18 @@ function KreaBoost() {
       <p className="-mt-1 text-[11.5px] leading-relaxed text-dim">{off ? "Plain Krea 2." : installed === false ? "Needs the Krea2T Enhancer node, which comes with the newest image — plain Krea 2 until then." : "Krea2T Enhancer at 1.5, as in the community workflows: details in your prompt are followed more closely. Turn off to compare."}</p>
     </div>
   );
+}
+
+/** PoseWear depth pose for the next realistic picture: Krea 2 copies its body position (its depth), the prompt does the rest */
+function DepthPoseChip() {
+  const p = usePoseWear((s) => s.create);
+  const open = () => import("../components/PoseWear").then(({ openPoseWear }) => openPoseWear("create", "depths"));
+  if (!p) return <button type="button" onClick={open} title="Pick a pose from PoseWear — realistic pictures copy its body position exactly (Krea 2 depth control)"
+    className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name="user" size={13} className="text-muted" />Depth pose</button>;
+  return (
+    <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 pl-1 pr-2 text-[12.5px]" title={`${p.title} — realistic pictures copy this pose`}>
+      <button type="button" onClick={open} className="h-6 w-5 overflow-hidden"><img src={p.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" /></button>
+      <span className="max-w-[140px] truncate">{p.title}</span>
+      <button aria-label="Stop using this pose" className="text-muted hover:text-ink" onClick={() => usePoseWear.getState().set({ create: null })}>×</button>
+    </span>);
 }

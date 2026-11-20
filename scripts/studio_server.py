@@ -3596,7 +3596,7 @@ TEMPLATES = {
     "sort": "CHARACTER: {character}\nSETS SO FAR: {existing}\n\nPICTURES:\n{pictures}",
     "deep": "TASK:\n{task}\n\nWHO SHE IS:\n{character}\n\nWRITTEN SO FAR:\n{draft}",
     "name": "TAKEN: {taken}\n\nCHARACTERS:\n{characters}",
-    "cosplay": "CHARACTER: {character}\nSERIES: {series}\nCOSPLAYER: {cosplayer}\nLORA TRIGGER WORDS: {triggers}\n\nREFERENCE NOTES:\n{notes}\n\nTHEIR TASTE:\n{taste}",
+    "cosplay": "CHARACTER: {character}\nSERIES: {series}\nCOSPLAYER: {cosplayer}\nLORA TRIGGER WORDS: {triggers}\n\nREFERENCE NOTES:\n{notes}\n\nHOW THIS CHARACTER'S LORA IS PROMPTED (its creator's and users' Krea 2 posts — costume and trigger wording only):\n{posts}\n\nSHOTS (write one prompt per shot, in this order — each its own pose, camera angle and setting):\n{shots}\n\nTHEIR TASTE (wording style only):\n{taste}",
     "taste": "LIKED:\n{liked}\n\nDISLIKED:\n{disliked}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }

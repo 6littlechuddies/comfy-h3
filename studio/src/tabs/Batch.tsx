@@ -21,6 +21,7 @@ import { PhotoSet } from "../components/PhotoSet";
 import { RecipePanel } from "../components/MyRecipes";
 import "../lib/faceDetail";
 import { CosplayList, CosplayOptions } from "../components/CosplayPanel";
+import { usePoseWear } from "../lib/posewear";
 
 export default function BatchTab() {
   const b = useBatch();
@@ -29,9 +30,11 @@ export default function BatchTab() {
   const jobs = useJobs(useShallow((s) => s.jobs.filter((j) => j.tab === "batch")));
   const file = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"" | "write" | "queue">("");
+  const [compact, setCompactS] = useState(() => { try { return localStorage.getItem("h3.batch.compact") === "1"; } catch { return false; } });
+  const setCompact = (v: boolean) => { setCompactS(v); try { localStorage.setItem("h3.batch.compact", v ? "1" : "0"); } catch { /* */ } };
   const video = b.target === "video";
   // Pictures: one way at a time, so the sidebar only shows what that way uses
-  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes" | "cosplay">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
+  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes" | "cosplay" | "poses">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
   const pickWay = (v: typeof way) => { setWay(v); try { localStorage.setItem("h3.batch.way", v); } catch { /* */ } if (v === "swap") useBatch.getState().set({ take: useBatch.getState().take === "face" || useBatch.getState().take === "person" ? useBatch.getState().take : "swap" }); };
 
   useHandoffInto("batch", (items) => items.forEach(({ media }) => useBatch.getState().add({ imitate: media })));
@@ -94,7 +97,7 @@ export default function BatchTab() {
     <Workspace needs={video ? "video" : "edit"} tab="batch" title="Batch" sub="many at once, runs while you're away" bar={bar}
       drawer={<>
         <Seg label="Make" value={b.target} onChange={(v) => b.set({ target: v })} options={[{ value: "video", label: "Videos" }, { value: "image", label: "Pictures" }]} />
-        {!video && <Seg label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }]} />}
+        {!video && <Seg wrap label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }, { value: "poses", label: "Poses" }]} />}
         {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
         {(video || way === "plan" || way === "cosplay") && <WriterChoice />}
         {!video && way === "cosplay" && <CosplayOptions />}
@@ -126,13 +129,18 @@ export default function BatchTab() {
         {!video && way === "recreate" && <RecreatePanel />}
         {!video && way === "swap" && <PhotoSet chars={chars} />}
         {!video && way === "recipes" && <RecipePanel />}
+        {!video && way === "poses" && <PosesPanel />}
         {!video && way === "plan" && <ContentPlan />}
         {!video && way === "plan" && <p className="text-[12px] leading-relaxed text-dim">Rows with just words are made in Create's style with its LoRAs.</p>}
         <details className="border-t border-line pt-3 text-[13px]"><summary className="cursor-pointer text-muted hover:text-ink">Phone alerts</summary><div className="mt-2"><PhoneAlerts /></div></details>
       </>}>
       <div className="flex flex-col gap-2.5 pt-1">
         {!video && way === "cosplay" && <CosplayList />}
-        {b.rows.map((r, i) => (!video && way === "recreate" && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : <RowCard key={r.id} r={r} n={i} video={video} />))}
+        <ChangeAll />
+        {b.rows.length > 3 && <div className="flex items-center gap-2 text-[12px] text-muted">
+          <button onClick={() => setCompact(!compact)} className="press flex items-center gap-1 hover:text-ink"><Icon name="chev" size={13} className={cx("transition-transform", compact && "-rotate-90")} />{compact ? "Show rows in full" : "Fold rows to one line each"}</button>
+          <span className="text-dim">{b.rows.length} rows</span></div>}
+        {b.rows.map((r, i) => (!video && way === "recreate" && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : compact ? <RowLine key={r.id} r={r} n={i} /> : <RowCard key={r.id} r={r} n={i} video={video} />))}
         {!video && way === "recreate" && !b.rows.some((r) => r.civit || r.imitate || r.idea.trim() || r.prompt.trim()) && (
           <button onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }} className="hatch flex h-28 flex-col items-center justify-center gap-1 border border-dashed border-line text-[13.5px] text-muted hover:border-accent hover:text-ink">
             <span className="font-semibold text-ink">Pick CivitAI posts to recreate</span><span className="text-[12px]">Their words and LoRAs, made with your Create settings</span></button>)}
@@ -165,6 +173,7 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
         </button>
       ) : <Slot className="h-[150px]" value={r.imitate} onChange={(m) => update(r.id, { imitate: m, prompt: m === r.imitate ? r.prompt : "", status: "new" })} accept={["image", "video"]} label={video ? "Clip or picture to imitate" : "Picture to copy"} />}
       <div className="flex min-w-0 flex-col gap-2">
+        {r.control && <span className="text-[11.5px] text-muted" title="The body position is copied from this pose's depth (Krea 2 depth control)">Pose copied from its depth · strength {r.control.strength.toFixed(2)}{r.loras?.length ? ` · ${r.loras.length} LoRA${r.loras.length > 1 ? "s" : ""}` : ""}</span>}
         {r.civit && <span className="text-[11.5px] text-muted">Recreate <a href={r.civit.page} target="_blank" rel="noreferrer" className="underline hover:text-ink">post {r.civit.id}</a> · {recreateLine(r.civit)}</span>}
         {(r.charId || r.toSet || r.inspo) && <span className="text-[11.5px] text-muted">{r.charId ? useCharacters.getState().list.find((x) => x.id === r.charId)?.name ?? "?" : ""}{r.toSet ? ` → “${r.toSet.title}” ${r.toSet.tier} set` : ""}{r.faceFix ? " · face pass" : ""}{r.inspo ? " · from a saved scene" : ""}{r.expression ? ` · ${r.expression.split(",")[0]}` : ""}</span>}
         {!r.civit && <input value={r.idea} disabled={locked} onChange={(e) => update(r.id, { idea: e.target.value })}
@@ -181,7 +190,7 @@ function RowCard({ r, n, video }: { r: Row; n: number; video: boolean }) {
           {r.step && <span className="truncate text-accent">{r.step}</span>}
           {r.note && !r.error && <span className="truncate text-muted" title={r.note}>{r.note}</span>}
           {(r.error || (problem && r.status !== "queued")) && <span className="truncate text-muted">{r.error ?? problem}</span>}
-          {!!r.results?.length && <span className="ml-auto flex gap-1">{r.results.map((u, i) => <button key={u} onClick={() => openViewer(r.results!.map((x) => ({ url: x, kind: "image" as const, label: `Row ${n + 1}` })), i)} className="press h-12 w-9 overflow-hidden border border-line hover:border-accent"><img src={u} alt="" className="h-full w-full object-cover" /></button>)}</span>}
+          {!!r.results?.length && <span className="ml-auto flex gap-1">{r.results.map((u, i) => <button key={u} title={r.idea || `Row ${n + 1}`} onClick={() => openViewer(r.results!.map((x) => ({ url: x, kind: "image" as const, label: r.idea || `Row ${n + 1}` })), i)} className="press h-12 w-9 overflow-hidden border border-line hover:border-accent"><img src={u} alt="" className="h-full w-full object-cover" /></button>)}</span>}
           {jobs.length > 0 && <span className="ml-auto flex gap-1">{jobs.map((j) => <span key={j.id} title={`${j.label}: ${j.status}`} className={cx("h-1.5 w-6", j.status === "done" ? "bg-good" : j.status === "running" ? "stripes" : j.status === "error" ? "bg-bad" : "bg-raised2")} />)}</span>}
         </div>
       </div>
@@ -320,4 +329,88 @@ function RecreateRow({ r, locked }: { r: Row; locked: boolean }) {
             className="inset min-h-[92px] resize-y border px-2.5 py-2 font-mono text-[12px] leading-relaxed focus:border-accent focus:outline-none disabled:opacity-70" />{rw.menu}</>}
     </div>
   );
+}
+
+/** one line per row (Fold rows): name, status, takes, remove — for long cosplay / pose batches */
+function RowLine({ r, n }: { r: Row; n: number }) {
+  const { update, remove } = useBatch();
+  const problem = rowProblem(r);
+  const st = r.status === "queued" ? "QUEUED" : r.status === "writing" ? "WRITING" : r.status === "error" ? "ERROR" : problem ? "NEEDS INPUT" : "READY";
+  return (
+    <div className="flex items-center gap-2 border border-line px-3 py-1.5 text-[12.5px]" title={r.prompt || r.idea}>
+      <span className="micro w-7 text-dim">#{String(n + 1).padStart(2, "0")}</span>
+      {r.imitate && <img src={r.imitate.url} alt="" className="h-7 w-5 object-cover" />}
+      <span className="min-w-0 flex-1 truncate">{r.idea || r.prompt || "(empty)"}</span>
+      {r.control && <span className="micro text-accent" title="Pose copied from its depth">POSE</span>}
+      <span className={cx("micro", st === "READY" ? "text-good" : st === "ERROR" ? "text-bad" : "text-dim")} title={r.error ?? problem}>{st}</span>
+      <DropSelect value={r.takes} disabled={r.status === "queued"} onChange={(e) => update(r.id, { takes: Number(e.target.value) })} className="inset h-7 border px-1 text-[12px]">
+        {[1, 2, 3, 4].map((k) => <option key={k} value={k}>×{k}</option>)}</DropSelect>
+      <button aria-label={`Remove row ${n + 1}`} onClick={() => remove(r.id)} className="text-muted hover:text-bad"><Icon name="x" size={14} /></button>
+    </div>);
+}
+
+/** one instruction for every waiting row: the writer (DeepSeek) works it into each prompt, side by side */
+function ChangeAll() {
+  const rows = useBatch(useShallow((s) => s.rows.filter((r) => r.status !== "queued" && r.status !== "writing" && r.prompt.trim())));
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState("");
+  const toast = useJobs((s) => s.toast);
+  if (rows.length < 2) return null;
+  const go = async () => {
+    const change = text.trim();
+    if (!change) return;
+    const ids = rows.map((r) => r.id);
+    const { runWriter } = await import("../lib/writer");
+    let done = 0, bad = 0, next = 0;
+    setBusy(`0/${ids.length}`);
+    const one = async (id: string) => {
+      const r = useBatch.getState().rows.find((x) => x.id === id);
+      if (!r) return;
+      useBatch.getState().update(id, { status: "writing" });
+      try {
+        const out = (await runWriter("remix", { prompt: r.prompt, change }, { tab: "batch", label: `Changing row ${useBatch.getState().rows.indexOf(r) + 1}`, big: true })).trim();
+        useBatch.getState().update(id, { prompt: out || r.prompt, status: "ready" });
+      } catch (e) { bad++; useBatch.getState().update(id, { status: "ready", note: `Not changed: ${(e as Error).message.slice(0, 80)}` }); }
+      setBusy(`${++done}/${ids.length}`);
+    };
+    const { writerOutside } = await import("../lib/outside");
+    await Promise.all(Array.from({ length: Math.min(writerOutside() ? 1 : 4, ids.length) }, async () => { while (next < ids.length) await one(ids[next++]); }));
+    setBusy("");
+    toast(bad ? `Changed ${done - bad} of ${ids.length} prompts — ${bad} kept as they were` : `Changed all ${ids.length} prompts`, bad ? "info" : "good");
+    if (!bad) setText("");
+  };
+  return (
+    <div className="flex items-center gap-2 border border-line bg-raised/40 px-3 py-2">
+      <Icon name="script" size={14} className="shrink-0 text-muted" />
+      <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) void go(); }} disabled={!!busy}
+        placeholder={`Change all ${rows.length} prompts at once — e.g. "make it night with neon light", "add a black choker", "less smiling"`}
+        className="h-8 min-w-0 flex-1 bg-transparent text-[13px] placeholder:text-dim focus:outline-none" />
+      <Btn small onClick={go} disabled={!text.trim() || !!busy} why={busy ? "Working…" : "Type a change"}>{busy ? `Changing ${busy}` : `Change ${rows.length}`}</Btn>
+    </div>);
+}
+
+/** Poses: PoseWear picks → one picture per pose (× each picked outfit), the pose copied through its depth */
+function PosesPanel() {
+  const pw = usePoseWear();
+  const poses = pw.picks.filter((p) => p.lib === "poses" || p.lib === "depths");
+  const wear = pw.picks.filter((p) => p.lib === "costumes" || p.lib === "anime");
+  const face = pw.picks.find((p) => p.lib === "portraits");
+  const toast = useJobs((s) => s.toast);
+  const [busy, setBusy] = useState("");
+  const add = async () => {
+    try { setBusy("…"); const { posesToBatch } = await import("../lib/posewear"); const n = await posesToBatch((m) => setBusy(m)); toast(`Added ${n} row${n === 1 ? "" : "s"} — check them, then Queue`, "good"); }
+    catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(""); }
+  };
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-raised/40 p-3 text-[12.5px]">
+      <b className="font-medium">Poses from PoseWear</b>
+      <span className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">Tick depth poses, poses and outfits in the browser. Each pose becomes a picture (× each outfit): Krea 2 copies its body position from its depth, and its words go in the prompt.</span>
+      <Btn onClick={() => import("../components/PoseWear").then(({ openPoseWear }) => openPoseWear("many", "depths"))}><Icon name="user" size={14} /> Browse poses &amp; outfits</Btn>
+      <span className="text-muted">{poses.length} pose{poses.length === 1 ? "" : "s"} · {wear.length} outfit{wear.length === 1 ? "" : "s"}{face ? " · a face" : ""} picked</span>
+      {pw.picks.length > 0 && <div className="flex flex-wrap gap-1">{pw.picks.map((p) => <button key={p.key} title={`${p.title} — click to remove`} onClick={() => pw.toggle(p)} className="press h-12 w-9 overflow-hidden border border-line hover:border-bad"><img src={p.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" /></button>)}</div>}
+      <TextIn value={pw.who} onChange={(v) => pw.set({ who: v })} placeholder="Who's in them, e.g. an adult woman in her late twenties with auburn hair (blank: the face pick, or a woman in her twenties)" />
+      <label className="flex items-center gap-2 text-muted">Pose strength<input type="range" min={0.4} max={1} step={0.05} value={pw.strength} onChange={(e) => pw.set({ strength: Number(e.target.value) })} className="flex-1" /><span className="w-8 font-mono">{pw.strength.toFixed(2)}</span></label>
+      <Btn onClick={add} disabled={!poses.length || !!busy} why={busy || "Pick poses first"}><Icon name="plus" size={14} /> Add {poses.length * Math.max(1, wear.length) || ""} to batch</Btn>
+      <span className="text-[11.5px] leading-relaxed text-dim">Realistic (Krea 2) pictures only. With a Star picked, her picture is made from her sheet and the pose goes in as words — the depth copy works on pictures made from words.</span>
+    </div>);
 }

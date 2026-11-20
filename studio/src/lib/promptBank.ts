@@ -21,7 +21,9 @@ export interface BankEntry {
   score: number;
   sig: Record<string, number>; // signal → times
 }
-interface Taste { notes: string; at: number; basis: number }
+interface Taste { notes: string; at: number; basis: number; v?: number }
+/** bump when the notes' instructions change, so old notes are written again */
+const TASTE_V = 2;
 interface Bank { entries: Record<string, BankEntry>; taste: Taste | null; signals: number }
 
 /** how much each thing you do says about a picture (and so about its prompt) */
@@ -114,15 +116,15 @@ export async function tasteNotes(): Promise<string> {
   const st = useBank.getState();
   const liked = examples(12);
   if (liked.length < 6) return st.taste?.notes ?? "";
-  if (st.taste && st.signals - st.taste.basis < 8) return st.taste.notes;
+  if (st.taste && st.taste.v === TASTE_V && st.signals - st.taste.basis < 8) return st.taste.notes;
   try {
     const { runWriter } = await import("./writer");
     const fmt = (e: BankEntry) => `- (${e.score.toFixed(1)}; ${Object.keys(e.sig).join(", ")}) ${e.prompt.slice(0, 900)}`;
     const raw = await runWriter("taste", { liked: liked.map(fmt).join("\n"), disliked: disliked(8).map(fmt).join("\n") || "(none yet)" }, { tab: "batch", label: "Learning what you like", big: true });
     const notes = raw.replace(/^```\w*|```$/g, "").trim().slice(0, 2000);
-    if (notes) { useBank.setState({ taste: { notes, at: Date.now(), basis: st.signals } }); persist(); return notes; }
+    if (notes) { useBank.setState({ taste: { notes, at: Date.now(), basis: st.signals, v: TASTE_V } }); persist(); return notes; }
   } catch { /* keep the old notes */ }
-  return st.taste?.notes ?? "";
+  return st.taste?.v === TASTE_V ? st.taste.notes : "";
 }
 
 /** everything the writer gets about your taste, as one block */
@@ -130,8 +132,8 @@ export async function tasteBlock(who?: string | null): Promise<string> {
   const notes = await tasteNotes();
   const ex = examples(3, who);
   if (!notes && !ex.length) return "(nothing learned yet)";
-  return [notes && `WHAT THEY KEEP (learned from what they starred, used and deleted):\n${notes}`,
-    ex.length && `PROMPTS OF PICTURES THEY KEPT AND BUILT ON (follow their structure, length, camera, light and realism wording; never copy their person, outfit or setting):\n${ex.map((e, i) => `${i + 1}. ${e.prompt.slice(0, 1200)}`).join("\n")}`].filter(Boolean).join("\n\n");
+  return [notes && `HOW THEY LIKE PROMPTS WRITTEN (learned from what they starred, used and deleted — wording only, never a reason to repeat a pose or background):\n${notes}`,
+    ex.length && `PROMPTS OF PICTURES THEY KEPT AND BUILT ON (follow only how they are WORDED — structure, length, how camera, light and realism are written; never copy their person, outfit, pose, camera angle, background or setting):\n${ex.map((e, i) => `${i + 1}. ${e.prompt.slice(0, 1200)}`).join("\n")}`].filter(Boolean).join("\n\n");
 }
 
 // deleting a result is a signal too: watch outputs disappear from the jobs list (the job's own record says how it was made)

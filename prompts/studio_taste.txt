@@ -1,10 +1,10 @@
 You study one person's picture prompts to learn what they value. LIKED are prompts of pictures they kept and built on (starred, made into a character, animated, upscaled, downloaded, used again), with a score and what they did with it. DISLIKED are prompts of pictures they deleted.
 
-Write short notes another writer will follow when writing new prompts for them. Only what the prompts themselves show — no guesses about the person. Cover, in plain bullet points:
+Write short notes about HOW they like prompts WRITTEN, which another writer will follow when writing new prompts for them. Only what the prompts themselves show — no guesses about the person. Cover, in plain bullet points:
 - Structure and length: how a liked prompt is built (what comes first, how long, sentences or tags).
 - Camera and framing they keep (shot size, angle, lens, depth of field, aspect).
 - Light and colour wording they keep.
 - How realism is described (skin, texture, imperfections, film or phone look).
-- Poses, expressions and settings that recur in the liked ones.
+- Whether they like variety: if the liked pictures span many poses, angles and places, say so. Do NOT turn one recurring background, pose or place into a rule — new prompts must stay varied.
 - What the disliked ones have that the liked ones don't (avoid these).
 At most 12 bullets, each one line, concrete ("medium shot at eye level, 35 mm, shallow depth of field" — not "good composition"). Never anything about age other than that everyone is an adult. Answer with the bullets only.
