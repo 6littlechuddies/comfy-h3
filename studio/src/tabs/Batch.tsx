@@ -144,7 +144,7 @@ export default function BatchTab() {
         {b.rows.length > 3 && <div className="flex items-center gap-2 text-[12px] text-muted">
           <button onClick={() => setCompact(!compact)} className="press flex items-center gap-1 hover:text-ink"><Icon name="chev" size={13} className={cx("transition-transform", compact && "-rotate-90")} />{compact ? "Show rows in full" : "Fold rows to one line each"}</button>
           <span className="text-dim">{b.rows.length} rows</span></div>}
-        {b.rows.map((r, i) => (!video && way === "recreate" && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : compact ? <RowLine key={r.id} r={r} n={i} /> : <RowCard key={r.id} r={r} n={i} video={video} />))}
+        {b.rows.map((r, i) => (!video && (way === "recreate" || way === "cosplay" || way === "poses") && !r.civit && !r.imitate && !r.idea.trim() && !r.prompt.trim() ? null : compact ? <RowLine key={r.id} r={r} n={i} /> : <RowCard key={r.id} r={r} n={i} video={video} />))}
         {!video && way === "recreate" && !b.rows.some((r) => r.civit || r.imitate || r.idea.trim() || r.prompt.trim()) && (
           <button onClick={async () => { const { openRecreatePicker } = await import("../components/ImageImport"); openRecreatePicker(); }} className="hatch flex h-28 flex-col items-center justify-center gap-1 border border-dashed border-line text-[13.5px] text-muted hover:border-accent hover:text-ink">
             <span className="font-semibold text-ink">Pick CivitAI posts to recreate</span><span className="text-[12px]">Their words and LoRAs, made with your Create settings</span></button>)}
