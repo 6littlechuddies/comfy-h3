@@ -83,6 +83,8 @@ export interface Character {
   frontYours?: boolean;
   /** what goes to your site (⋯ → Your site): profile text, chat persona, photo sets */
   site?: SiteInfo;
+  /** the site's Live Stream / Live Action clips: her still, idle loops and actions (see lib/live.ts) */
+  live?: import("./live").LiveState;
   /** Characters → Build a training set: varied pictures of them made from their picture, each checked against it */
   trainset?: TrainSet;
   /** identity card: which picture shows their face best (face pass, face checks), and whether Edit uses them by itself */

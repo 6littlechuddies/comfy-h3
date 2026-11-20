@@ -704,6 +704,8 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   prefix: string;
   /** split across this many cards with Raylight (sequence parallel); 1 or unset = one card, as always */
   ray?: number;
+  /** straight out of the model: no in-between frames, no upscale (Live pack clips are re-encoded to the site's size) */
+  plain?: boolean;
 }
 
 // Mouths: by default nobody in a video talks, mouths words, sings or lip-syncs. H3 follows what a prompt says is there far
@@ -806,11 +808,11 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   const audio = g.add("VAEDecodeAudio", { samples: o(out), vae: o(avae) });
   // smoother: RIFE puts a frame between every two (24 → 48 fps, same length and sound), as most community H3 workflows do
   const it = interpOn();
-  const smooth = it.on ? g.add("FrameInterpolate", { interp_model: o(g.add("FrameInterpolationModelLoader", { model_name: M.rife })), images: o(frames), [it.widget]: 2 }) : null;
+  const smooth = it.on && !p.plain ? g.add("FrameInterpolate", { interp_model: o(g.add("FrameInterpolationModelLoader", { model_name: M.rife })), images: o(frames), [it.widget]: 2 }) : null;
   // RTX Video Super Resolution: the finished frames enlarged to about 1080p on the long side (fast — NVIDIA's video upscaler, not
   // another diffusion pass), so a quick 0.5 MP video comes out sharp enough to post. "HIGHBITRATE" = for clean sources like these
   const upBy = Math.round(Math.min(4, 1920 / Math.max(p.width, p.height)) * 100) / 100;
-  const up = rtxOn() && upBy >= 1.1 ? g.add("RTXVideoSuperResolution", { images: o(smooth ?? frames), resize_type: "scale by multiplier", "resize_type.scale": upBy,
+  const up = rtxOn() && upBy >= 1.1 && !p.plain ? g.add("RTXVideoSuperResolution", { images: o(smooth ?? frames), resize_type: "scale by multiplier", "resize_type.scale": upBy,
     quality: "HIGHBITRATE_ULTRA", strength: 1, image_encoding: "8-bit RGB" }) : null;
   const video = g.add("CreateVideo", { images: o(up ?? smooth ?? frames), fps: smooth ? 48 : 24, audio: o(audio) });
   g.add("SaveVideo", { video: o(video), filename_prefix: p.prefix, format: "auto", "format.codec": "auto" }, "result");

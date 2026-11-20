@@ -601,6 +601,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
           <Btn className="ml-auto" onClick={() => write(false)} disabled={writing || !!step} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing || step ? "Writing…" : "Fill the blanks"}</Btn>
           {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing || !!step} title="Rewrite every field">Rewrite all</Btn>}
+          <Btn onClick={() => import("./LivePack").then((m) => m.openLivePack(c.id))} title="Her Live Stream and Live Action clips: a still, idle loops and actions (tips / call buttons), made with H3 and checked join by join"><Icon name="play" size={14} /> Live pack</Btn>
           {!!site.persona && <Btn onClick={deep} disabled={writing || !!step} title="Her life, how she reacts in 15 situations, sample texts in her style, then an editor pass — from her current profile, about 2–3 minutes"><Icon name="sparkle" size={14} /> {site.deepAt ? "Redo deep" : "Make it deep"}</Btn>}
         </div>
         {step && <p className="border border-accent/40 bg-accent/5 px-3 py-2 text-[12.5px]"><span className="pulse text-accent">●</span> {step}</p>}

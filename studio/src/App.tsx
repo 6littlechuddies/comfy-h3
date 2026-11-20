@@ -31,6 +31,7 @@ import { coverOf, importCharacters, useCharacters } from "./lib/characters";
 import { viewUrl } from "./lib/api";
 import { ImportCard } from "./components/ImportCard";
 import { CatalogHost, openCatalog } from "./components/Catalog";
+import { LivePackHost } from "./components/LivePack";
 import { StorageHost, openStorage } from "./components/Storage";
 import { SpeedHost, openSpeed } from "./components/SpeedPanel";
 import { setHistoryProject } from "./lib/promptHistory";
@@ -215,6 +216,7 @@ export default function App() {
       <RecipeEditorHost />
       <ImportCard />
       <CatalogHost />
+      <LivePackHost />
       <StorageHost />
       <SpeedHost />
       <SelfCheck />

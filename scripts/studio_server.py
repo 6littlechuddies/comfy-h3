@@ -4076,6 +4076,184 @@ async def last_frame(req):
     return web.json_response({"name": name, "kind": "image"})
 
 
+# ------------------------------------------------------------------ Live pack (the site's Live Stream / Live Action)
+# The site plays a character's clips back to back as one continuous shot: every clip starts and/or ends on one still (the
+# anchor), action segments continue from the last frame of the one before, and a short return clip goes back to the still.
+# Here: the anchor still (720×1280), each clip re-encoded exactly as the site asks (H.264 High, 24 fps constant, 720×1280,
+# silent) with its joins eased onto the exact frame it has to meet (a few frames, so no jump), how big each join's jump was
+# before that, a reel of the whole pack to check by eye, and the upload + PUT /characters/{id}/live.
+LIVE_W, LIVE_H, LIVE_FPS, LIVE_EASE = 720, 1280, 24, 6
+LIVE_DIR = os.path.join(WORK, "live")
+LIVE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+
+
+def _live_dir(cid: str) -> str:
+    if not LIVE_ID.match(cid or ""): raise web.HTTPBadRequest(text="bad character id")
+    d = os.path.join(LIVE_DIR, cid); os.makedirs(d, exist_ok=True); return d
+
+
+def _live_fit(im):
+    """a picture cut to 9:16 from its middle and sized to 720×1280 (what every clip is)"""
+    from PIL import Image
+    im = im.convert("RGB")
+    w, h = im.size; r = LIVE_W / LIVE_H
+    if w / h > r: nw = round(h * r); im = im.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    else: nh = round(w / r); im = im.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
+    return im.resize((LIVE_W, LIVE_H), Image.LANCZOS)
+
+
+async def live_anchor(req):
+    """{cid, ref} → the still every clip starts or ends on: 720×1280 PNG, in the input folder (videos start from it)"""
+    from PIL import Image
+    d = await req.json()
+    cid = str(d.get("cid") or ""); folder_ = _live_dir(cid)
+    src = _file_of(d["ref"]) if isinstance(d.get("ref"), dict) else safe_join(INPUT, str(d.get("input") or ""))
+    if not os.path.isfile(src): raise web.HTTPNotFound(text="that picture isn't on this rental")
+    with Image.open(src) as im: still = _live_fit(im)
+    name = f"live_{cid}_anchor_{int(time.time())}.png"
+    still.save(os.path.join(INPUT, name)); still.save(os.path.join(folder_, "anchor.png"))
+    return web.json_response({"input": name, "width": LIVE_W, "height": LIVE_H})
+
+
+def _live_target(name: str):
+    """a join frame (an input picture: the anchor, or the last frame of the clip before) as 720×1280 RGB array"""
+    from PIL import Image
+    import numpy as np
+    p = safe_join(INPUT, name)
+    if not os.path.isfile(p): raise RuntimeError(f"join picture {name} isn't on this rental")
+    with Image.open(p) as im: return np.asarray(_live_fit(im), dtype=np.float32)
+
+
+def _live_encode(src: str, dst: str, start: str | None, end: str | None, last_name: str) -> dict:
+    """decode → 720×1280 at 24 fps → ease the first / last frames onto the frames they must meet → H.264 High, silent.
+    Returns how far the first / last frame was from its join before easing (0 = identical, 255 = opposite), in 0-100."""
+    import numpy as np, subprocess, collections
+    from PIL import Image
+    fb = LIVE_W * LIVE_H * 3
+    vf = f"fps={LIVE_FPS},scale={LIVE_W}:{LIVE_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={LIVE_W}:{LIVE_H}"
+    dec = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", src, "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    enc = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{LIVE_W}x{LIVE_H}", "-r", str(LIVE_FPS), "-i", "-",
+                            "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(LIVE_FPS), "-fps_mode", "cfr", "-g", "48", "-crf", "17", "-preset", "medium",
+                            "-an", "-movflags", "+faststart", dst], stdin=subprocess.PIPE)
+    A = _live_target(start) if start else None
+    B = _live_target(end) if end else None
+    ease = lambda i: 0.5 - 0.5 * np.cos(np.pi * min(1.0, i / LIVE_EASE))  # 0 at the join → 1 after LIVE_EASE frames
+    tail = collections.deque(maxlen=LIVE_EASE + 1)
+    n, d0, d1, last = 0, None, None, None
+    try:
+        while True:
+            buf = dec.stdout.read(fb)
+            if len(buf) < fb: break
+            f = np.frombuffer(buf, dtype=np.uint8).reshape(LIVE_H, LIVE_W, 3).astype(np.float32)
+            if n == 0 and A is not None: d0 = float(np.abs(f - A).mean()) / 2.55
+            if A is not None and n <= LIVE_EASE: f = A + (f - A) * ease(n)
+            n += 1
+            if B is None: enc.stdin.write(f.clip(0, 255).astype(np.uint8).tobytes()); last = f
+            else:
+                tail.append(f)
+                if len(tail) == tail.maxlen: enc.stdin.write(tail.popleft().clip(0, 255).astype(np.uint8).tobytes())
+        if B is not None and tail:
+            k = len(tail)
+            d1 = float(np.abs(tail[-1] - B).mean()) / 2.55
+            for j, f in enumerate(tail):
+                f = B + (f - B) * ease(k - 1 - j)  # the very last frame is B itself
+                enc.stdin.write(f.clip(0, 255).astype(np.uint8).tobytes()); last = f
+        enc.stdin.close(); enc.wait(); dec.wait()
+    except BrokenPipeError: pass
+    if n == 0 or enc.returncode not in (0, None): raise RuntimeError("couldn't re-encode that clip (no frames, or ffmpeg failed)")
+    # its own last frame, for the next segment / the return clip to start from
+    Image.fromarray(last.clip(0, 255).astype(np.uint8)).save(os.path.join(INPUT, last_name))
+    return {"frames": n, "seconds": round(n / LIVE_FPS, 2), "d_start": None if d0 is None else round(d0, 1), "d_end": None if d1 is None else round(d1, 1),
+            "last": last_name, "size": os.path.getsize(dst)}
+
+
+async def live_encode(req):
+    """{cid, key, src: output ref, start?: input picture, end?: input picture} → the clip as the site wants it"""
+    d = await req.json()
+    cid, key = str(d.get("cid") or ""), str(d.get("key") or "")
+    if not LIVE_ID.match(key): raise web.HTTPBadRequest(text="bad clip key")
+    src = _file_of(d["src"])
+    if not os.path.isfile(src): raise web.HTTPNotFound(text="that video isn't on this rental")
+    dst = os.path.join(_live_dir(cid), f"{key}.mp4")
+    try: info = await asyncio.to_thread(_live_encode, src, dst, d.get("start") or None, d.get("end") or None, f"live_{cid}_{key}_last.png")
+    except RuntimeError as e: return web.json_response({"error": str(e)}, status=400)
+    return web.json_response(info)
+
+
+async def live_file(req):
+    cid, key = req.query.get("cid", ""), req.query.get("key", "")
+    if not LIVE_ID.match(key) and key not in ("reel",): raise web.HTTPBadRequest()
+    p = os.path.join(_live_dir(cid), "anchor.png" if key == "anchor" else f"{key}.mp4")
+    if not os.path.isfile(p): raise web.HTTPNotFound()
+    return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+
+async def live_reel(req):
+    """{cid, keys: [...]} → every clip one after another (the order the site would play them), to watch the joins by eye"""
+    d = await req.json()
+    folder_ = _live_dir(str(d.get("cid") or ""))
+    files = [os.path.join(folder_, f"{k}.mp4") for k in d.get("keys") or [] if LIVE_ID.match(str(k))]
+    files = [f for f in files if os.path.isfile(f)]
+    if not files: return web.json_response({"error": "no clips made yet"}, status=400)
+    lst = os.path.join(folder_, "reel.txt")
+    with open(lst, "w") as f: f.write("".join(f"file '{x}'\n" for x in files))
+    out = os.path.join(folder_, "reel.mp4")
+    p = await asyncio.create_subprocess_exec("ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", "-movflags", "+faststart", out,
+                                             stderr=asyncio.subprocess.PIPE)
+    _, err = await p.communicate()
+    if p.returncode != 0: return web.json_response({"error": err.decode(errors="ignore")[-300:]}, status=400)
+    return web.json_response({"ok": True, "clips": len(files)})
+
+
+async def live_send(req):
+    """{cid, pack} → uploads the still and every clip (ones already sent unchanged are reused), then PUT /characters/{id}/live.
+    pack: {framing, idle: [{key, kind, rating?}], actions: [{key, title, segments: [clip keys], return: clip key, rating,
+    live_action?, live_stream?, reaction_hint, thumb?}]}"""
+    d = await req.json()
+    cid = str(d.get("cid") or ""); folder_ = _live_dir(cid); pack = d.get("pack") or {}
+    sent_file = os.path.join(folder_, "media.json")
+    try: sent = json.load(open(sent_file))
+    except (OSError, ValueError): sent = {}
+    need = ["anchor"] + [x["key"] for x in pack.get("idle") or []] + [k for a in pack.get("actions") or [] for k in [*(a.get("segments") or []), a.get("return")] if k]
+    paths = {k: os.path.join(folder_, "anchor.png" if k == "anchor" else f"{k}.mp4") for k in need}
+    missing = [k for k, pth in paths.items() if not os.path.isfile(pth)]
+    if missing: return web.json_response({"error": f"not made yet: {', '.join(missing)}"}, status=400)
+    ids: dict = {}; sem = asyncio.Semaphore(SITE_UPLOAD_PARALLEL)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
+        async def one(k: str, pth: str):
+            st = os.stat(pth); sig = f"{st.st_size}:{int(st.st_mtime)}"
+            if sent.get(k, {}).get("sig") == sig: ids[k] = sent[k]["id"]; return
+            async with sem:
+                body, ct, name = await asyncio.to_thread(_site_ready_file, pth)
+                mid, _ = await _site_send_one(s, body, ct, f"{cid}_{name}")
+            ids[k] = mid; sent[k] = {"id": mid, "sig": sig}
+        try: await asyncio.gather(*(one(k, pth) for k, pth in paths.items()))
+        except RuntimeError as e:
+            json.dump(sent, open(sent_file, "w")); return web.json_response({"error": str(e)}, status=502)
+        json.dump(sent, open(sent_file, "w"))
+        body = {"version": 1, "anchor": {"media_id": ids["anchor"], "framing": pack.get("framing") or "waist_up"},
+                "idle": [{"media_id": ids[x["key"]], "kind": x.get("kind") or "idle", **({"rating": x["rating"]} if x.get("rating") else {})} for x in pack.get("idle") or []],
+                "actions": []}
+        for a in pack.get("actions") or []:
+            act = {"key": a["key"], "title": str(a.get("title") or a["key"])[:40], "segments": [ids[k] for k in a.get("segments") or []], "return": ids[a["return"]],
+                   "rating": a.get("rating") or "sfw", "reaction_hint": str(a.get("reaction_hint") or "")[:200]}
+            if a.get("thumb") and a["thumb"] in ids: act["thumb"] = ids[a["thumb"]]
+            if a.get("live_action"): act["live_action"] = a["live_action"]
+            if a.get("live_stream"): act["live_stream"] = a["live_stream"]
+            body["actions"].append(act)
+        code, res = await _site_call(s, "PUT", f"/characters/{quote('h3-' + cid)}/live", _plain(body))
+    return web.json_response({"status": code, "body": res, "problems": _site_err(res) if code >= 400 else "", "sent": body}, status=200)
+
+
+async def live_site(req):
+    """what the site has for her live pack (and its own check of every clip)"""
+    cid = req.query.get("cid", "")
+    if not LIVE_ID.match(cid): raise web.HTTPBadRequest()
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
+        code, res = await _site_call(s, "GET", f"/characters/{quote('h3-' + cid)}/live")
+    return web.json_response({"status": code, "body": res})
+
+
 # ------------------------------------------------------------------ reference sheets: one picture -> separate views
 def split_sheet(path: str, n: int) -> list[tuple[int, int, int, int]]:
     """find the n figures standing on a plain background: columns that differ from the background are 'figure',
@@ -6340,6 +6518,8 @@ def main():
         web.get("/studio-api/packs", packs_list), web.post("/studio-api/packs", packs_add), web.put("/studio-api/packs/active", packs_activate),
         web.patch("/studio-api/packs/{id}", packs_update), web.delete("/studio-api/packs/{id}", packs_delete), web.get("/studio-api/packs/{id}/text", packs_text),
         web.post("/studio-api/last-frame", last_frame),
+        web.post("/studio-api/live/anchor", live_anchor), web.post("/studio-api/live/encode", live_encode), web.get("/studio-api/live/file", live_file),
+        web.post("/studio-api/live/reel", live_reel), web.post("/studio-api/live/send", live_send), web.get("/studio-api/live/site", live_site),
         web.post("/studio-api/media-meta", media_meta), web.post("/studio-api/workflow/save", workflow_save),
         web.post("/studio-api/downloads/later", downloads_later),
         web.post("/studio-api/downloads/preset", downloads_preset),
