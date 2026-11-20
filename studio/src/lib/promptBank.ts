@@ -40,7 +40,26 @@ let loading: Promise<void> | null = null;
 export function loadBank(): Promise<void> {
   return (loading ??= loadState<Bank>("promptbank").then((b) => { useBank.setState({ ...(b ?? { entries: {}, taste: null, signals: 0 }), loaded: true }); }).catch(() => { useBank.setState({ loaded: true }); }));
 }
-if (typeof window !== "undefined") void loadBank();
+if (typeof window !== "undefined") void loadBank().then(() => setTimeout(backfill, 8000));
+
+/** the first time: learn from what you already starred and made characters from (as far as this browser still has
+ *  their jobs — How it was made), so it doesn't start from nothing */
+async function backfill() {
+  if (useBank.getState().signals > 0 || Object.keys(useBank.getState().entries).length) return;
+  try {
+    const { loadState: ls } = await import("./api");
+    const favs = (await ls<Record<string, true>>("favorites")) ?? {};
+    for (const k of Object.keys(favs)) {
+      const m = /^(output)\/(.*)\/([^/]+)$/.exec(k);
+      if (m) record(`${m[2]}/${m[3]}`, madeBy({ type: "output", subfolder: m[2], filename: m[3] })?.j, "star");
+    }
+    const origins: Record<string, string> = JSON.parse(localStorage.getItem("h3.origins") || "{}");
+    for (const v of new Set(Object.values(origins))) {
+      const i = v.lastIndexOf("/");
+      record(v, madeBy({ type: "output", subfolder: v.slice(0, i), filename: v.slice(i + 1) })?.j, "character");
+    }
+  } catch { /* nothing to learn from yet */ }
+}
 let timer: ReturnType<typeof setTimeout> | undefined;
 function persist() {
   clearTimeout(timer);
