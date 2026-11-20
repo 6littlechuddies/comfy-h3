@@ -168,6 +168,7 @@ export interface CivitModel { model_id: number; name: string; creator: string; d
 export interface CivitImage {
   id: number; url: string; thumb: string; explicit: boolean; video: boolean; width?: number; height?: number;
   prompt: string; negative: string; sampler: string; scheduler: string; steps?: number; cfg?: number; seed?: number; size: string; weight: number | null; reactions: number;
+  /** the other LoRAs and the checkpoint it was made with ("Name @0.6", "checkpoint: Name") */ uses?: string[];
   workflow?: boolean;
 }
 /** CivitAI is often busy for a moment (503 / 429 / 502): wait and ask again (up to 3 times) before showing an error */

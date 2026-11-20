@@ -1309,7 +1309,27 @@ async def _gen_meta(iid: int) -> dict:
     gd = gd.get("json", gd) if isinstance(gd, dict) else {}
     meta = gd.get("meta") if isinstance(gd, dict) and isinstance(gd.get("meta"), dict) else {}
     if isinstance(meta.get("meta"), dict): meta = {**meta["meta"], **{k: v for k, v in meta.items() if k != "meta"}}
+    # the models and LoRAs the picture was made with (CivitAI's own list), for "what people pair it with"
+    if isinstance(gd, dict) and isinstance(gd.get("resources"), list): meta = {**meta, "_resources": gd["resources"]}
     return meta or {}
+
+
+def _uses(meta: dict, vid: int) -> list[str]:
+    """the other LoRAs and the checkpoint a post was made with: ["Some LoRA @0.6", "checkpoint: Krea Muse"]"""
+    out: list[str] = []
+    for r in meta.get("_resources") or []:
+        if not isinstance(r, dict) or vid in (r.get("versionId"), r.get("modelVersionId")): continue
+        t = str(r.get("modelType") or r.get("type") or "").lower()
+        name = str(r.get("modelName") or r.get("name") or "").strip()
+        if not name: continue
+        w = r.get("strength")
+        if t in ("lora", "locon", "dora"): out.append(name + (" @" + str(w) if w is not None else ""))
+        elif t == "checkpoint": out.append("checkpoint: " + name)
+    for r in meta.get("resources") or []:
+        if isinstance(r, dict) and str(r.get("type", "")).lower() == "lora" and r.get("name"):
+            w = r.get("weight")
+            out.append(str(r["name"]) + (" @" + str(w) if w is not None else ""))
+    return list(dict.fromkeys(out))[:8]
 
 
 async def civitai_images(req):
@@ -1338,7 +1358,7 @@ async def civitai_images(req):
                     "prompt": prompt, "negative": meta.get("negativePrompt") or "", "sampler": meta.get("sampler") or "",
                     "scheduler": meta.get("scheduler") or meta.get("Schedule type") or "", "steps": meta.get("steps"), "cfg": meta.get("cfgScale"),
                     "workflow": bool(meta.get("comfy") or meta.get("workflow")),
-                    "seed": meta.get("seed"), "size": size, "weight": _weight(meta, vid, name), "reactions": sum((i.get("stats") or {}).get(k, 0) for k in ("likeCount", "heartCount", "laughCount", "cryCount"))})
+                    "seed": meta.get("seed"), "size": size, "weight": _weight(meta, vid, name), "uses": _uses(meta, vid), "reactions": sum((i.get("stats") or {}).get(k, 0) for k in ("likeCount", "heartCount", "laughCount", "cryCount"))})
     return web.json_response({"items": out, "next": (d.get("metadata") or {}).get("nextCursor")})
 
 

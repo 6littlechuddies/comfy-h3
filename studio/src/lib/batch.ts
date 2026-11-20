@@ -4,6 +4,7 @@
 // keeps running with this page closed, and your phone gets one alert when the whole batch is done.
 import { create } from "zustand";
 import { planWriter, useBigPlanner } from "./packs";
+import { balanceLoras, BUDGET } from "./loraBalance";
 import { buildAnimate, buildCreate, buildEdit, buildPromptHelper, MINOR_FLAG, type AnimateOpts } from "./graphs";
 import { look } from "./charVideo";
 import { h3Frames, h3Size } from "./models";
@@ -50,6 +51,8 @@ export interface Row {
   realistic?: boolean;
   /** copy a pose through its depth (PoseWear): the picture on the rental, how strongly, and whether its depth is worked out first */
   control?: { image: string; strength: number; estimate: boolean };
+  /** this row's own Krea 2 checkpoint (a fine-tune's name, or "official"), instead of Create's */
+  checkpoint?: string;
   /** the PoseWear pose (its picture, for a character made from her sheet: then the pose goes in as a reference picture) */
   pose?: import("./posewear").PwPick;
   /** which "Add to batch" press made this row (so one press can be taken back) */
@@ -283,6 +286,8 @@ export function rowProblem(r: Row): string | undefined {
   return undefined;
 }
 
+let libP: Promise<import("./api").LoraInfo[]> | null = null;
+const libOnce = () => (libP ??= import("./api").then((m) => m.loraLibrary()).finally(() => setTimeout(() => { libP = null; }, 60000)));
 /** step 2: queue everything on the instance; returns the number of jobs */
 /** a content-plan row's extras on its jobs: the face pass (as that character) and the site set the results go into */
 const extra = (r: Row, c: { id: string } | null) => ({
@@ -471,13 +476,18 @@ export async function queueAll(only?: string[]): Promise<number> {
           }
           if (r.control && !anime) await (await import("./posewear")).depthReady();
           const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 60);
+          // the row's own checkpoint (Cosplay: picked per character), and the LoRAs fitted to what Krea 2 holds without going blotchy
+          const ma = modelArgs(st.create, mi);
+          const ckArgs = !anime && r.checkpoint ? (r.checkpoint === "official" ? { ...ma, unet: undefined } : { ...ma, unet: r.checkpoint }) : ma;
+          let rowLoras = [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])];
+          if (!anime && r.loras?.length) { const bal = balanceLoras(rowLoras, await libOnce(), BUDGET.krea2); rowLoras = bal.loras; if (bal.changed.length) useBatch.getState().update(r.id, { note: `LoRAs balanced: ${bal.changed.join(", ")}` }); }
           job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${named || "picture"}`, buildCreate({
-            ...adv, seed: newSeed(), ...modelArgs(st.create, mi), positive, negative: st.create.negative, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])],
+            ...adv, seed: newSeed(), ...ckArgs, positive, negative: st.create.negative, loras: rowLoras,
             width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,
           }), `create:${anime ? "anime" : "realistic"}:portrait:1`, { batchRow: r.id, kind: "make", ...extra(r, c) });
           useBatch.getState().update(r.id, { debug: { path: anime ? "anime text-to-picture" : "Krea 2 text-to-picture", character: c?.name ?? null, model: mi.label, size: `${w}×${h}`,
             pose: r.pose?.title ?? null, poseImage: !anime && r.control ? r.control.image : null, poseDepth: !anime && r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : r.control ? "skipped (anime)" : null,
-            poseStrength: !anime && r.control ? r.control.strength : null, loras: [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])].map((l) => `${l.name} @${l.strength}`), prompt: positive.slice(0, 900) } });
+            poseStrength: !anime && r.control ? r.control.strength : null, checkpoint: (ckArgs as { unet?: string }).unet ?? "official", loras: rowLoras.map((l) => `${l.name} @${l.strength}`), prompt: positive.slice(0, 900) } });
         }
         rowIds.push(job.id); ids.push(job.id);
       }

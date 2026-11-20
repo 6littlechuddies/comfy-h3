@@ -26,6 +26,9 @@ export interface CosItem {
   picks?: Candidate[];         // the approved CivitAI LoRAs — several allowed ([] = none, undefined = not decided yet)
   extra?: LoraPick[];          // your own LoRAs for this character (library, a link, Browse)
   ai?: LoraPick[];             // LoRAs from your library the writer picked and weighted for this character (you can change them)
+  aiWhy?: Record<string, string>; // why it picked each one
+  aiCheckpoint?: { name: string; why: string }; // the checkpoint it picked ("official" = Krea 2 as released); you can change it
+  build?: string;              // its read of her build and figure (from the design, the LoRA's pictures and posts)
   files?: Record<number, LoraPick>; // approved LoRAs once on the rental, by version
   /** @deprecated one approved LoRA (older lists) — read through picksOf */
   lora?: Candidate | null;
@@ -158,17 +161,24 @@ function dealer(posePicks: import("./posewear").PwPick[]) {
 }
 
 /** how people prompt this character's LoRA on Krea 2: the most-liked example posts' words (costume and trigger wording) */
-async function lorasPosts(it: CosItem): Promise<string> {
+async function lorasPosts(it: CosItem): Promise<{ text: string; pics: string[] }> {
   const top = picksOf(it)?.[0] ?? it.loras?.[0];
-  if (!top) return "(no LoRA for this character)";
+  if (!top) return { text: "(no LoRA for this character)", pics: [] };
   try {
     const { civitImages } = await import("./api");
     const r = await civitImages(top.version_id, top.name);
-    const ps = r.items.filter((x) => !x.video && x.prompt && !minorWords(x.prompt).length).sort((a, b) => b.reactions - a.reactions)
-      .map((x) => x.prompt.replace(/\s+/g, " ").slice(0, 600));
-    const uniq = ps.filter((p, i) => ps.findIndex((q) => q.slice(0, 60) === p.slice(0, 60)) === i).slice(0, 4);
-    return uniq.length ? uniq.map((p, i) => `${i + 1}. ${p}`).join("\n") : "(its posts have no prompts)";
-  } catch { return "(couldn't read its posts)"; }
+    const good = r.items.filter((x) => !x.video && x.prompt && !minorWords(x.prompt).length).sort((a, b) => b.reactions - a.reactions);
+    const seen = new Set<string>();
+    const uniq = good.filter((x) => { const k = x.prompt.slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 4);
+    // what people pair this LoRA with (other LoRAs, checkpoints), counted over its most-liked posts
+    const count = new Map<string, number>();
+    for (const x of good.slice(0, 30)) for (const u of x.uses ?? []) { const k = u.replace(/ @[\d.]+$/, ""); count.set(k, (count.get(k) ?? 0) + 1); }
+    const pairs = [...count.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `${k} (in ${n} posts)`);
+    const text = [uniq.length ? uniq.map((x, i) => `${i + 1}. ${x.prompt.replace(/\s+/g, " ").slice(0, 600)}${x.weight != null ? ` [this LoRA at ${x.weight}]` : ""}`).join("\n") : "(its posts have no prompts)",
+      pairs.length ? `WHAT PEOPLE PAIR IT WITH: ${pairs.join("; ")}` : ""].filter(Boolean).join("\n");
+    // two of its most-liked pictures for the writer to look at (her build as the LoRA makes her)
+    return { text, pics: uniq.filter((x) => !x.explicit).slice(0, 2).map((x) => x.url) };
+  } catch { return { text: "(couldn't read its posts)", pics: [] }; }
 }
 
 /** reference notes without the sentences that would stop the writer outright ("she lost her child", "at 12 years old she…"):
@@ -176,11 +186,11 @@ async function lorasPosts(it: CosItem): Promise<string> {
 const usableNotes = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).filter((x) => !minorWords(x).length).join(" ").trim();
 
 /** step 4: the writer's adult check, costume and one prompt per shot */
-async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string, library: string, locked: string, libNames: Set<string>): Promise<Partial<CosItem>> {
+async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: { brief: string; ref?: import("./posewear").PwPick }[], posts: string, library: string, locked: string, libNames: Set<string>, refPics: string[] = [], ckNames: Set<string> = new Set()): Promise<Partial<CosItem>> {
   const triggers = [...(picksOf(it) ?? []).map((l) => l.trigger), ...(it.extra ?? []).map((l) => l.trigger ?? "")].filter(Boolean).join(", ");
   const raw = await runWriter("cosplay", { taste, posts, library, locked, shots: briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n"), character: it.name, series: it.series || "(not given)",
     cosplayer: cosplayer || `(none given: an adult woman, about 25 years old${useCosplay.getState().opts.look?.trim() ? `, ${useCosplay.getState().opts.look.trim()} — vary her face, hair and build from shot to shot within that` : ""})`, triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
-    { tab: "batch", label: `Cosplay · ${it.name}`, images: it.picture ? [it.picture] : undefined, big: true });
+    { tab: "batch", label: `Cosplay · ${it.name}`, images: [it.picture, ...refPics].filter((x): x is string => !!x).length ? [it.picture, ...refPics].filter((x): x is string => !!x) : undefined, big: true });
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("The writer didn't answer in the expected format — try again");
   const d = JSON.parse(m[0]);
@@ -191,9 +201,14 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   if (!shots.length) throw new Error("The writer answered without prompts — try again");
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
   // the writer's LoRA picks: only names from your library, strengths kept sensible
-  const ai: LoraPick[] | undefined = libNames.size ? (Array.isArray(d.loras) ? d.loras : []).filter((l: { name?: string }) => l?.name && libNames.has(l.name))
-    .slice(0, 4).map((l: { name: string; strength?: number; why?: string }) => ({ name: l.name, strength: Math.round(Math.min(1.3, Math.max(0.1, Number(l.strength) || 0.6)) * 100) / 100 })) : undefined;
-  return { status: "ready", age: d.age || it.age, outfit: d.outfit, wig: d.wig, eyes: d.eyes, props: d.props, pose: shots[0].pose, prompt: shots[0].prompt, shots, ...(ai ? { ai } : {}) };
+  type Pick = { name: string; strength?: number; why?: string };
+  const chosen: Pick[] = libNames.size ? (Array.isArray(d.loras) ? d.loras : []).filter((l: Pick) => l?.name && libNames.has(l.name)).slice(0, 3) : [];
+  const ai: LoraPick[] | undefined = libNames.size ? chosen.map((l) => ({ name: l.name, strength: Math.round(Math.min(1.2, Math.max(0.1, Number(l.strength) || 0.6)) * 100) / 100 })) : undefined;
+  const aiWhy = libNames.size ? Object.fromEntries(chosen.map((l) => [l.name, String(l.why ?? "")])) : undefined;
+  const ck = d.checkpoint && typeof d.checkpoint === "object" ? d.checkpoint as { name?: string; why?: string } : null;
+  const aiCheckpoint = ckNames.size && ck?.name && (ckNames.has(ck.name) || ck.name === "official") ? { name: ck.name, why: String(ck.why ?? "") } : undefined;
+  return { status: "ready", age: d.age || it.age, outfit: d.outfit, wig: d.wig, eyes: d.eyes, props: d.props, pose: shots[0].pose, prompt: shots[0].prompt, shots,
+    build: typeof d.build === "string" ? d.build : undefined, ...(ai ? { ai, aiWhy } : {}), ...(aiCheckpoint ? { aiCheckpoint } : {}) };
 }
 
 /** the writers working side by side (CivitAI and AniList are fine with this many) */
@@ -213,13 +228,18 @@ export async function researchAll(cosplayer: string, only?: string) {
   if (st.opts.poses === "posewear" && !picksNow.length) throw new Error("Poses are set to your PoseWear picks, but none are picked — Browse PoseWear first");
   const deal = dealer(picksNow);
   // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
-  let library = "(not used)", libNames = new Set<string>();
+  let library = "(not used)", libNames = new Set<string>(), ckNames = new Set<string>();
   const locked = st.opts.loras?.length ? st.opts.loras.map((l) => `${l.name} @${l.strength}`).join(", ") : "(none)";
   if (st.opts.director) {
     const { loraLibrary } = await import("./api");
     const lib = (await loraLibrary()).filter((l) => l.family === "krea2" && l.role !== "character" && !st.opts.loras?.some((x) => x.name === l.name));
     libNames = new Set(lib.map((l) => l.name));
     library = lib.length ? lib.map((l) => `- ${l.name} | ${l.title}${l.role ? ` | ${l.role}` : ""}${l.trigger ? ` | trigger: ${l.trigger}` : ""}${l.tips?.weight != null ? ` | creator's strength ${l.tips.weight_range ?? l.tips.weight}` : ""}`).join("\n") : "(no Krea 2 LoRAs downloaded)";
+    // your Krea 2 checkpoints (fine-tunes) too: one per character, or the official model
+    const { myModels } = await import("./api");
+    const cks = (await myModels().catch(() => ({ items: [] as import("./api").MyModel[] }))).items.filter((m) => m.family === "krea2" && m.here);
+    ckNames = new Set(cks.map((m) => m.name));
+    if (cks.length) library += `\nCHECKPOINTS (pick one, or "official"):\n- official | Krea 2 as released\n${cks.map((m) => `- ${m.name} | ${m.title}${m.version ? ` (${m.version})` : ""}`).join("\n")}`;
   }
   const one = async (k: string) => {
     const up = (p: Partial<CosItem>) => useCosplay.getState().update(k, p);
@@ -236,9 +256,12 @@ export async function researchAll(cosplayer: string, only?: string) {
         cur = useCosplay.getState().items.find((x) => x.key === k)!;
       }
       const o = useCosplay.getState().opts;
-      const posts = o.posts ? await lorasPosts(cur) : "(not used)";
+      const lp = o.posts || o.director ? await lorasPosts(cur) : { text: "(not used)", pics: [] as string[] };
+      const posts = o.posts ? lp.text : "(not used)";
+      const refPics = (await Promise.all(lp.pics.map((u) => fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
+        .then((r) => (r.ok ? r.json() : null)).then((d) => d?.name as string | undefined).catch(() => undefined)))).filter((x): x is string => !!x);
       const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k));
-      up(await writePrompt(cur, cosplayer, taste, briefs, posts, library, locked, libNames));
+      up(await writePrompt(cur, cosplayer, taste, briefs, posts, library, locked, libNames, refPics, ckNames));
     } catch (e) {
       const msg = (e as Error).message;
       // the writer's own age stop counts as a skip, not an error
@@ -302,7 +325,8 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;
-      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref,
+      const ckName = st.opts.director ? it.aiCheckpoint?.name : undefined;
+      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, ...(ckName ? { checkpoint: ckName } : {}),
         charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras, control });
       n++;
     }
