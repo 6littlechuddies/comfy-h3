@@ -1008,18 +1008,60 @@ POSEWEAR_FILES = {"pose": "poses.json", "depth": "depths.json", "costume": "cost
                   "poses": "poses.json", "depths": "depths.json", "costumes": "costumes.json", "portraits": "portraits.json"}
 
 
+async def _posewear_paths(s: "aiohttp.ClientSession") -> dict:
+    """where the site keeps its lists now: its build gives each one a hashed name (/assets/poses.1a2b3c4d5e.json), named
+    in its page and its app script. Found once a day; the old plain names (/poses.json) are the fallback"""
+    cache = os.path.join(WORK, "posewear", "paths.json")
+    try:
+        if time.time() - os.path.getmtime(cache) < 86400:
+            with open(cache) as f: return json.load(f)
+    except (OSError, ValueError):
+        pass
+    found: dict = {}
+    hdr = {"User-Agent": "Mozilla/5.0 (H3 Studio)"}
+    try:
+        async with s.get(POSEWEAR, headers=hdr) as r: page = await r.text() if r.status == 200 else ""
+        texts = [page]
+        for js in re.findall(r'src="(/?assets/app\.[0-9a-f]+\.js)"', page)[:2]:
+            async with s.get(POSEWEAR + js.lstrip("/"), headers=hdr) as r:
+                if r.status == 200: texts.append(await r.text())
+        for t in texts:
+            for m in re.finditer(r"/?(assets/(poses|depths|costumes|anime|portraits)\.[0-9a-f]+\.json)", t):
+                found[m.group(2) + ".json"] = m.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    if found:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, "w") as f: json.dump(found, f)
+    return found
+
+
 async def posewear_list(req):
     """PoseWear's galleries (posewear.pages.dev — MIT index of @giaaibusi's pose / depth pose / outfit galleries and CC0
     portraits): the list as it publishes it, kept for a day. Pictures stay on their sites until you use one."""
     lib = req.match_info["lib"]
     if lib not in POSEWEAR_FILES: return web.json_response({"error": f"No PoseWear list called {lib}"}, status=404)
-    cache = os.path.join(WORK, "posewear", POSEWEAR_FILES[lib])
+    plain = POSEWEAR_FILES[lib]
+    cache = os.path.join(WORK, "posewear", plain)
     if not (os.path.isfile(cache) and time.time() - os.path.getmtime(cache) < 86400):
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
-                async with s.get(POSEWEAR + POSEWEAR_FILES[lib], headers={"User-Agent": "H3 Studio"}) as r:
-                    if r.status != 200: raise RuntimeError(f"PoseWear answered {r.status}")
-                    body = await r.read()
+                paths = await _posewear_paths(s)
+                body, last = None, ""
+                for path in [paths.get(plain), plain]:
+                    if not path: continue
+                    async with s.get(POSEWEAR + path, headers={"User-Agent": "Mozilla/5.0 (H3 Studio)"}) as r:
+                        if r.status == 200: body = await r.read(); break
+                        last = f"PoseWear answered {r.status} for {path}"
+                if body is None:
+                    # the names changed since they were looked up: look again once
+                    try: os.remove(os.path.join(WORK, "posewear", "paths.json"))
+                    except OSError: pass
+                    paths = await _posewear_paths(s)
+                    if paths.get(plain):
+                        async with s.get(POSEWEAR + paths[plain], headers={"User-Agent": "Mozilla/5.0 (H3 Studio)"}) as r:
+                            if r.status == 200: body = await r.read()
+                if body is None: raise RuntimeError(last or "PoseWear didn't answer")
             json.loads(body)
             os.makedirs(os.path.dirname(cache), exist_ok=True)
             with open(cache + ".tmp", "wb") as f: f.write(body)
