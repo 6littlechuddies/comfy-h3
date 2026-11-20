@@ -287,7 +287,12 @@ function StackWarning({ value, onChange, family, lib }: { value: LoraPick[]; onC
   );
 }
 
-export function LoraList({ value, onChange, family, label = "LoRAs", onSweep, onFamily, onTips }: { value: LoraPick[]; onChange: (v: LoraPick[]) => void; family?: "sdxl" | "anima" | "krea2" | "h3"; label?: string; filter?: (n: string) => boolean; onSweep?: (l: LoraPick, title: string) => void;
+export function LoraList({ value, onChange, family, label = "LoRAs", onSweep, onFamily, onTips, locks, onLock, notes }: { value: LoraPick[]; onChange: (v: LoraPick[]) => void; family?: "sdxl" | "anima" | "krea2" | "h3"; label?: string; filter?: (n: string) => boolean; onSweep?: (l: LoraPick, title: string) => void;
+  /** a lock on each LoRA (Batch → Cosplay): locked = always at this strength; unlocked = DeepSeek may set it higher or lower, and it's
+   *  turned down when the stack would go blotchy */
+  locks?: Record<string, true>; onLock?: (name: string, on: boolean) => void;
+  /** a line under a LoRA (why DeepSeek picked it) */
+  notes?: Record<string, string>;
   /** a LoRA for another model was added: switch to that model and add it there (instead of warning "probably won't work") */
   onFamily?: (family: ImgFam, pick: LoraPick) => void;
   /** use a LoRA's creator tips: "auto" when it's added (negative words), "all" when you press Use (sampler, scheduler, CFG, steps too) */
@@ -393,8 +398,13 @@ export function LoraList({ value, onChange, family, label = "LoRAs", onSweep, on
                   title={role === "slider" ? "Slider: moves one thing (size, age look, detail…) up or down. Not counted in the total, and Balance leaves it alone. Negative = the other way." : "Character LoRA: leads the stack — Balance keeps it at its creator's strength"}>{role.toUpperCase()}</span>}
                 {inf?.remembered && <span className="micro text-good" title="Kept: re-downloaded automatically on every rental">KEPT</span>}
                 {onSweep && <button aria-label={`Try strengths for ${inf?.title ?? l.name}`} title="Try strengths: same picture at several strengths, side by side" className="text-muted hover:text-accent" onClick={() => onSweep(l, inf?.title ?? l.name.split("/").pop()!.replace(/\.safetensors$/, ""))}><Icon name="sweep" size={15} /></button>}
+                {onLock && <button onClick={() => onLock(l.name, !locks?.[l.name])} aria-pressed={!!locks?.[l.name]}
+                  title={locks?.[l.name] ? "Locked: always exactly this strength. Click to let DeepSeek adjust it" : "Not locked: DeepSeek may set it higher or lower for each character, and it's turned down if the stack would go blotchy. Click to lock it at this strength"}
+                  className={cx("press flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[11px]", locks?.[l.name] ? "border-accent/60 bg-accent/15 text-accent" : "border-line text-dim hover:text-ink")}>
+                  <Icon name={locks?.[l.name] ? "lock" : "unlock"} size={11} />{locks?.[l.name] ? "Locked" : "Auto"}</button>}
                 <button aria-label={`Remove ${l.name}`} className="text-muted hover:text-ink" onClick={() => onChange(value.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
               </div>
+              {notes?.[l.name] && <p className="mt-0.5 text-[11px] leading-snug text-dim">{notes[l.name]}</p>}
               {bad && <p className="mt-0.5 text-[11px] text-bad">Made for {FAMILY_LABEL[inf!.family] ?? inf!.base} — probably won't work here{onFamily && (inf!.family === "sdxl" || inf!.family === "anima" || inf!.family === "krea2") && <button className="ml-1.5 text-accent hover:underline" onClick={() => { onChange(value.filter((_, j) => j !== i)); onFamily(inf!.family as ImgFam, l); }}>move it to {FAMILY_LABEL[inf!.family]}</button>}</p>}
               {inf?.tips && tipsLine(inf.tips) && <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-dim">
                 <span className="min-w-0 flex-1 truncate" title={`The creator recommends: ${tipsLine(inf.tips)}${inf.tips.negative ? ` · negative: ${inf.tips.negative}` : ""}`}>Creator: {tipsLine(inf.tips)}</span>

@@ -21,6 +21,7 @@ import { PhotoSet } from "../components/PhotoSet";
 import { RecipePanel } from "../components/MyRecipes";
 import "../lib/faceDetail";
 import { copyText } from "../lib/copy";
+import { CheckpointPicker } from "../components/Checkpoint";
 import { CosplayList, CosplayOptions } from "../components/CosplayPanel";
 import { usePoseWear } from "../lib/posewear";
 
@@ -101,6 +102,7 @@ export default function BatchTab() {
         {!video && <Seg wrap label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }, { value: "poses", label: "Poses" }]} />}
         {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
         {(video || way === "plan" || way === "cosplay") && <WriterChoice />}
+        {!video && <BatchCheckpoint />}
         {!video && way === "cosplay" && <CosplayOptions />}
         {(video || way === "plan") && <label className="flex flex-col gap-1.5"><span className="lbl">Star (optional)</span>
           <DropSelect value={b.characterId ?? ""} onChange={(e) => b.set({ characterId: e.target.value || null })} className="inset h-10 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none">
@@ -450,4 +452,24 @@ function debugText(rows: Row[]): string {
       return [`--- row ${i + 1}: ${r.idea || "(no title)"}`, ...Object.entries(r.debug ?? {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v ?? "—"}`),
         ...js.map((j) => `job ${j.id}: ${j.status}${j.error ? ` — ${String(j.error).slice(0, 300)}` : ""}${j.outputs?.length ? ` · ${j.outputs.map((o) => o.filename).join(", ")}` : ""}`)].join("\n");
     })].join("\n\n");
+}
+
+/** realistic pictures' checkpoint for the batch: 03 Create's, or one picked here (with + Add from a CivitAI link); locked = every
+ *  row uses it (Cosplay's DeepSeek then doesn't pick one), unlocked = rows that picked their own keep theirs */
+function BatchCheckpoint() {
+  const ck = useBatch((s) => s.ck) ?? { mode: "create" as const, name: "", locked: false };
+  const set = (p: Partial<typeof ck>) => useBatch.getState().set({ ck: { ...ck, ...p } });
+  return (
+    <div className="flex flex-col gap-2">
+      <Seg label="Checkpoint (realistic)" value={ck.mode} onChange={(v) => set({ mode: v })} options={[{ value: "create", label: "Same as 03 Create" }, { value: "pick", label: "Pick one" }]} />
+      {ck.mode === "pick" && <>
+        <CheckpointPicker model="krea2" value={ck.name} onChange={(v) => set({ name: v })} models={["krea2"]} />
+        <button onClick={() => set({ locked: !ck.locked })} aria-pressed={ck.locked}
+          className={cx("press flex items-center gap-2 border px-2.5 py-2 text-left text-[12.5px]", ck.locked ? "border-accent/60 bg-accent/10" : "border-line hover:border-muted")}>
+          <Icon name={ck.locked ? "lock" : "unlock"} size={14} className={ck.locked ? "text-accent" : "text-muted"} />
+          <span className="flex flex-col"><b className="font-medium">{ck.locked ? "Locked for every picture" : "Not locked"}</b>
+            <span className="text-[11.5px] text-dim">{ck.locked ? "Every row uses it; Cosplay's DeepSeek won't pick another" : "Rows without their own use it; DeepSeek may still pick one per cosplay character"}</span></span>
+        </button>
+      </>}
+    </div>);
 }

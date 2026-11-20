@@ -86,6 +86,8 @@ export function removeDuplicates(): number {
 export function clearWaiting() { useBatch.setState((s) => ({ rows: s.rows.filter((r) => r.status === "queued") })); }
 export interface BatchOpts {
   target: "video" | "image";
+  /** realistic pictures: the checkpoint — 03 Create's, or one picked here ("" = Krea 2 official); locked = every row uses it */
+  ck?: { mode: "create" | "pick"; name: string; locked: boolean };
   characterId: string | null;
   seconds: number;
   aspect: "16:9" | "9:16" | "1:1";
@@ -175,7 +177,8 @@ export const useBatch = create<BatchState>((set) => ({
   target: (() => { try { return localStorage.getItem("h3.batch.target") === "video" ? "video" : "image"; } catch { return "image"; } })(), characterId: null, seconds: 8, aspect: "9:16", mp: 0.6, useClipSound: true,
   rows: [newRow()],
   rec: loadRec(),
-  set: (p) => { if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ } if (p.rec) saveRec(p.rec); set(p); },
+  ck: (() => { try { return JSON.parse(localStorage.getItem("h3.batch.ck") || "null") ?? undefined; } catch { return undefined; } })(),
+  set: (p) => { if (p.ck) try { localStorage.setItem("h3.batch.ck", JSON.stringify(p.ck)); } catch { /* */ } if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ } if (p.rec) saveRec(p.rec); set(p); },
   add: (p) => set((s) => ({ rows: [...s.rows, newRow(p)] })),
   update: (id, p) => set((s) => ({ rows: s.rows.map((r) => (r.id === id ? { ...r, ...p } : r)) })),
   remove: (id) => set((s) => ({ rows: s.rows.filter((r) => r.id !== id) })),
@@ -480,7 +483,10 @@ export async function queueAll(only?: string[]): Promise<number> {
           const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 60);
           // the row's own checkpoint (Cosplay: picked per character), and the LoRAs fitted to what Krea 2 holds without going blotchy
           const ma = modelArgs(st.create, mi);
-          const ckArgs = !anime && r.checkpoint ? (r.checkpoint === "official" ? { ...ma, unet: undefined } : { ...ma, unet: r.checkpoint }) : ma;
+          // the batch's checkpoint (locked: every row; else rows without their own), then the row's own (Cosplay: per character)
+          const bck = b.ck?.mode === "pick" ? (b.ck.name || "official") : undefined;
+          const ck = b.ck?.locked && bck ? bck : r.checkpoint ?? bck;
+          const ckArgs = !anime && ck ? (ck === "official" ? { ...ma, unet: undefined } : { ...ma, unet: ck }) : ma;
           let rowLoras = [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])];
           if (!anime && r.loras?.length) {
             // the locked ones keep your strength; the rest are fitted into what's left of Krea 2's budget

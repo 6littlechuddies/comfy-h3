@@ -51,8 +51,6 @@ export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; aut
   director: boolean;
   /** which of the every-picture LoRAs you locked (kept at your strength, never balanced down); the rest can be turned down */
   lockedAll?: Record<string, true>;
-  /** one checkpoint for every cosplay picture (locked: DeepSeek doesn't pick one); empty = per character / Create's */
-  checkpoint?: string;
 }
 /** the approved LoRAs, whichever way they were stored */
 export const picksOf = (it: CosItem): Candidate[] | undefined => it.picks ?? (it.lora === undefined ? undefined : it.lora ? [it.lora] : []);
@@ -270,8 +268,10 @@ export async function researchAll(cosplayer: string, only?: string) {
       // your locked LoRAs for her (and every picture): the writer works around them and keeps their strength
       const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
       const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}${cur.aiLocked?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`)].filter(Boolean).join(", ") || "(none)";
-      const ckHere = cur.ckLocked || o.checkpoint ? new Set<string>() : ckNames;
-      const lib = cur.ckLocked || o.checkpoint ? library.split("\nCHECKPOINTS")[0] : library;
+      const bck = (await import("./batch")).useBatch.getState().ck;
+      const ckFixed = cur.ckLocked || (bck?.mode === "pick" && bck.locked);
+      const ckHere = ckFixed ? new Set<string>() : ckNames;
+      const lib = ckFixed ? library.split("\nCHECKPOINTS")[0] : library;
       const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere);
       // a rewrite keeps what you locked: locked LoRAs first (your strength), then its new picks; your checkpoint stays
       const keep = (cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name]);
@@ -346,7 +346,7 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;
-      const ckName = st.opts.checkpoint || (st.opts.director || it.ckLocked ? it.aiCheckpoint?.name : undefined);
+      const ckName = st.opts.director || it.ckLocked ? it.aiCheckpoint?.name : undefined;
       useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, locked: lockedNames, ...(ckName ? { checkpoint: ckName } : {}),
         charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras, control });
       n++;
