@@ -175,7 +175,7 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
     const lp = await loraFor(it);
     // the LoRA's trigger words lead the prompt (when it was approved after the prompt was written)
     const prompt = lp?.trigger && !it.prompt!.toLowerCase().includes(lp.trigger.toLowerCase()) ? `${lp.trigger}, ${it.prompt}` : it.prompt!;
-    useBatch.getState().add({ prompt, idea: `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}`, takes: st.opts.takes, charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", loras: lp ? [lp] : [] });
+    useBatch.getState().add({ prompt, idea: `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}`, takes: st.opts.takes, charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras: lp ? [lp] : [] });
     n++;
   }
   return n;

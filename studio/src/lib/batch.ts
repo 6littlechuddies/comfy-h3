@@ -46,6 +46,8 @@ export interface Row {
   loras?: import("./graphs").LoraPick[];
   /** never the batch's Star (Cosplay: a new woman in each picture) */
   noStar?: boolean;
+  /** always a photo (Krea 2), whatever Create's style is (Cosplay) */
+  realistic?: boolean;
 }
 export interface BatchOpts {
   target: "video" | "image";
@@ -407,7 +409,7 @@ export async function queueAll(only?: string[]): Promise<number> {
           noteRowUse(r, b, null, stars.map((x) => x?.id ?? null));
           continue;
         } else {
-          const anime = c ? c.style === "anime" : st.create.style === "anime";
+          const anime = !r.realistic && (c ? c.style === "anime" : st.create.style === "anime");
           const text = r.prompt.trim() || r.idea.trim();
           const mi = modelOf(st.create, anime ? "anime" : "realistic");
           // a written Krea 2 prompt (Write prompts) already carries the character's look word for word
