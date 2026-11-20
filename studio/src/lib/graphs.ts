@@ -86,6 +86,9 @@ export interface CreateOpts extends SamplerOpts {
   prefix: string;
   /** finish bigger: enlarge the picture this much and redraw it lightly (a "hires fix") — ×1.5 turns 1024×1536 into 1536×2304 */
   hires?: { scale: number; denoise: number; steps?: number };
+  /** Krea 2 depth control (the Krea 2 depth ControlNet-LoRA): the picture follows this depth map's pose and layout.
+   *  estimate = the image is an ordinary picture: its depth is worked out first (Depth Anything V2 Small) */
+  control?: { image: string; strength: number; estimate?: boolean };
   /** Krea 2: split this one picture across this many cards with Raylight (1 or unset = one card) */
   ray?: number;
 }
@@ -94,12 +97,12 @@ export function buildCreate(p: CreateOpts): ApiGraph {
   const g = new G();
   let image: Link;
   /** decode the picture; with hires: enlarge it, then redraw it lightly at the new size for real detail */
-  const decode = (model: Link, pos: Link, neg: Link, ks: string, vae: Link): Link => {
+  const decode = (model: Link, pos: Link, neg: Link, ks: string, vae: Link, hiresModel: Link = model): Link => {
     let img: Link = o(g.add("VAEDecode", { samples: o(ks), vae }));
     if (p.hires && p.hires.scale > 1.01) {
       const big = g.add("ImageScaleBy", { image: img, upscale_method: "lanczos", scale_by: p.hires.scale });
       const enc = g.add("VAEEncode", { pixels: o(big), vae });
-      const ks2 = g.add("KSampler", { model, seed: p.seed, steps: p.hires.steps ?? p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler,
+      const ks2 = g.add("KSampler", { model: hiresModel, seed: p.seed, steps: p.hires.steps ?? p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler,
         positive: pos, negative: neg, latent_image: o(enc), denoise: p.hires.denoise });
       img = o(g.add("VAEDecode", { samples: o(ks2), vae }));
     }
@@ -119,11 +122,25 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     const pos = g.add("CLIPTextEncode", { text: withTriggers(p.positive, p.loras), clip });
     const neg = g.add("CLIPTextEncode", { text: negative, clip });
     const lat = g.add("EmptyLatentImage", { width: p.width, height: p.height, batch_size: p.count });
+    // depth control: the Control LoRA on the model, the depth map encoded at the picture's size and attached
+    const free = model;
+    if (p.control) {
+      let ci: Link = o(g.add("LoadImage", { image: p.control.image }));
+      if (p.control.estimate) {
+        const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything });
+        ci = o(g.add("DepthAnything_V2", { da_model: o(da), images: ci }));
+      }
+      model = o(g.add("Krea2ControlLoRALoader", { model, lora_name: M.kreaDepth, strength: p.control.strength }));
+      const enc = g.add("Krea2ControlImageEncode", { control_image: ci, vae: o(vae), resize: "match_latent_size", upscale_method: "lanczos", crop: "center",
+        channel_mode: "grayscale", normalize: "per_image_minmax", invert: false, batch_mode: "independent_images", latent: o(lat) });
+      model = o(g.add("Krea2ControlApply", { model, control_latent: o(enc, 0) }));
+    }
     const ks = g.add("KSampler", {
       model, seed: p.seed, steps: p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler,
       positive: o(pos), negative: o(neg), latent_image: o(lat), denoise: 1,
     });
-    image = decode(model, o(pos), o(neg), ks, o(vae));
+    // the finish pass (bigger size) without the control: its latent is a different size than the depth map's
+    image = decode(model, o(pos), o(neg), ks, o(vae), free);
   } else if (p.style === "anime") {
     const ck = g.add("CheckpointLoaderSimple", { ckpt_name: p.ckpt || M.noob });
     let model: Link = o(ck, 0), clip: Link = o(ck, 1);
@@ -150,7 +167,7 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     // Krea 2 Turbo — same graph as ComfyUI's "Text to Image (Krea-2 Turbo)" template (8 steps, CFG 1, euler/simple);
     // Krea 2 RAW — the undistilled base (28 steps, CFG 4.5), optionally with Krea's turbo LoRA for fewer steps
     const raw = p.realModel === "krea2raw";
-    if ((p.ray ?? 1) > 1) return buildCreateKreaRay(p, raw, negative);
+    if ((p.ray ?? 1) > 1 && !p.control) return buildCreateKreaRay(p, raw, negative);
     const unet = g.add("UNETLoader", { unet_name: p.unet || (raw ? M.kreaRaw : M.kreaUnet), weight_dtype: "default" });
     let model: Link = o(unet);
     if (raw && p.kreaTurboLora && p.kreaTurboLora > 0) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.kreaTurboLora, strength_model: p.kreaTurboLora }));
@@ -164,11 +181,25 @@ export function buildCreate(p: CreateOpts): ApiGraph {
     // at CFG 1 the negative is ignored anyway (the template zeroes it); above 1 it's encoded like the positive
     const neg = p.cfg > 1 ? g.add("CLIPTextEncode", { text: negative, clip: o(clip) }) : g.add("ConditioningZeroOut", { conditioning: o(pos) });
     const lat = g.add("EmptyLatentImage", { width: p.width, height: p.height, batch_size: p.count });
+    // depth control: the Control LoRA on the model, the depth map encoded at the picture's size and attached
+    const free = model;
+    if (p.control) {
+      let ci: Link = o(g.add("LoadImage", { image: p.control.image }));
+      if (p.control.estimate) {
+        const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything });
+        ci = o(g.add("DepthAnything_V2", { da_model: o(da), images: ci }));
+      }
+      model = o(g.add("Krea2ControlLoRALoader", { model, lora_name: M.kreaDepth, strength: p.control.strength }));
+      const enc = g.add("Krea2ControlImageEncode", { control_image: ci, vae: o(vae), resize: "match_latent_size", upscale_method: "lanczos", crop: "center",
+        channel_mode: "grayscale", normalize: "per_image_minmax", invert: false, batch_mode: "independent_images", latent: o(lat) });
+      model = o(g.add("Krea2ControlApply", { model, control_latent: o(enc, 0) }));
+    }
     const ks = g.add("KSampler", {
       model, seed: p.seed, steps: p.steps, cfg: p.cfg, sampler_name: p.sampler, scheduler: p.scheduler,
       positive: o(pos), negative: o(neg), latent_image: o(lat), denoise: 1,
     });
-    image = decode(model, o(pos), o(neg), ks, o(vae));
+    // the finish pass (bigger size) without the control: its latent is a different size than the depth map's
+    image = decode(model, o(pos), o(neg), ks, o(vae), free);
   }
   if (p.cutout) {
     const cut = matte(g, image);

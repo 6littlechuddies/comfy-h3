@@ -52,6 +52,9 @@ export const M = {
    *  community's choice, so explicit prompts aren't watered down — unless you switched back to the stock one */
   get kreaClip() { return kreaTE.uncensored ? KREA_TE_UNCENSORED : "qwen3vl_4b_fp8_scaled.safetensors"; },
   kreaVae: "qwen_image_vae.safetensors",
+  /** Krea 2 depth ControlNet-LoRA (Patil/Krea-2-depth-controlnet) and the depth estimator (Depth Anything V2 Small, Apache-2.0) */
+  kreaDepth: "depth-control-lora.safetensors",
+  depthAnything: "depth_anything_v2_vits_fp16.safetensors",
   h3Ref: "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
   /** H3 Eros Max beta6 int8 (one hybrid model for reference, text and first-frame videos) */
   h3Eros: "h3ErosMax_beta6_int8.safetensors",

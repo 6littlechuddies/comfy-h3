@@ -124,6 +124,12 @@ loras/qwen21      https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/l
 diffusion_models  https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_raw_bf16.safetensors  krea2_raw_bf16.safetensors  fallback=https://huggingface.co/krea/Krea-2-Raw/resolve/main/raw.safetensors
 text_encoders     https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors
 
+# @group kdepth Depth poses (Krea 2 depth control)
+# --- the Krea 2 depth ControlNet-LoRA (Patil/Krea-2-depth-controlnet, Krea 2 Community License) and Depth Anything V2 Small
+# (Apache-2.0 — the larger ones are non-commercial) to work out a depth map from any picture. Create / Batch → Depth pose ---
+loras             https://huggingface.co/Patil/Krea-2-depth-controlnet/resolve/main/depth-control-lora.safetensors
+depthanything     https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vits_fp16.safetensors
+
 # @group ph3 Character sheets (P-H3, for the Character Sheet Designer)
 # --- PrunaAI's P-H3 Image set: turns the H3 first/last-frame video model (Video group) into a still-image model for the H3
 # Character Sheet Designer node (github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer, workflow "P-H3 Subgraph"). Waits as

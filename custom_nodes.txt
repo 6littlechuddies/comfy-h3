@@ -51,3 +51,8 @@ https://github.com/KadoBOT/ComfyUI-H3-Continuity-Studio@a2ddb97ae8cf3e47b7ccf50a
 # --- H3 Character Sheet Designer (ukr8b3g-cmyk; MIT): up to 13-view character sheets with native H3 reference conditioning.
 #     Its P-H3 workflow uses the H3 first/last-frame model we already have + the "Character sheets (P-H3)" download ---
 https://github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer@63a24c3c6a2b5a28dc4158819a4aeb39e9727639
+
+# --- Krea 2 depth control (facok; the Krea 2 Control-LoRA loader / encode / apply) + Depth Anything V2 (kijai): Create and
+#     Batch → "Depth pose" — a picture follows a depth map's pose (PoseWear's depth poses, or one worked out from any picture) ---
+https://github.com/facok/comfyui-krea2-controlnet@79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f
+https://github.com/kijai/ComfyUI-DepthAnythingV2@553187872eeb1d52e50dc53209fa57e569609a72
