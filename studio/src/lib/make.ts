@@ -127,13 +127,29 @@ export async function toTags(text: string, c: Character | null): Promise<string>
 
 const polishCache = new Map<string, string>();
 /** realistic: plain words → a detailed Krea 2 prompt (the "Krea 2 frame builder" prompt file; your own one if you added it) */
-export async function polishKrea(text: string, c: Character | null, shape: string): Promise<string> {
-  const key = `${c?.id ?? ""}|${shape}|${text}|${(await import("./models")).writerFast() ? "fast" : ""}`;
+export async function polishKrea(text: string, c: Character | null, shape: string, pose?: import("./posewear").PwPick | null, tab: import("./jobs").Tab = "create"): Promise<string> {
+  const key = `${c?.id ?? ""}|${shape}|${text}|${pose?.key ?? ""}|${(await import("./models")).writerFast() ? "fast" : ""}`;
   const hit = polishCache.get(key);
   if (hit) { useMakeRefs.setState({ tags: { from: text, to: hit } }); return hit; }
-  const { looks } = await import("./characters");
+  const { looks, coverOf } = await import("./characters");
   const character = c ? looks(c) : "An adult person exactly as FRAME describes them (no fixed character — describe them from FRAME).";
-  let out = await runWriter("krea", { character, frame: text, aspect: shape === "wide" ? "16:9" : shape === "square" ? "1:1" : shape === "tall" ? "2:3" : "9:16" }, { tab: "create", label: "Writing your Krea 2 prompt", big: true });
+  // a PoseWear pose: the writer gets the pose's own prompt and its picture (Krea 2 copies that body position through depth),
+  // and the character's picture from the project list, and is told which picture is which
+  const images: string[] = [];
+  let frame = text;
+  if (pose) {
+    const { toInput } = await import("./api");
+    const face = c ? coverOf(c) : undefined;
+    const who = face ? await toInput(face).then((x) => x.name).catch(() => "") : "";
+    const pic = await (await import("./posewear")).controlFor(pose).then((x) => x.image).catch(() => "");
+    if (who) images.push(who);
+    if (pic) images.push(pic);
+    const n = (x: string) => images.indexOf(x) + 1;
+    frame = [text.trim() || "(nothing more — make a picture of this pose)",
+      `POSE REFERENCE — a real pose from PoseWear${pic ? ` (attached picture ${n(pic)}${pose.depth ? ", a depth map: lighter = nearer the camera" : ""})` : ""}. Krea 2 copies its body position exactly, so describe THIS body position limb by limb and make your words agree with it. Its own description: "${pose.words}"${pose.cat ? ` [${pose.cat}]` : ""}. It is ONLY a pose reference: take nothing else from it — not its person, face, hair, body, clothes, background or light.`,
+      who ? `Attached picture ${n(who)} is the character (${c?.name}) from the project — who is in the picture; recognise them, and where it differs from the CHARACTER block, the CHARACTER block wins.` : ""].filter(Boolean).join("\n\n");
+  }
+  let out = await runWriter("krea", { character, frame, aspect: shape === "wide" ? "16:9" : shape === "square" ? "1:1" : shape === "tall" ? "2:3" : "9:16" }, { tab, label: pose ? `Writing your Krea 2 prompt · pose “${pose.title}”` : "Writing your Krea 2 prompt", big: true, ...(images.length ? { images } : {}) });
   // Grok (and some prompt files) add a "Negative prompt: …" part: it goes to Create's negative box, not into the picture's words
   const neg = /\n?\s*\**\s*negative(?: prompt)?\s*\**\s*[:：]\s*([\s\S]+)$/i.exec(out);
   if (neg) {

@@ -108,7 +108,7 @@ export async function addLoraFromLink(url: string): Promise<string> {
 }
 export interface LoraJob { status: "running" | "done" | "error"; progress: number; title?: string; base?: string; name?: string; family?: string; trigger?: string; tips?: LoraTips; error?: string; total_mb?: number; kind?: "model"; folder?: string }
 /** one of your own checkpoints (a Krea 2 / Anima / Illustrious fine-tune from CivitAI) */
-export interface MyModel { name: string; title: string; version: string; family: string; folder: string; base: string; here: boolean; model_id?: number; version_id?: number }
+export interface MyModel { name: string; title: string; version: string; family: string; folder: string; base: string; here: boolean; model_id?: number; version_id?: number; problem?: string }
 export const myModels = async () => j<{ items: MyModel[] }>(await fetch("/studio-api/models"));
 export const forgetModel = async (name: string, del = false) => j(await fetch("/studio-api/models/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, delete: del }) }));
 export const loraJob = async (id: string) => j<LoraJob>(await fetch(`/studio-api/loras/job/${id}`));

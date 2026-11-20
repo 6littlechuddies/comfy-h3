@@ -172,8 +172,9 @@ export default function CreateTab() {
   const dl = useGroup(m.group);
   useDownloads((st) => st.groups);
   const refDl = useGroup(editGroup(anime ? animeEngine(person ? ch : null) : "krea"));
+  const poseSet = usePoseWear((s) => !!s.create);
   const why = usingRefs ? (!refDl.ready ? refDl.why : busy ? "Sending…" : undefined)
-    : !dl.ready ? dl.why : (!positive.trim() ? "Describe something first" : busy ? "Sending…" : undefined);
+    : !dl.ready ? dl.why : (!positive.trim() && !poseSet ? "Describe something first" : busy ? "Sending…" : undefined);
   const etaKey = `create:${m.model}:${c.shape}:${c.count}${up > 1.01 ? `:x${up}` : ""}`;
   const queue = async (over: { loras?: LoraPick[]; seed?: number; count?: number; label?: string; sweep?: { name: string; strength: number }; take?: { i: number; n: number } } = {}) => {
     const seed = over.seed ?? seedFor(adv, setAdv);
@@ -196,9 +197,11 @@ export default function CreateTab() {
       : merged;
     // anime + plain words: the local writer turns them into tags first (see them under the prompt box)
     const extra = anime && writerOn && !c.raw && looksPlain(words) ? await toTags(words, person ? ch : null).catch((e) => { if (/under 18/i.test((e as Error).message)) throw e; toast(`Sent your words as typed: ${(e as Error).message}`, "info"); return words; }) : words;
+    // a PoseWear pose for realistic pictures: the writer writes from it (its own prompt and picture) even with an empty box
+    const posePick = !anime && !c.raw ? (await import("../lib/posewear")).usePoseWear.getState().create : null;
     // realistic + plain words: the local writer turns them into a precise Krea 2 prompt (see it under the prompt box)
-    const polished = !anime && !c.raw && writerOn && looksPlain(words)
-      ? await polishKrea(person ? `${words} ${castSentence(gender, cast)}` : words, person ? ch : null, c.shape).catch((e) => { if (/under 18/i.test((e as Error).message)) throw e; toast(`Sent your words as typed: ${(e as Error).message}`, "info"); return null; })
+    const polished = !anime && !c.raw && writerOn && (looksPlain(words) || (posePick && !words.trim()))
+      ? await polishKrea(person ? `${words} ${castSentence(gender, cast)}` : words, person ? ch : null, c.shape, posePick).catch((e) => { if (/under 18/i.test((e as Error).message)) throw e; toast(`Sent your words as typed: ${(e as Error).message}`, "info"); return null; })
       : null;
     const bgLine = c.make === "character" && c.cutout ? " Plain white studio background." : "";
     const positiveSent = polished ? `${polished}${bgLine}` : positiveFor(extra);

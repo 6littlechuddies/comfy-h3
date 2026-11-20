@@ -253,8 +253,10 @@ function DropAvatar({ c, on, onClick }: { c: Character; on: boolean; onClick: ()
   return <div {...t.props} title={t.armed ? `Drop here to move them to ${c.name}` : c.name} className={cx("shrink-0", dropRing(t.armed, t.over))}><Avatar c={c} on={on} onClick={onClick} size={40} /></div>;
 }
 
-function Avatar({ c, on, onClick, size = 36 }: { c: Character; on?: boolean; onClick?: () => void; size?: number }) {
-  const f = coverOf(c);
+function Avatar({ c, on, onClick, size = 40 }: { c: Character; on?: boolean; onClick?: () => void; size?: number }) {
+  // no sheet picture yet: their newest result, so every face in the list can be told apart
+  const last = useJobs((st) => (coverOf(c) ? undefined : st.jobs.find((j) => j.status === "done" && j.meta?.project === c.id && j.outputs.some((o) => o.type === "output" && o.kind === "image"))?.outputs.find((o) => o.type === "output" && o.kind === "image")));
+  const f = coverOf(c) ?? last;
   return (
     <button onClick={onClick} title={c.name} style={{ width: size, height: size }}
       className={cx("shrink-0 overflow-hidden border bg-raised2", on ? "border-accent" : "border-line hover:border-muted")}>

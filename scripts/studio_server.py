@@ -438,10 +438,17 @@ def save_models(reg: dict):
 async def my_models(req):
     """your own checkpoints, by family: [{name, title, version, family, folder, here}]"""
     out = []
+    # why one isn't here: the downloader's own words for that file (CivitAI refused it, early access …)
+    errs: dict = {}
+    try:
+        for f in json.load(open(os.path.join(H3_RUN, "downloads.json"))).get("files") or []:
+            if f.get("err"): errs[os.path.basename(str(f.get("n") or ""))] = str(f["err"])
+    except (OSError, ValueError): pass
     for rel, x in load_models().items():
         here = os.path.isfile(os.path.join(MODELS, x.get("folder", "diffusion_models"), rel))
         out.append({"name": rel, "title": x.get("title", rel), "version": x.get("version", ""), "family": x.get("family", "other"),
-                    "folder": x.get("folder", "diffusion_models"), "base": x.get("base", ""), "here": here, "model_id": x.get("model_id"), "version_id": x.get("version_id")})
+                    "folder": x.get("folder", "diffusion_models"), "base": x.get("base", ""), "here": here, "model_id": x.get("model_id"), "version_id": x.get("version_id"),
+                    **({"problem": errs.get(os.path.basename(rel))} if not here and errs.get(os.path.basename(rel)) else {})})
     return web.json_response({"items": out})
 
 
@@ -451,6 +458,7 @@ async def forget_model(req):
     x = reg.pop(rel, None)
     if x is None: return web.json_response({"error": "Not in your models"}, status=404)
     save_models(reg)
+    _forget("models", rel)
     if d.get("delete"):
         try: os.remove(safe_join(os.path.join(MODELS, x.get("folder", "diffusion_models")), rel))
         except (OSError, web.HTTPException): pass
@@ -498,7 +506,7 @@ def scan_loras() -> list[dict]:
             info = info or {}
             guess = "MiniMax H3" if re.search(r"minimax|(^|[_/-])h3", rel, re.I) else "Qwen" if "qwen" in rel.lower() else ""
             out.append({"name": rel, "title": info.get("title") or os.path.splitext(fn)[0], "base": info.get("base") or guess,
-                        "family": family(info.get("base") or guess), "trigger": info.get("trigger", ""), "tips": info.get("tips") or {}, "role": info.get("role") or lora_role(None, info.get("title") or "", rel), "remembered": bool(info.get("version_id") or info.get("backed_up")),
+                        "family": family(info.get("base") or guess), "trigger": info.get("trigger", ""), "tips": info.get("tips") or {}, "role": ("detail" if (info.get("role") == "character" and REALISM_RE.search(f"{info.get('title') or ''} {rel}")) else info.get("role")) or lora_role(None, info.get("title") or "", rel), "remembered": bool(info.get("version_id") or info.get("backed_up")),
                         "size_mb": round(os.path.getsize(os.path.join(root, fn)) / 1e6)})
     if changed: save_reg(reg)
     return sorted(out, key=lambda x: x["name"].lower())
@@ -859,6 +867,9 @@ TIP_RES = {
 }
 
 
+REALISM_RE = re.compile(r"realism|ultra\s*-?real|snapshot|amateur photo|photo\s*-?real|skin texture|candid|iphone|phone photo|analog film|film grain", re.I)
+
+
 def lora_role(tags: list | None, title: str = "", name: str = "") -> str:
     """what a LoRA does, from its CivitAI tags and name: slider (one attribute, signed strength), character, style, detail,
     concept (pose, clothing, objects…). The Studio's Balance treats them differently: sliders are left alone, the
@@ -866,6 +877,8 @@ def lora_role(tags: list | None, title: str = "", name: str = "") -> str:
     t = {str(x).lower() for x in (tags or [])}
     n = f"{title} {name}".lower()
     if "slider" in t or re.search(r"\bslider\b|_slider|slider_", n): return "slider"
+    # a realism / photo-look LoRA is often tagged "person" or "influencer" on CivitAI — it's not a character
+    if REALISM_RE.search(n): return "detail"
     if t & {"character", "characters", "celebrity", "person", "real person", "influencer"} or re.search(r"\b(character|oc)\b", n): return "character"
     if re.search(r"\b(detail|details|detailer|enhancer|quality|realism|skin texture)\b", n) or t & {"detail", "enhancer", "tool"}: return "detail"
     if t & {"style", "art style", "artstyle", "photography style", "artist"} or re.search(r"\bstyle\b", n): return "style"
@@ -1362,6 +1375,7 @@ async def lora_job(job: dict, url: str):
             mreg = load_models()
             mreg[rel] = {"version_id": vid, "model_id": v.get("modelId"), "title": v["model"]["name"], "version": v.get("name", ""), "base": v.get("baseModel", ""), "family": fam, "folder": folder}
             save_models(mreg)
+            if not job.get("from_import"): _forget("models", rel, False)  # added again by you: imports may bring it too
             job.update(status="done", progress=1.0, name=rel, kind="model", folder=folder, family=fam, trigger="")
             return
         reg = load_reg()
@@ -1369,6 +1383,7 @@ async def lora_job(job: dict, url: str):
         reg[rel] = {"version_id": vid, "model_id": v.get("modelId"), "title": v["model"]["name"], "base": v.get("baseModel", ""), "trigger": trig, "tips": tips,
                     "role": role, "tags": [str(x) for x in mtags][:12]}
         save_reg(reg)
+        if not job.get("from_import"): _forget("loras", rel, False)
         job.update(status="done", progress=1.0, name=rel, family=family(v.get("baseModel", "")), trigger=reg[rel]["trigger"], tips=tips, role=role)
     except Exception as e:  # noqa: BLE001
         job.update(status="error", error=str(e)[:400])
@@ -2455,9 +2470,41 @@ async def upload_lora(req):
                               "trigger": trigger, "backed_up": backed, "size_mb": round(size / 1e6)})
 
 
+def _forgotten(kind: str) -> set:
+    """LoRAs / checkpoints you removed: an import of an older export doesn't bring them back (or download them again)"""
+    d = _state_json("forgotten", {}) or {}
+    return set((d.get(kind) or []) if isinstance(d, dict) else [])
+
+
+def _forget(kind: str, name: str, add: bool = True):
+    d = _state_json("forgotten", {}) or {}
+    d = d if isinstance(d, dict) else {}
+    cur = set(d.get(kind) or [])
+    (cur.add if add else cur.discard)(name)
+    d[kind] = sorted(cur)[-2000:]
+    _state_write("forgotten", d)
+
+
+async def forget_failed(req):
+    """POST: take the library entries that won't download (CivitAI refuses them, the version is gone) off your library —
+    an older export can bring back LoRAs you'd dropped long ago. GET: just list them."""
+    try: files = json.load(open(os.path.join(H3_RUN, "downloads.json"))).get("files") or []
+    except (OSError, ValueError): files = []
+    bad = {os.path.basename(str(f.get("n") or "")): str(f.get("err") or "") for f in files if f.get("group") == "library" and f.get("st") == "failed"}
+    reg, mreg = load_reg(), load_models()
+    hit = [("loras", k, reg[k].get("title") or k) for k in reg if os.path.basename(k) in bad and not os.path.isfile(os.path.join(LORAS, k))]
+    hit += [("models", k, mreg[k].get("title") or k) for k in mreg if os.path.basename(k) in bad and not os.path.isfile(os.path.join(MODELS, mreg[k].get("folder", "diffusion_models"), k))]
+    if req.method == "POST":
+        for kind, k, _ in hit:
+            (reg if kind == "loras" else mreg).pop(k, None); _forget(kind, k)
+        save_reg(reg); save_models(mreg)
+    return web.json_response({"items": [{"kind": kind, "name": k, "title": t, "why": bad.get(os.path.basename(k), "")} for kind, k, t in hit], "removed": req.method == "POST"})
+
+
 async def forget_lora(req):
     d = await req.json()
     reg = load_reg(); reg.pop(d.get("name", ""), None); save_reg(reg)
+    if d.get("name"): _forget("loras", str(d["name"]))
     p = safe_join(LORAS, d.get("name", ""))
     if d.get("delete") and os.path.isfile(p): os.remove(p)
     return web.json_response({"ok": True})
@@ -4225,6 +4272,24 @@ def _usage_report() -> dict:
             "negative_jobs": (negs.get("#jobs") or [0])[0]}
 
 
+async def library_unused(req):
+    """LoRAs / checkpoints in your library that nothing used: not loaded by any job on any rental (the usage log) and not
+    named in any result's record. Characters' LoRAs picked for a batch that hasn't run yet are marked so you keep them."""
+    used = set(); u = _usage_load()
+    for e in (u.get("rentals") or {}).values(): used |= set((e.get("m") or {}).keys())
+    blob = json.dumps(_state_json("jobs", []) or [])
+    out = []
+    for kind, reg in (("loras", load_reg()), ("models", load_models())):
+        for rel, info in reg.items():
+            b = os.path.basename(rel)
+            if b in used or b in blob: continue
+            folder = LORAS if kind == "loras" else os.path.join(MODELS, info.get("folder", "diffusion_models"))
+            try: gb = os.path.getsize(os.path.join(folder, rel)) / 2**30
+            except OSError: gb = 0.0
+            out.append({"kind": kind, "name": rel, "title": info.get("title") or b, "gb": round(gb, 2), "role": info.get("role") or ""})
+    return web.json_response({"items": sorted(out, key=lambda x: -x["gb"]), "rentals": len(u.get("rentals") or {})})
+
+
 async def usage_get(req):
     return web.json_response(_usage_report())
 
@@ -4807,10 +4872,14 @@ def _merge_list(have: list, incoming: list, key: str = "id") -> int:
     return n
 
 
-def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
-    """scenes, presets, prompt files and preferences from a project .zip (scenes of refused characters stay out)"""
+def _import_extras(z, refused_ids: set | None = None, tick=None, pictures: bool = False) -> dict:
+    """scenes, presets, prompt files and preferences from a project .zip (scenes of refused characters stay out).
+    pictures=True ("Bring back old pictures"): only the results, how each was made, favourites and the catalog's records —
+    none of the settings, prompt files, LoRAs, checkpoints or preferences of that older time"""
     names = set(z.namelist())
     got = {}
+    if pictures:
+        names = {n for n in names if n.startswith("results/") or n in ("jobs.json", "catalog_meta.json", "catalog_seen.json", "favorites.json", "input_sources.json")}
     def rd(n):
         try: return json.loads(z.read(n))
         except (KeyError, ValueError): return None
@@ -4865,7 +4934,8 @@ def _import_extras(z, refused_ids: set | None = None, tick=None) -> dict:
         if not isinstance(d, dict): continue
         cur = _state_json(name, {}) or {}
         cur = cur if isinstance(cur, dict) else {}
-        new = {k: v for k, v in d.items() if isinstance(v, dict) and k not in cur}
+        gone = _forgotten(name)  # ones you removed since that export stay removed
+        new = {k: v for k, v in d.items() if isinstance(v, dict) and k not in cur and k not in gone}
         if new:
             _state_write(name, {**cur, **new}); got[name] = len(new)
             if name == "loras": _fetch_missing_loras(new)
@@ -4964,7 +5034,7 @@ def _fetch_missing_loras(reg: dict, now: bool = False):
         _spawn(_bg_fetch(job, url, lambda r=rel: _FETCHING.discard(r), now))
 
 
-def _import_zip(z, progress=None) -> dict:
+def _import_zip(z, progress=None, mode: str = "all") -> dict:
     """a .zip from Export: characters (newer copies win), their pictures, and everything else it carries"""
     try: data = json.loads(z.read("characters.json"))
     except (KeyError, ValueError): raise ValueError("That isn't a characters file from Export (a .zip with characters.json inside)")
@@ -4993,7 +5063,8 @@ def _import_zip(z, progress=None) -> dict:
             refused.append(c.get("name") or cid); refused_ids.add(cid); tick(len(pics)); continue
         i = next((j for j, x in enumerate(have) if isinstance(x, dict) and str(x.get("id")) == cid), None)
         # an older copy (an export from before your latest changes) never replaces the newer one you have
-        if i is not None and (c.get("updatedAt") or 0) < (have[i].get("updatedAt") or 0):
+        if i is not None and ((c.get("updatedAt") or 0) < (have[i].get("updatedAt") or 0) or mode == "pictures"):
+            # (bringing back old pictures: a character you have stays exactly as it is; only missing ones come back)
             kept_newer += 1; tick(len(pics)); continue
         for info in pics:  # its pictures (the same file already here is skipped)
             name = info.filename.split("/")[2]
@@ -5007,7 +5078,7 @@ def _import_zip(z, progress=None) -> dict:
         else: have.insert(0, c); added += 1
     with open(CHAR_FILE + ".tmp", "w") as f: json.dump(have, f)
     os.replace(CHAR_FILE + ".tmp", CHAR_FILE)
-    extras = _import_extras(z, refused_ids, tick)
+    extras = _import_extras(z, refused_ids, tick, pictures=mode == "pictures")
     if progress: progress(len(files), len(files))
     return {"ok": True, "added": added, "updated": updated, "kept_newer": kept_newer, "refused": refused, "aged": aged, "extras": extras}
 
@@ -5062,7 +5133,8 @@ async def import_start(req):
     iid = uuid.uuid4().hex[:12]
     path = os.path.join(IMPORT_DIR, iid + ".zip")
     with open(path, "wb") as f: f.truncate(size)
-    IMPORTS[iid] = {"path": path, "size": size, "got": 0, "state": "uploading", "done": 0, "total": 0, "name": str(d.get("name") or "")[:120], "at": time.time()}
+    IMPORTS[iid] = {"path": path, "size": size, "got": 0, "state": "uploading", "done": 0, "total": 0, "name": str(d.get("name") or "")[:120], "at": time.time(),
+                    "mode": "pictures" if d.get("mode") == "pictures" else "all"}
     return web.json_response({"id": iid, "chunk": 16 * 1024 * 1024})
 
 
@@ -5094,7 +5166,7 @@ def _import_run(it):
     import zipfile
     def progress(done, total): it.update(done=done, total=total)
     try:
-        with zipfile.ZipFile(it["path"]) as z: it["result"] = _import_zip(z, progress)
+        with zipfile.ZipFile(it["path"]) as z: it["result"] = _import_zip(z, progress, it.get("mode") or "all")
         it["state"] = "done"
     except zipfile.BadZipFile:
         it.update(state="error", error="That isn't a .zip file (or it didn't arrive whole — try again)")
@@ -5789,10 +5861,15 @@ async def catalog(req):
         m = meta.get(f"{it['subfolder']}/{it['filename']}")
         p = m.get("project") if isinstance(m, dict) else None
         return f"@{p}" if p and p != "testing" else it["folder"]
-    counts: dict = {}
+    counts: dict = {}; thumbs: dict = {}
     for it in items:
         k = key(it); counts[k] = counts.get(k, 0) + 1
+        if k not in thumbs and it["kind"] == "image": thumbs[k] = {"subfolder": it["subfolder"], "filename": it["filename"], "type": "output"}
     sel = [it for it in items if (not want or key(it) in want or it["folder"] in want) and (not kind or it["kind"] == kind) and it["folder"] != "Testing"]
+    if req.query.get("fav"):  # only your ★ ones (the Studio's favourites: "output/<subfolder>/<file>")
+        fav = _state_json("favorites", {}) or {}
+        fav = fav if isinstance(fav, dict) else {}
+        sel = [it for it in sel if fav.get(f"output/{it['subfolder']}/{it['filename']}")]
     if q:
         # every word must be there ("nun outfit" finds pictures whose words have both), in any order
         words = q.split()
@@ -5802,7 +5879,7 @@ async def catalog(req):
         sel = [it for it, h in ((it, hay(it)) for it in sel) if all(w in h for w in words)]
     off, lim = max(0, int(req.query.get("offset", 0) or 0)), min(500, max(1, int(req.query.get("limit", 120) or 120)))
     page = [{**it, **({"meta": meta[k]} if (k := f"{it['subfolder']}/{it['filename']}") in meta else {})} for it in sel[off:off + lim]]
-    return web.json_response({"items": page, "total": len(sel), "folders": sorted(({"name": k, "count": v} for k, v in counts.items() if k != "Testing"), key=lambda x: -x["count"])})
+    return web.json_response({"items": page, "total": len(sel), "folders": sorted(({"name": k, "count": v, "thumb": thumbs.get(k)} for k, v in counts.items() if k != "Testing"), key=lambda x: -x["count"])})
 
 
 async def catalog_project(req):
@@ -6248,7 +6325,7 @@ def main():
         web.post("/studio-api/output/delete", delete_output), web.post("/studio-api/keep", keep), web.get("/studio-api/kept/{path:.+}", get_kept), web.delete("/studio-api/kept/{path:.+}", del_kept),
         web.get("/studio-api/https", https_link),
         web.get("/studio-api/loras", list_loras), web.post("/studio-api/loras/fetch-missing", fetch_missing_loras), web.post("/studio-api/loras/add", add_lora),
-        web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora),
+        web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora), web.get("/studio-api/loras/failed", forget_failed), web.get("/studio-api/library/unused", library_unused), web.post("/studio-api/loras/failed", forget_failed),
         web.post("/studio-api/loras/upload", upload_lora),
         web.post("/studio-api/client-error", client_error),
         web.get("/studio-api/storage", storage), web.post("/studio-api/usage", usage_post), web.route("*", "/studio-api/machines", machines), web.get("/studio-api/usage", usage_get), web.post("/studio-api/storage", storage_act),

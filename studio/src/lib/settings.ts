@@ -139,7 +139,7 @@ export const DEFAULTS: Settings = {
     negative: "worst quality, low quality, lowres, bad anatomy, bad hands, extra digits, missing fingers, watermark, signature, text, blurry",
     cutout: false, lorasAnime: [], lorasReal: [], shape: "portrait", count: 4,
     advAnime: adv("euler_ancestral", "normal", 28, 5.5), advReal: adv("euler", "simple", 25, 1),
-    realModel: "krea2", lorasKrea: [], advKrea: adv("euler", "simple", 8, 1), advKreaRaw: adv("euler", "simple", 28, 4.5), kreaTurboLora: 0,
+    realModel: "krea2", lorasKrea: [], advKrea: adv("euler", "beta", 8, 1), advKreaRaw: adv("euler", "simple", 28, 4.5), kreaTurboLora: 0,
     animeModel: "anima", lorasAnima: [], advAnima: adv("er_sde", "simple", 30, 4),
     characterId: null, styleAnime: "default", styleReal: "default", raw: false,
   },
@@ -283,6 +283,13 @@ Promise.all([loadState<Settings>("settings"), loadState<SettingsState["presets"]
   if ((merged.edit.engine as string) === "qwen") merged.edit.engine = "krea";
   // Edit came out at ~1 MP (about 768×1344) while Create makes ~2 MP: the old 1024 default moves up to 2 MP, like Create
   if (merged.edit.resolution === 1024) merged.edit.resolution = 1448;
+  // Krea 2 Turbo's skin: the "beta" schedule spends more of its 8 steps on fine detail than "simple" — pores and texture
+  // instead of smooth plastic skin (what Krea 2 fine-tunes like Lustify recommend). Only the untouched old default moves.
+  const ak = merged.create.advKrea;
+  if (ak && ak.sampler === "euler" && ak.scheduler === "simple" && ak.steps === 8 && ak.cfg === 1 && !(() => { try { return localStorage.getItem("h3.beta1"); } catch { return "1"; } })()) {
+    merged.create.advKrea = { ...ak, scheduler: "beta" };
+    try { localStorage.setItem("h3.beta1", "1"); } catch { /* */ }
+  }
   useSettings.setState({ s: merged, presets: p ?? {}, loaded: true });
 });
 

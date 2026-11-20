@@ -60,14 +60,14 @@ async function sendPiece(id: string, blob: Blob, offset: number, onBytes: (n: nu
 
 /** Upload a .zip from Export in pieces (several at once — faster, and never over Cloudflare's 100 MB limit), then wait for
  *  the rental to unpack it. Progress goes to useImport (the import card in the Studio, and the startup screen). */
-export async function uploadImport(file: File): Promise<ImportResult> {
+export async function uploadImport(file: File, mode: "all" | "pictures" = "all"): Promise<ImportResult> {
   const st = useImport.getState();
   if (st.run && ["uploading", "unpacking", "fetching"].includes(st.run.state) && st.run.source === "you") throw new Error("An import is already running — wait for it to finish");
   useImport.setState({ run: { id: "", name: file.name, source: "you", state: "uploading", size: file.size, got: 0, done: 0, total: 0 }, hidden: false });
   let start;
   try {
     if (!/\.zip$/i.test(file.name)) throw new Error("That isn't a .zip from Export");
-    start = await json(await fetch("/studio-api/import/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, size: file.size }) }));
+    start = await json(await fetch("/studio-api/import/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, size: file.size, mode }) }));
   } catch (e) {
     useImport.getState().set({ state: "error", error: (e as Error).message === "Failed to fetch" ? "Couldn't reach the rental — try again in a moment" : (e as Error).message });
     throw e;

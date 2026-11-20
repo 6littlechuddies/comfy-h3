@@ -472,13 +472,12 @@ function debugText(rows: Row[]): string {
 function BatchCheckpoint() {
   const ck = useBatch((s) => s.ck) ?? { mode: "create" as const, name: "", locked: false };
   const set = (p: Partial<typeof ck>) => useBatch.getState().set({ ck: { ...ck, ...p } });
-  const value = ck.mode === "create" ? "@create" : ck.name;
+  const value = ck.mode === "create" ? "@create" : ck.mode === "auto" ? "@auto" : ck.name;
   return (
-    <CheckpointPicker model="krea2" models={["krea2"]} follow="Same as 03 Create" value={value}
-      onChange={(v) => set(v === "@create" ? { mode: "create", locked: false } : { mode: "pick", name: v })}
-      right={ck.mode === "pick" && <button onClick={() => set({ locked: !ck.locked })} aria-pressed={ck.locked}
-        title={ck.locked ? "Locked: every row uses it, and Cosplay's DeepSeek won't pick another. Click to unlock" : "Not locked: rows without their own use it, and DeepSeek may still pick one per cosplay character. Click to lock"}
-        className={cx("press flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10.5px]", ck.locked ? "border-accent/60 bg-accent/15 text-accent" : "border-line text-dim hover:text-ink")}>
-        <Icon name={ck.locked ? "lock" : "unlock"} size={10} />{ck.locked ? "Locked" : "Auto"}</button>} />
+    <div className="flex flex-col gap-1">
+      <CheckpointPicker model="krea2" models={["krea2"]} follow="Same as 03 Create" extra={[["@auto", "DeepSeek picks one for each character"]]} value={value}
+        onChange={(v) => set(v === "@create" ? { mode: "create", locked: true } : v === "@auto" ? { mode: "auto", locked: false } : { mode: "pick", name: v, locked: true })} />
+      <p className="text-[11.5px] leading-relaxed text-dim">{ck.mode === "auto" ? "Cosplay: DeepSeek picks one of your checkpoints per character (its reason is on each character). Other rows use 03 Create's." : "Every picture in the batch uses this one — DeepSeek doesn't change it."}</p>
+    </div>
   );
 }

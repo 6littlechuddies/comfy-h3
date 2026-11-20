@@ -331,7 +331,7 @@ def parse() -> list[dict]:
 
 
 # ------------------------------------------------------------------ sizes + links
-def resolve(fl: dict) -> None:
+def resolve(fl: dict, quiet: bool = False) -> None:
     """real download URL (CivitAI -> signed link, so the API key never goes to the file host) and its size"""
     url, headers = fl["url"], {}
     tok = fl.get("key") or HF_TOKEN  # its own key in the team, else the current one
@@ -404,7 +404,9 @@ def resolve(fl: dict) -> None:
         why = refused(fl["url"], r.status_code)
         if why and fl.get("civitai_note"): why = f"CivitAI refused ({r.status_code}): {fl['civitai_note']}"
         elif why and fl.get("civitai_said"): why += f" — CivitAI says: “{fl['civitai_said']}”"
-        if why and not fl.get("error"): fl["error"] = why; log(f"{fl['name']}: {why}")
+        if why and not fl.get("error"):
+            fl["error"] = why
+            if not quiet: log(f"{fl['name']}: {why}")
     except Exception as e:  # noqa: BLE001
         if "get" not in fl and fl.get("fallback") and url.startswith("https://civitai.com/"):
             log(f"{fl['name']}: couldn't reach CivitAI ({e}) — using {fl['fallback']}")
@@ -519,7 +521,7 @@ SMALL_GPU = os.environ.get("H3_IMAGES_ONLY") == "1" or (os.environ.get("H3_IMAGE
 SMALL_SKIP = {"video", "writer_xl", "autoprompter", "eros"}
 # Waiting until asked for (status menu → Now, or the tab that needs it): Eros Max (Animate → Video model), LoRA training
 # (Characters → Train) and the AutoPrompter extras (old node-editor workflow only) — they ate the disk the 27B writer needs
-DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend,ph3,kdepth").split(",") if x.strip()}
+DEFAULT_LATER = {x.strip() for x in os.environ.get("H3_DEFAULT_LATER", "eros,autoprompter,trainer,extend,ph3").split(",") if x.strip()}
 # Retired: never downloaded, and taken off the disk when found (Edit V1 — V2 replaces it; the Qwen edit helper, both builds;
 # the IP-Adapter anime sheets; the node editor's AutoPrompter LLM — DeepSeek writes). "Download now" still fetches one.
 RETIRED = {x.strip() for x in os.environ.get("H3_RETIRED", "kedit,qwen,qwen_full,animeref,autoprompter").split(",") if x.strip()}
@@ -531,13 +533,13 @@ DEFAULT_LATER |= RETIRED
 # screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
 # "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
 PRESETS = {
-    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kedit2", "writer", "sam"]},
-    "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "writer", "sam"]},
-    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kedit2", "writer", "sam"]},
-    "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "writer", "sam"]},
-    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kedit2", "writer", "video", "sam", "smooth"]},
+    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam"]},
+    "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "kdepth", "writer", "sam"]},
+    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam"]},
+    "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "kdepth", "writer", "sam"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "video", "sam", "smooth"]},
     "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth"]},
-    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "writer", "video", "sam", "smooth"]},
+    "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "kdepth", "writer", "video", "sam", "smooth"]},
     "all":        {"label": "Everything",                  "groups": []},
 }
 
@@ -878,8 +880,27 @@ def main() -> int:
     launched_at = time.time(); by_path = {}; run_hf: list[dict] = []; log_pos = 0
     shown: list[tuple[float, int]] = []  # (time, bytes) of the last ~12 s, for the speed on the page (3 s alone jumps around)
     log_out = open("/var/log/aria2.log" if os.path.isdir("/var/log") and os.access("/var/log", os.W_OK) else os.devnull, "a")
+    lib_seen = [0.0]
     while True:
         mark_later()
+        # a LoRA / checkpoint you removed from your library (or "Remove the ones that won't download") leaves the queue
+        try:
+            mt = max((os.path.getmtime(os.path.join(STATE_DIR, n)) for n in ("loras.json", "models.json") if os.path.exists(os.path.join(STATE_DIR, n))), default=0)
+        except OSError: mt = 0
+        if mt and mt != lib_seen[0]:
+            lib_seen[0] = mt
+            names = set()
+            for n in ("loras.json", "models.json"):
+                try: names |= {os.path.basename(k) for k in json.load(open(os.path.join(STATE_DIR, n)))}
+                except (OSError, ValueError): pass
+            for g in groups:
+                if g["id"] != "library": continue
+                gone = [f for f in g["files"] if f["name"] not in names and not complete(f)]
+                if gone:
+                    g["files"] = [f for f in g["files"] if f not in gone]
+                    log(f"{len(gone)} file(s) left your library — taken off the download list")
+                    if g["id"] in flagged: continue
+                    if g.get("state") == "error" and all(complete(f) for f in g["files"]): g.pop("error", None)
         m = os.path.getmtime(LATER_FILE) if os.path.exists(LATER_FILE) else 0
         if m != lf_mtime:  # a switch was pressed: "Download now" on a failed group retries its files
             lf_mtime = m
@@ -909,16 +930,21 @@ def main() -> int:
                 if g.get("later"): continue
                 for f in g["files"]:
                     if f.get("error") and not complete(f):
-                        log(f"{f['name']}: trying again"); drop_partial(f); f.pop("fresh", None); resolve(f)
+                        log(f"{f['name']}: trying again"); drop_partial(f); f.pop("fresh", None); f.pop("tries", None); resolve(f)
         nxt = next_ids(groups)
         order = queue_order(groups, nxt)
         # a CivitAI file that couldn't get a link (often: your CivitAI key only arrives with the restore from your drive, a
         # minute after start) asks again every minute instead of waiting half an hour
         for g in order:
             for f in g["files"]:
-                if f.get("error") and wanted(f) and not complete(f) and f["url"].startswith(("https://civitai.com/", "civitai-file:")) and time.time() - f.get("resolved", 0) > 60:
-                    resolve(f)
-                    if not f.get("error"): log(f"{f['name']}: CivitAI gave the link now")
+                # … and backs off when it keeps saying no (1, 2, 4, 8 … minutes, at most every 30): a refusal (403: early access,
+                # members-only) doesn't change from one minute to the next, and asking every minute only fills the log
+                wait = min(1800, 60 * 2 ** min(5, f.get("tries", 0)))
+                if f.get("error") and wanted(f) and not complete(f) and f["url"].startswith(("https://civitai.com/", "civitai-file:")) and time.time() - f.get("resolved", 0) > wait:
+                    quiet = f.get("tries", 0) >= 2
+                    resolve(f, quiet=quiet)
+                    if not f.get("error"): log(f"{f['name']}: CivitAI gave the link now"); f.pop("tries", None)
+                    else: f["tries"] = f.get("tries", 0) + 1
         want = [f for g in order for f in g["files"] if wanted(f) and not complete(f) and not f.get("error")]
         keys = {f["path"] for f in want}
         by_path = {f["path"]: f for g in groups for f in g["files"]}

@@ -221,9 +221,7 @@ export async function suggestNames(chars: Character[], avoid: string[] = []): Pr
     });
     const used = [...taken, ...avoid, ...out.flatMap((x) => [x.name, ...x.alt])];
     const raw = await runWriter("name", { taken: used.join(", ") || "(none)", characters: lines.join("\n") }, { tab: "characters", label: `Naming ${part.length} character${part.length === 1 ? "" : "s"}` });
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("The writer didn't answer in the expected format — try again");
-    const d = JSON.parse(m[0]) as { names?: { n: number; name: string; alt?: string[]; why?: string }[] };
+    const d = (await import("../lib/looseJson")).looseJson<{ names?: { n: number; name: string; alt?: string[]; why?: string }[] }>(raw);
     const seen = new Set(used.map((x) => x.toLowerCase()));
     part.forEach((c, k) => {
       const r = d.names?.find((x) => Number(x.n) === k + 1);

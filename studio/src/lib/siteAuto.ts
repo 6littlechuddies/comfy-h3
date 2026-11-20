@@ -1,3 +1,4 @@
+import { looseJson } from "./looseJson";
 // Your site, hands-off: (1) fill a character's whole profile from everything made of them — their look, the prompts of
 // their pictures, their set titles — keeping what you already wrote; (2) sort all their pictures into themed sets by
 // what each picture shows, rated sfw (free) / suggestive / explicit (behind the paywall). Both go through the prompt
@@ -89,7 +90,8 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
   return out;
 }
 
-const json = (raw: string) => { const m = raw.match(/\{[\s\S]*\}/); if (!m) throw new Error("The writer didn't answer in the expected format — try again"); return JSON.parse(m[0]); };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const json = (raw: string) => looseJson<any>(raw);
 
 // ------------------------------------------------------------------ 1. the whole profile
 const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary"] as const;
@@ -182,7 +184,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     .slice(0, 12).map((x) => `- ${x.name}: ${stripAges(`${x.site?.bio ?? ""} ${(x.site?.backstory ?? "").split(/(?<=\.)\s/)[0] ?? ""}`).slice(0, 220)}`);
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
-    stripAges(describe(c)), c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`, c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     sparkNote(others.join(" ")),
@@ -308,6 +310,15 @@ const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
 /** a phrase of three or more words used twice in the sample texts = a catchphrase she'd repeat forever */
 const repeats3 = (t: string) => { const w = t.toLowerCase().replace(/^(him|you):/gm, "").match(/[a-z']+/g) ?? []; const seen = new Set<string>(); for (let i = 0; i + 2 < w.length; i++) { const k = w.slice(i, i + 3).join(" "); if (seen.has(k) && !/^(i don't|you know|i'm not|it's a|i was|in the|of the)/.test(k)) return true; seen.add(k); } return false; };
 
+/** a cosplay character ("Cosplay of Makima (Chainsaw Man)"): her personality IS that character's — researched from the
+ *  source (anime, manga, game, comics): temperament, how she talks, her habits and quirks, what she wants, how she treats
+ *  people — as a real adult woman living a real-world version of that life. The name stays off the site (titles, bio). */
+export function canonNote(source?: string): string {
+  const m = /^Cosplay of (.+)$/.exec(source ?? "");
+  if (!m) return "";
+  return `HER PERSONALITY IS ${m[1].toUpperCase()}'S — think it through from the source material first (the anime, manga, game or comics: how she acts across the story, what she says and how, what she wants, fears and loves, how she treats people she likes and people she doesn't). Model her on that character exactly: the same temperament, the same way of talking (sentence length, formality, teasing or bluntness, verbal habits — paraphrased into her own texting, never quoting lines from the show), the same quirks, habits, tastes, values, pet peeves and contradictions, the same way she flirts or holds people at arm's length. She is an adult woman who IS like that, living a real-world version of that life (her job, home and hobbies echo the character's world). Never write the character's or series' name into her bio, title, greeting or messages, and she never claims to be that character.`;
+}
+
 /** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.
  *  When the editor's answer is cut short or loses a section, the parts are put together as they are (with its NEVER SAY). */
 export async function deepProfile(c: Character, o: { onStep?: (t: string) => void } = {}): Promise<void> {
@@ -316,7 +327,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const site = cur0.site ?? {};
   const core = site.personaCore?.trim() || site.persona?.trim() || "";
   if (!core) return;
-  const who = [`Name: ${cur0.name}. Adult woman.`, stripAges(describe(cur0)), site.direction && `Owner's direction: ${site.direction}`, site.bio && `Bio: ${site.bio}`,
+  const who = [`Name: ${cur0.name}. Adult woman.`, stripAges(describe(cur0)), canonNote(cur0.source), site.direction && `Owner's direction: ${site.direction}`, site.bio && `Bio: ${site.bio}`,
     site.backstory && `Backstory: ${site.backstory}`, site.personality && `Traits: ${site.personality}`, site.voice && `How she texts: ${site.voice}`, site.quirks && `Texting habits: ${site.quirks}`,
     site.opinions && `Opinions: ${site.opinions}`, site.flaw && `Flaw: ${site.flaw}`, site.greeting && `Her first message: ${site.greeting}`].filter(Boolean).join("\n");
   const call = (task: string, draft: string, label: string) => runWriter("deep", { task: task + TAIL, character: who, draft: draft || "(nothing yet)" }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } }).catch(() => "");

@@ -503,6 +503,28 @@ function PresetPick() {
   );
 }
 
+/** your library's entries that won't download (an old export can bring back LoRAs you'd dropped; CivitAI refuses some):
+ *  see them, take them off in one go */
+function DropFailed() {
+  const [items, setItems] = useState<{ kind: string; name: string; title: string; why: string }[] | null>(null);
+  const toast = useJobs((s) => s.toast);
+  const load = async () => setItems((await (await fetch("/studio-api/loras/failed")).json()).items ?? []);
+  const drop = async () => {
+    const r = await (await fetch("/studio-api/loras/failed", { method: "POST" })).json();
+    toast(`Took ${r.items?.length ?? 0} off your library — they won't download or come back with an import`, "good"); setItems(null);
+  };
+  return (
+    <div className="-mt-0.5 ml-[18px] flex flex-col gap-1 text-[11.5px]">
+      {items === null ? <button onClick={() => void load()} className="self-start text-muted underline-offset-2 hover:text-ink hover:underline">Which ones? — remove the ones that won't download</button>
+        : items.length === 0 ? <span className="text-dim">None left to remove.</span>
+        : <>
+          <ul className="max-h-40 overflow-auto border border-line bg-raised px-2 py-1">{items.map((x) => <li key={x.name} className="truncate py-0.5" title={x.why}><span className="text-ink">{x.title}</span> <span className="text-dim">· {x.kind === "models" ? "checkpoint" : "LoRA"}{x.why ? ` · ${x.why.slice(0, 60)}` : ""}</span></li>)}</ul>
+          <span className="flex gap-2"><button onClick={() => void drop()} className="press border border-bad/50 px-2 py-0.5 text-bad hover:bg-bad/10">Remove these {items.length}</button><button onClick={() => setItems(null)} className="text-dim hover:text-ink">Keep</button></span>
+        </>}
+    </div>
+  );
+}
+
 function DownloadGroups() {
   const groups = useDownloads((s) => s.groups);
   const active = useDownloads((s) => s.active);
@@ -521,7 +543,8 @@ function DownloadGroups() {
             <span className={cx("micro w-16 shrink-0 text-right", g.why || g.state === "error" ? "text-hot" : "text-dim")} title={g.why ?? g.error ?? undefined}>{g.state === "done" ? "READY" : g.why ? (/disk/.test(g.why) ? "NO ROOM" : /card/.test(g.why) ? "BIG CARD" : "LATER") : g.state === "skipped" || g.state === "later" ? "LATER" : g.state === "error" ? "FAILED" : g.state === "downloading" ? `${g.pct}%` : "IN LINE"}</span>
             <LaterSwitch g={g} />
           </div>
-        )).flatMap((row, i) => { const g = groups[i]; return g.state === "error" && g.error ? [row, <p key={`${g.id}-why`} className="-mt-1 ml-[18px] text-[11px] leading-snug text-hot/90">{g.error.split(" — ").slice(1).join(" — ") || g.error}</p>] : [row]; })}
+        )).flatMap((row, i) => { const g = groups[i]; return g.state === "error" && g.error ? [row, <p key={`${g.id}-why`} className="-mt-1 ml-[18px] text-[11px] leading-snug text-hot/90">{g.error.split(" — ").slice(1).join(" — ") || g.error}</p>,
+          ...(g.id === "library" ? [<DropFailed key="dropfailed" />] : [])] : [row]; })}
       </div>
       <a href="/h3-boot?stay=1" className="micro mt-2 inline-block text-dim hover:text-ink">FULL DOWNLOAD SCREEN — FILES, SPEEDS, RETRY</a>
     </div>

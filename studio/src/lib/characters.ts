@@ -1,3 +1,4 @@
+import { looseJson } from "./looseJson";
 // Character library: saved once, used everywhere. The data and the reference pictures are kept with your
 // settings (ComfyUI/user/default/studio), so they come back on every new rental via the B2 backup.
 import { create } from "zustand";
@@ -263,17 +264,17 @@ export function exportCharacters(ids?: string[]) {
   }).catch(() => {});
 }
 /** bring characters back from an Export .zip: new ones are added, ones you already have are updated */
-export async function importCharacters(file: File): Promise<ImportResult> {
+export async function importCharacters(file: File, mode: "all" | "pictures" = "all"): Promise<ImportResult> {
   clearTimeout(timer); // don't let a pending save overwrite what arrives
-  const d = await uploadImport(file);
+  const d = await uploadImport(file, mode);
   await afterImport(d);
   return d;
 }
 /** an import finished (yours, or the rental's own restore from Proton Drive): pick up what came in */
 export async function afterImport(d: ImportResult | undefined) {
   clearTimeout(timer);
-  // results that came along show up in every tab's results right away
-  import("./jobs").then((m) => m.syncJobs()).catch(() => {});
+  // results that came along show up in every tab's results right away (and ones hidden as "not here" are looked at again)
+  import("./jobs").then((m) => { m.resetMissing(); return m.syncJobs(); }).catch(() => {});
   const l = await loadState<Character[]>("characters");
   useCharacters.setState({ list: withAge(Array.isArray(l) ? l : []), loaded: true });
   // scenes, presets, chats, prompt files or preferences came along: start fresh so every part of the Studio picks them up
@@ -355,10 +356,11 @@ useJobs.subscribe((s, prev) => {
 
 /** read a profile the extractor returned (JSON somewhere in the text) */
 export function parseExtracted(raw: string): Partial<Character> | null {
-  const m = raw.replace(/<think>[\s\S]*?<\/think>/g, "").match(/\{[\s\S]*\}/);
-  if (!m) return null;
+  const text = raw.replace(/<think>[\s\S]*?<\/think>/g, "");
+  if (!text.includes("{")) return null;
   try {
-    const d = JSON.parse(m[0]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = looseJson<any>(text);
     const g = String(d.gender ?? "").toLowerCase();
     return {
       name: String(d.name ?? "").trim() || "Unnamed", age: Number(d.age) || 25, // no age given: an adult by default

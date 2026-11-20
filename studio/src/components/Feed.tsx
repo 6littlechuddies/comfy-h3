@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useImport } from "../lib/importer";
 import { openPictureMenu } from "./PictureMenu";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -96,8 +97,21 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra, allProject
   // results whose files aren't on this rental (made on an earlier one and not restored) are checked up front and left out,
   // so the count is what you can actually open — before, they only disappeared once their tile had tried to load
   const keysNow = items.map((it) => missingKey(it.o)).join("|");
-  useEffect(() => { checkAll(items.map((it) => it.o)); }, [keysNow]); // eslint-disable-line react-hooks/exhaustive-deps
+  const epoch = useMissing((m) => m.epoch);
+  const importing = useImport((s) => !!s.run && ["uploading", "unpacking", "fetching"].includes(s.run.state));
+  useEffect(() => { checkAll(items.map((it) => it.o)); }, [keysNow, epoch, importing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // newest first, left to right across the top (columns were filled top to bottom, so the newest ones sat down column 1),
+  // and more tiles as you scroll (all 800 at once made the page crawl)
   const [size, setSize] = useState<"s" | "m" | "l">(() => { try { return (localStorage.getItem("h3.feed.size") as "s" | "m" | "l") || "m"; } catch { return "m"; } });
+  const cols = useCols(size);
+  const [limit, setLimit] = useState(60);
+  const more = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = more.current; if (!el) return;
+    const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) setLimit((l) => l + 60); }, { rootMargin: "1200px" });
+    io.observe(el); return () => io.disconnect();
+  }, [stacks.length > limit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = stacks.slice(0, limit);
   const pickSize = (v: "s" | "m" | "l") => { setSize(v); try { localStorage.setItem("h3.feed.size", v); } catch { /* */ } };
   const failed = jobs.find((j) => j.status === "error" && !j.meta?.quietFail); // a recipe's / picked pictures' failures get one summary instead
   const acts = (it: Item) => [...actionsFor(it), ...(extra?.(it) ?? [])];
@@ -115,9 +129,9 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra, allProject
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3 pt-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-1 [&>button]:whitespace-nowrap">
         <h2 className="display text-[17px] ">Results</h2>
-        <span className="text-xs text-dim">{all ? "all projects" : selName ? `${selName}'s project` : "Free work"}{items.length ? ` · ${items.length}${stacks.length !== shown.length ? ` in ${stacks.length} stacks` : ""}` : ""}</span>
+        <span className="whitespace-nowrap text-xs text-dim">{all ? "all projects" : selName ? `${selName}'s project` : "Free work"}{items.length ? ` · ${items.length}${stacks.length !== shown.length ? ` in ${stacks.length} stacks` : ""}` : ""}</span>
         {(elsewhere > 0 || all) && <button onClick={() => setAll((v) => !v)} className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">{all ? "Only this project" : `+ ${elsewhere} in other projects`}</button>}
         <button onClick={() => import("./Catalog").then((m) => m.openCatalog())} title="Every picture and video on this rental, including older ones" className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Catalog · all of them</button>
         <form role="search" onSubmit={(e) => { e.preventDefault(); const q = new FormData(e.currentTarget).get("q")?.toString().trim(); if (q) import("./Catalog").then((m) => m.searchResults(q)); }} className="relative hidden md:block">
@@ -165,9 +179,17 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra, allProject
           {onlyFav ? "No favourites yet — tap the ★ on a result." : empty}
         </div>
       ) : (
-        <div className={cx("gap-2 [&>*]:mb-2", { s: "columns-3 md:columns-4 xl:columns-5 2xl:columns-7", m: "columns-2 md:columns-3 2xl:columns-5", l: "columns-1 md:columns-2 2xl:columns-3" }[size])}>
-          {stacks.map((st, i) => <Stack key={trayIdOf(st[0].o)} st={st} favs={favs} acts={acts} size={size} onOpen={(it) => setOpen(shown.indexOf(it))} delay={Math.min(i, 8) * 30} sel={pick} />)}
-        </div>
+        <>
+          <div className="flex items-start gap-2">
+            {Array.from({ length: cols }, (_, c) => (
+              <div key={c} className="flex min-w-0 flex-1 flex-col gap-2">
+                {visible.map((st, i) => (i % cols === c ? <Stack key={trayIdOf(st[0].o)} st={st} favs={favs} acts={acts} size={size} onOpen={(it) => setOpen(shown.indexOf(it))} delay={Math.min(i, 8) * 30} sel={pick} /> : null))}
+              </div>
+            ))}
+          </div>
+          {stacks.length > limit && <div ref={more} className="flex items-center justify-center gap-3 py-4 text-[12.5px] text-dim">
+            Showing {limit} of {stacks.length}<button onClick={() => setLimit(stacks.length)} className="text-muted underline-offset-2 hover:text-ink hover:underline">Show all</button></div>}
+        </>
       )}
       {open != null && shown[open] && createPortal(<Lightbox items={shown} index={open} setIndex={setOpen} acts={acts} />, document.body)}
     </div>
@@ -176,8 +198,14 @@ export function Feed({ tab, empty, kinds = ["image", "video"], extra, allProject
 
 /** a picture that didn't load: if its file isn't on this rental, the card goes (instead of an empty black box) */
 const checked = new Set<string>();
-/** HEAD every result not checked yet, six at a time (each file once per page load) */
+let checkedEpoch = 0;
+/** HEAD every result not checked yet, six at a time (each file once per page load — again after an import). While an
+ *  import is still unpacking, files are on their way: nothing is called missing then (the count used to drop as it ran) */
 function checkAll(os: Output[]) {
+  const ep = useMissing.getState().epoch;
+  if (ep !== checkedEpoch) { checked.clear(); checkedEpoch = ep; }
+  const run = useImport.getState().run;
+  if (run && ["uploading", "unpacking", "fetching"].includes(run.state)) return;
   const todo = os.filter((o) => !checked.has(missingKey(o)));
   todo.forEach((o) => checked.add(missingKey(o)));
   let i = 0;
@@ -189,6 +217,14 @@ function goneCheck(o: Output) {
   fetch(viewUrl(o), { method: "HEAD" }).then((r) => {
     if (r.status === 404) useMissing.setState((m) => ({ keys: { ...m.keys, [missingKey(o)]: true } }));
   }).catch(() => {});
+}
+
+/** how many columns the results get at this width and tile size (the same steps the old CSS columns had) */
+function useCols(size: "s" | "m" | "l") {
+  const [w, setW] = useState(() => window.innerWidth);
+  useEffect(() => { const on = () => setW(window.innerWidth); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
+  const at = (base: number, md: number, xl: number, x2: number) => (w >= 1536 ? x2 : w >= 1280 ? xl : w >= 768 ? md : base);
+  return size === "s" ? at(3, 4, 5, 7) : size === "m" ? at(2, 3, 3, 5) : at(1, 2, 2, 3);
 }
 
 function Star({ on, size = 16 }: { on: boolean; size?: number }) {

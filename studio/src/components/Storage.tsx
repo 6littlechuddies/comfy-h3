@@ -316,17 +316,40 @@ const ago = (t: number | null) => {
 };
 
 /** which downloads you actually use, across every rental (the usage log) — the ones you never use are the ones to drop */
+/** LoRAs and checkpoints in your library that no picture used (every result's record is checked): re-downloaded on
+ *  every rental for nothing */
+function LibraryFat() {
+  const [items, setItems] = useState<{ kind: string; name: string; title: string; gb: number; role?: string }[] | null>(null);
+  const [pick, setPick] = useState<Record<string, boolean>>({});
+  const load = async () => { const d = await (await fetch("/studio-api/library/unused")).json(); setItems(d.items ?? []); setPick(Object.fromEntries((d.items ?? []).map((x: { name: string; role?: string }) => [x.name, x.role !== "character"]))); }; // character LoRAs may be waiting in a batch: unticked
+  const drop = async () => {
+    const names = (items ?? []).filter((x) => pick[x.name]);
+    for (const x of names) await fetch(x.kind === "models" ? "/studio-api/models/forget" : "/studio-api/loras/forget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: x.name, delete: true }) });
+    useJobs.getState().toast(`Removed ${names.length} from your library — they won't download on the next rentals`, "good"); setItems(null);
+  };
+  if (items === null) return <button onClick={() => void load()} className="mt-2 text-[12.5px] text-muted underline-offset-2 hover:text-ink hover:underline">LoRAs and checkpoints no picture has used…</button>;
+  if (!items.length) return <p className="mt-2 text-[12.5px] text-dim">Every LoRA and checkpoint in your library has been used.</p>;
+  const sel = items.filter((x) => pick[x.name]);
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 border border-line p-2.5 text-[12.5px]">
+      <p className="text-muted">{items.length} in your library that no picture you have used — they download again on every rental. Untick the ones to keep.</p>
+      <ul className="max-h-56 overflow-auto">{items.map((x) => <li key={x.name}><label className="flex cursor-pointer items-center gap-2 py-0.5"><input type="checkbox" checked={!!pick[x.name]} onChange={(e) => setPick({ ...pick, [x.name]: e.target.checked })} /><span className="min-w-0 flex-1 truncate">{x.title}</span><span className="text-dim">{x.kind === "models" ? "checkpoint" : "LoRA"} · {x.gb.toFixed(2)} GB</span></label></li>)}</ul>
+      <span className="flex gap-2"><button disabled={!sel.length} onClick={() => void drop()} className="press border border-bad/50 px-2 py-0.5 text-bad hover:bg-bad/10 disabled:opacity-40">Remove {sel.length} ({sel.reduce((n, x) => n + x.gb, 0).toFixed(1)} GB)</button><button onClick={() => setItems(null)} className="text-dim hover:text-ink">Close</button></span>
+    </div>
+  );
+}
+
 function WhatYouUse() {
   const [r, setR] = useState<UsageReport | null | undefined>(undefined);
   const [busy, setBusy] = useState("");
   const load = () => usageReport().then(setR);
   useEffect(() => { load(); }, []);
-  const later = async (id: string) => {
+  const later = async (id: string, remove = false) => {
     setBusy(id);
     try {
-      const res = await fetch("/studio-api/downloads/later", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group: id, later: true }) });
+      const res = await fetch("/studio-api/downloads/later", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group: id, later: true, ...(remove ? { remove: true } : {}) }) });
       if (!res.ok) throw new Error(`The rental answered ${res.status}`);
-      useJobs.getState().toast("Left out of this rental's downloads", "good");
+      useJobs.getState().toast(remove ? "Taken off this disk — and left out of the next rentals until you press Download now" : "Left out of this rental's downloads", "good");
       await load();
     } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } finally { setBusy(""); }
   };
@@ -339,6 +362,9 @@ function WhatYouUse() {
       <p className="mt-0.5 text-[12.5px] text-muted">
         {r.on ? `How often each download was used, over ${r.rentals} rental${r.rentals === 1 ? "" : "s"}. Least used first — those are the ones worth leaving out.` : "The usage log is switched off (H3_USAGE=0 in the template)."}
       </p>
+      {(() => { const fat = groups.filter((g) => !g.uses && g.state === "done" && g.gb > 0.05); const gb = fat.reduce((n, g) => n + g.gb, 0);
+        return fat.length > 0 && r.rentals >= 2 ? <p className="mt-2 border border-hot/30 bg-hot/5 px-3 py-1.5 text-[12.5px] text-hot">{fat.length} download{fat.length > 1 ? "s" : ""} on this disk ({gb.toFixed(1)} GB) never used in {r.rentals} rentals — Remove takes them off and keeps them off.</p> : null; })()}
+      <LibraryFat />
       <div className="mt-3 grid gap-1">
         {groups.map((g) => (
           <div key={g.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 border-b border-line2 py-1.5 text-[12.5px] last:border-0">
@@ -347,7 +373,9 @@ function WhatYouUse() {
             <span className={cx("w-36 text-right tabular-nums", g.uses ? "text-muted" : "text-hot")}>{g.uses ? `${g.uses} use${g.uses === 1 ? "" : "s"} · ${ago(g.last)}` : "never used"}</span>
             {g.state !== "done" && g.state !== "later" && g.state !== "skipped"
               ? <button disabled={!!busy} onClick={() => later(g.id)} className="press h-7 rounded-md border border-line px-2 text-[12px] text-muted hover:text-ink disabled:opacity-40">{busy === g.id ? "…" : "Later"}</button>
-              : <span className="w-[52px] text-right text-[11.5px] text-dim">{g.state === "done" ? "on disk" : "waiting"}</span>}
+              : g.state === "done" && !g.uses && g.gb > 0.05
+                ? <button disabled={!!busy} onClick={() => later(g.id, true)} title="Never used: take its files off this disk and leave it out of the next rentals (Download now brings it back)" className="press h-7 rounded-md border border-hot/50 px-2 text-[12px] text-hot hover:bg-hot/10 disabled:opacity-40">{busy === g.id ? "…" : "Remove"}</button>
+                : <span className="w-[52px] text-right text-[11.5px] text-dim">{g.state === "done" ? "on disk" : "waiting"}</span>}
           </div>
         ))}
       </div>

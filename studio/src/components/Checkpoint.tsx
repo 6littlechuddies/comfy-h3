@@ -21,10 +21,12 @@ const GROUP: Record<string, string> = { krea2: "Realistic · Krea 2", anima: "An
 
 /** "Checkpoint": the official model or one of your own fine-tunes for it; "+ Add" takes a CivitAI link.
  *  With onModel, every model's checkpoints are listed together and picking one of another model switches to that model. */
-export function CheckpointPicker({ model, value, onChange, onModel, models = ["krea2", "anima", "noob"], follow, right }: { model: string; value: string | undefined; onChange: (v: string) => void;
+export function CheckpointPicker({ model, value, onChange, onModel, models = ["krea2", "anima", "noob"], follow, extra, right }: { model: string; value: string | undefined; onChange: (v: string) => void;
   onModel?: (model: string, ckpt: string) => void; models?: string[];
   /** an option above the official one that follows another setting (Batch: "Same as 03 Create" → value "@create") */
   follow?: string;
+  /** more options above the official one: [value, label] (Batch: "@auto" → DeepSeek picks per character) */
+  extra?: [string, string][];
   /** something beside the label (Batch: the lock) */
   right?: ReactNode }) {
   const all = useMyModels();
@@ -69,14 +71,17 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
           ))}
         </DropSelect>
       ) : (
-        <DropSelect value={follow && value === "@create" ? "@create" : cur ? cur.name : ""} onChange={(e) => onChange(e.target.value)} aria-label="Checkpoint"
+        <DropSelect value={follow && value === "@create" ? "@create" : extra?.some(([v]) => v === value) ? value! : cur ? cur.name : ""} onChange={(e) => onChange(e.target.value)} aria-label="Checkpoint"
           className="inset h-9 border border-line bg-raised px-2.5 text-[13px] focus:border-accent focus:outline-none">
           {follow && <option value="@create">{follow}</option>}
+          {extra?.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           <option value="">{OFFICIAL[model]} (official)</option>
-          {mine.map((m) => <option key={m.name} value={m.name} disabled={!m.here}>{m.title}{m.version ? ` · ${m.version}` : ""}{m.here ? "" : " (downloading…)"}</option>)}
+          {mine.map((m) => <option key={m.name} value={m.name}>{m.title}{m.version ? ` · ${m.version}` : ""}{m.here ? "" : m.problem ? " (not on this rental)" : " (downloading…)"}</option>)}
         </DropSelect>
       )}
-      {value && value !== "@create" && !cur && <p className="text-[11.5px] text-bad">That checkpoint isn't in your models any more — using the official one.</p>}
+      {value && !value.startsWith("@") && !cur && <p className="text-[11.5px] text-bad">That checkpoint isn't in your models any more — pick another.</p>}
+      {cur && !cur.here && <p className="border border-bad/40 bg-bad/5 px-2.5 py-1.5 text-[11.5px] leading-relaxed text-bad">
+        {cur.problem ? <>Not on this rental: {cur.problem}. Pictures won't start with it — pick another, or ask the creator / download it on CivitAI and add the file.</> : <>Still downloading — pictures wait for it.</>}</p>}
       {adding && (
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">

@@ -60,7 +60,7 @@ const MEM = "h3.cosplay.loras"; // character key → the approved LoRA (or "none
 const load = <T,>(k: string, d: T): T => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : d; } catch { return d; } };
 const keyOf = (name: string, series: string) => `${name}|${series}`.toLowerCase().replace(/\s+/g, " ").trim();
 
-export const useCosplay = create<{ items: CosItem[]; opts: CosOpts; set: (p: Partial<{ items: CosItem[]; opts: CosOpts }>) => void; update: (key: string, p: Partial<CosItem>) => void }>((set, get) => ({
+export const useCosplay = create<{ items: CosItem[]; opts: CosOpts; workers?: number; set: (p: Partial<{ items: CosItem[]; opts: CosOpts }>) => void; update: (key: string, p: Partial<CosItem>) => void }>((set, get) => ({
   items: load<{ items: CosItem[] }>(KEY, { items: [] }).items,
   opts: (() => {
     const saved = load<Partial<CosOpts> & { v?: number }>(KEY + ".opts", {});
@@ -237,12 +237,14 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   const opts = briefs.find((b) => b.options?.length)?.options ?? [];
   const shotsText = (opts.length ? `HER POSE OPTIONS (real pose references: the picture copies the chosen one's body position exactly — pick the ones that suit her personality and the place; never two shots with the same number):\n${opts.map((p, i) => `  ${i + 1}. ${p.words}${p.cat ? ` [${p.cat}]` : ""}`).join("\n")}\n\n` : "")
     + briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n");
-  const raw = await runWriter("cosplay", { taste, posts, library, locked, shots: shotsText, character: it.name, series: it.series || "(not given)",
+  const ask = () => runWriter("cosplay", { taste, posts, library, locked, shots: shotsText, character: it.name, series: it.series || "(not given)",
     cosplayer: cosplayer || `(none given: an adult woman, about 25 years old${useCosplay.getState().opts.look?.trim() ? `, ${useCosplay.getState().opts.look.trim()} — vary her face, hair and build from shot to shot within that` : ""})`, triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
     { tab: "batch", label: `Cosplay · ${it.name}`, images: [it.picture, ...refPics].filter((x): x is string => !!x).length ? [it.picture, ...refPics].filter((x): x is string => !!x) : undefined, big: true });
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("The writer didn't answer in the expected format — try again");
-  const d = JSON.parse(m[0]);
+  const { looseJson } = await import("./looseJson");
+  // an answer that can't be read even leniently (rare): ask once more before giving up on her
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let d: any;
+  try { d = looseJson(await ask()); } catch { d = looseJson(await ask()); }
   if (!d.allowed) return { status: "skipped", age: d.age || it.age, why: d.why || "Not an adult character" };
   // older prompt files answer with one "prompt": treat it as the only shot
   const got: { pose?: string; prompt?: string; pose_id?: unknown }[] = Array.isArray(d.shots) ? d.shots : d.prompt ? [{ pose: d.pose, prompt: d.prompt }] : [];
@@ -272,8 +274,12 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
     build: typeof d.build === "string" ? d.build : undefined, ...(ai ? { ai, aiWhy } : {}), ...(aiCheckpoint ? { aiCheckpoint } : {}) };
 }
 
-/** the writers working side by side (CivitAI and AniList are fine with this many) */
-export const WORKERS = 4;
+/** the writers working side by side: starts at WORKERS and adapts — one more each time a character comes back quickly
+ *  and cleanly (up to MAX_WORKERS), half as many when DeepSeek or CivitAI push back (busy, rate limit, timeouts).
+ *  DeepSeek bills per word, not per call, so more at once costs the same in total — it only finishes sooner. */
+export const WORKERS = 6;
+export const MAX_WORKERS = 16;
+const pushback = (msg: string) => /\b(429|503|502|504)\b|rate|busy|timeout|Timeout|Couldn't reach/i.test(msg);
 
 /** steps 1–4 for every character that isn't done — several at once, each its own writer job ("sub-agents"), all reading
  *  the same learned taste (worked out once, before they start) and dealt different shots */
@@ -340,7 +346,7 @@ export async function researchAll(cosplayer: string, only?: string) {
       const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
       const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}${cur.aiLocked?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`)].filter(Boolean).join(", ") || "(none)";
       const bck = (await import("./batch")).useBatch.getState().ck;
-      const ckFixed = cur.ckLocked || (bck?.mode === "pick" && bck.locked);
+      const ckFixed = cur.ckLocked || bck?.mode !== "auto"; // only "DeepSeek picks one for each character" lets it choose
       const ckHere = ckFixed ? new Set<string>() : ckNames;
       const lib = ckFixed ? library.split("\nCHECKPOINTS")[0] : library;
       const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere);
@@ -358,8 +364,31 @@ export async function researchAll(cosplayer: string, only?: string) {
   };
   let next = 0;
   const { writerOutside } = await import("./outside");
-  const n = writerOutside() ? 1 : WORKERS; // the Grok tab answers one message at a time
-  await Promise.all(Array.from({ length: Math.min(n, todo.length) }, async () => { while (next < todo.length) await one(todo[next++]); }));
+  if (writerOutside()) { for (const k of todo) await one(k); return; } // the Grok tab answers one message at a time
+  // an adaptive pool: `want` workers at a time, raised on clean fast answers, halved on push-back
+  let want = Math.min(WORKERS, todo.length), running = 0, slowest = 0;
+  await new Promise<void>((done) => {
+    const fill = () => {
+      if (next >= todo.length && running === 0) { done(); return; }
+      while (running < want && next < todo.length) {
+        const k = todo[next++]; running++;
+        const t0 = Date.now();
+        void one(k).finally(() => {
+          running--;
+          const it = useCosplay.getState().items.find((x) => x.key === k);
+          const secs = (Date.now() - t0) / 1000;
+          if (it?.status === "error" && pushback(it.why ?? "")) want = Math.max(2, Math.floor(want / 2));
+          else if (it?.status === "ready" && (slowest === 0 || secs < slowest * 1.5)) want = Math.min(MAX_WORKERS, want + 1);
+          slowest = Math.max(slowest * 0.9, secs);
+          useCosplay.setState({ workers: want });
+          fill();
+        });
+      }
+      useCosplay.setState({ workers: want });
+    };
+    fill();
+  });
+  useCosplay.setState({ workers: 0 });
 }
 
 /** turn one CivitAI LoRA on or off for a character (several can be on); null = none at all. Remembered for next time */
@@ -423,8 +452,9 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;
-      const ckName = st.opts.director || it.ckLocked ? it.aiCheckpoint?.name : undefined;
-      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, locked: lockedNames, ...(ckName ? { checkpoint: ckName } : {}),
+      // your own pick for her (locked) always; DeepSeek's only when the batch's Checkpoint says it may pick
+      const ckName = it.ckLocked || (st.opts.director && useBatch.getState().ck?.mode === "auto") ? it.aiCheckpoint?.name : undefined;
+      useBatch.getState().add({ prompt, idea, takes: 1, status: "ready", group, pose: sh.ref, locked: lockedNames, ...(ckName ? { checkpoint: ckName, ckMine: !!it.ckLocked } : {}),
         charId: st.opts.cosplayer === "one" && st.opts.charId ? st.opts.charId : undefined, noStar: st.opts.cosplayer !== "one", realistic: true, loras, control });
       n++;
     }

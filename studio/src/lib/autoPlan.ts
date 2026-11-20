@@ -17,9 +17,7 @@ export async function planFor(c: Character, o: AutoPlan): Promise<Partial<Row>[]
     character: `${c.name} — ${describe(c)}`, profile: profile || "(none — infer it from their look)", sets: String(o.sets), per: String(o.per), mix: o.mix, backdrop: o.backdrop,
     poses: poseSet ? poseSet.items.slice(0, 20).map((x) => x.text).join(" | ") : "", existing: (site.sets ?? []).map((s) => s.title).join(", "),
   }, { tab: "batch", label: `${c.name}: planning ${o.sets} photo sets`, big: true });
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error(`${c.name}: the writer didn't answer with a plan — try again`);
-  const d = JSON.parse(m[0]) as { sets?: PlannedSet[] };
+  const d = (await import("./looseJson")).looseJson<{ sets?: PlannedSet[] }>(raw);
   const rows: Partial<Row>[] = [];
   let k = Math.floor(Math.random() * 50);
   for (const s of (d.sets ?? []).slice(0, o.sets)) {

@@ -14,6 +14,11 @@ const projOf = (j: Job) => (typeof j.meta?.project === "string" ? j.meta.project
 /** returns how many results actually changed project */
 export function moveResults(items: MoveItem[], project: string | null): number {
   const want = new Map<string, Set<string>>();
+  // from the catalog: a file without its job — found by its name among this browser's results (older ones have none)
+  const byFile = new Map<string, string>();
+  if (items.some((x) => !x.jobId)) for (const j of useJobs.getState().jobs) for (const o of j.outputs) byFile.set(`${o.subfolder}|${o.filename}`, j.id);
+  let loose = 0;
+  items = items.map((x) => { if (x.jobId) return x; const id = byFile.get(`${x.subfolder}|${x.filename}`); if (!id) loose++; return { ...x, jobId: id ?? "" }; });
   for (const x of items) {
     if (!want.has(x.jobId)) want.set(x.jobId, new Set());
     want.get(x.jobId)!.add(`${x.subfolder}|${x.filename}`);
@@ -39,6 +44,7 @@ export function moveResults(items: MoveItem[], project: string | null): number {
     return { jobs: out };
   });
   // the catalog follows too (it groups results by project, so a renamed character keeps them)
+  moved += loose;
   if (moved) fetch("/studio-api/catalog/project", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: items.map((x) => ({ subfolder: x.subfolder, filename: x.filename })), project }) }).catch(() => {});
   return moved;
 }

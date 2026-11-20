@@ -93,8 +93,8 @@ export function CosplayOptions() {
       </Section>
 
       <Section id="loras" title="LoRAs & checkpoint" summary={`${(o.loras ?? []).length} on every picture${nLocked ? ` · ${nLocked} locked` : ""}${o.director ? " · DeepSeek picks" : ""}`}>
-        <Toggle on={!!o.director} set={(v) => set({ director: v })} title="Let DeepSeek pick LoRAs and a checkpoint"
-          sub="Per character: reads her build, then up to 5 of your Krea 2 LoRAs (realism, body shape, style) and a checkpoint — each with a reason. Kept under Krea 2's strength limit so nothing goes blotchy." />
+        <Toggle on={!!o.director} set={(v) => set({ director: v })} title="Let DeepSeek pick LoRAs"
+          sub="Per character: reads her build, then up to 5 of your Krea 2 LoRAs (realism, body shape, style) — each with a reason. Kept under Krea 2's strength limit so nothing goes blotchy. It picks a checkpoint too only when Checkpoint above is set to “DeepSeek picks one for each character”." />
         <Toggle on={o.auto} set={(v) => set({ auto: v })} title="Approve her CivitAI LoRA by itself" sub="The most collected Krea 2 LoRA of the character. Off: you tick them on each character." />
         {o.auto && <label className="-mt-1.5 flex items-center gap-2 pl-[42px] text-[12px] text-muted">if it has at least<input type="number" min={0} step={10} value={o.minCollected} onChange={(e) => set({ minCollected: Math.max(0, Number(e.target.value) || 0) })} className="inset h-7 w-16 border px-1.5" />collections</label>}
         <Toggle on={o.posts} set={(v) => set({ posts: v })} title="Learn from her LoRA's posts" sub="Copies how people word that costume on Krea 2, and what they pair the LoRA with." />
@@ -146,6 +146,7 @@ export function CosplayList() {
   const skipped = items.filter((i) => i.status === "skipped");
   const errors = items.filter((i) => i.status === "error");
   const working = items.filter((i) => i.status === "looking");
+  const workers = useCosplay((s) => s.workers ?? 0);
   const todo = items.filter((i) => i.status === "new" || i.status === "error");
   const waitingLora = ready.filter((i) => picksOf(i) === undefined && i.loras?.length);
   const pics = ready.reduce((n, i) => n + (i.shots?.length || 1), 0);
@@ -163,7 +164,7 @@ export function CosplayList() {
           <span className="display text-[17px]">Cosplay</span></button>
         {items.length > 0 && <div className="flex flex-wrap items-center gap-1.5">
           <Chip tone="good">{ready.length} ready</Chip>
-          {working.length > 0 && <Chip tone="accent">{working.length} researching</Chip>}
+          {working.length > 0 && <Chip tone="accent" title="Writers working side by side. It starts at 6 and adds one each time a character comes back quickly, up to 16; it halves when DeepSeek or CivitAI push back. DeepSeek bills per word, so more at once costs the same — it just finishes sooner.">{working.length} researching{workers ? ` · ${workers} writers` : ""}</Chip>}
           {todo.length - errors.length > 0 && <Chip>{todo.length - errors.length} to research</Chip>}
           {errors.length > 0 && <Chip tone="bad">{errors.length} failed</Chip>}
           {skipped.length > 0 && <Chip title={skipped.map((s) => `${s.name}: ${s.why ?? ""}`).join("\n")}>{skipped.length} skipped</Chip>}
@@ -320,7 +321,7 @@ function Look({ it }: { it: CosItem }) {
           <button onClick={() => up({ ckLocked: !it.ckLocked })} aria-pressed={!!it.ckLocked}
             className={cx("press flex h-6 items-center gap-1 rounded-sm border px-1.5", it.ckLocked ? "border-accent/60 bg-accent/15 text-accent" : "border-line text-dim hover:text-ink")}>
             <Icon name={it.ckLocked ? "lock" : "unlock"} size={11} />{it.ckLocked ? "Locked" : "Auto"}</button>
-          <span className="truncate text-dim" title={it.aiCheckpoint?.why}>{it.ckLocked ? "Kept on every rewrite" : it.aiCheckpoint?.why ? `Why: ${it.aiCheckpoint.why}` : director ? "DeepSeek picks one when it rewrites" : "Batch's checkpoint unless you pick one"}</span>
+          <span className="truncate text-dim" title={it.aiCheckpoint?.why}>{it.ckLocked ? "Your pick for her — wins over the batch's Checkpoint" : it.aiCheckpoint?.why ? `Why: ${it.aiCheckpoint.why}` : "The batch's Checkpoint unless you pick one here"}</span>
         </div>
       </div>
     </div>

@@ -232,9 +232,12 @@ function ClassicEdit() {
             toast("Getting the pose picture…", "info");
             const m = await useTray.getState().addUrl(p.image);
             setMask(null);
-            setPics((cur) => { const person = cur[1] ?? cur[0]; return [m, person ?? null, ...cur.slice(2)]; });
-            set({ mode: "pose", instruction: TEMPLATES(engine).pose });
-            toast(`Pose “${p.title}” is Picture 1 — put your person in Picture 2 (if they aren't already), then Make edit`, "good");
+            // the person: whoever is in the pictures already, else the character picked on the left (their front picture)
+            const mine = !pics[0] && !pics[1] && selChar ? await useCharacters.getState().asMedia(selChar.id, "front").catch(() => null) : null;
+            setPics((cur) => { const person = cur[1] ?? cur[0] ?? mine; return [m, person ?? null, ...cur.slice(2)]; });
+            // the pose's own words go in with the instruction, so the edit knows which body position it's copying
+            set({ mode: "pose", instruction: `${TEMPLATES(engine).pose} The pose: ${p.words.replace(/\s+/g, " ").trim().slice(0, 400)}` });
+            toast(mine ? `Pose “${p.title}” is Picture 1 and ${selChar!.name} is Picture 2 — press Make edit` : `Pose “${p.title}” is Picture 1 — put your person in Picture 2 (if they aren't already), then Make edit`, "good");
           } catch (err) { toast((err as Error).message, "bad"); }
         }))}
         className="press btn-raised flex h-8 items-center gap-1.5 px-2.5 text-[12.5px]"><Icon name="user" size={13} className="text-muted" />Pose (PoseWear)</button>}

@@ -9,7 +9,7 @@ export type Role = "slider" | "character" | "style" | "detail" | "concept";
 export const ROLE_LABEL: Record<Role, string> = { slider: "slider", character: "character", style: "style", detail: "detail", concept: "concept" };
 
 /** how much each model holds in total (sliders not counted) before it smears; kreaEdit = on top of the identity-edit LoRA */
-export const BUDGET = { krea2: 1.4, anima: 2.0, sdxl: 2.2, h3: 1.8, kreaEdit: 0.9 } as const;
+export const BUDGET = { krea2: 1.6, anima: 2.0, sdxl: 2.2, h3: 1.8, kreaEdit: 0.9 } as const;
 export type BudgetKey = keyof typeof BUDGET;
 
 export function roleOf(l: LoraPick, inf?: LoraInfo): Role {
@@ -42,7 +42,9 @@ export function balanceLoras(ls: LoraPick[], lib: LoraInfo[], budget: number): {
   const room = Math.max(others.length * floor, budget - leadS);
   const sum = others.reduce((a, l) => a + rec(l), 0) || 1;
   const k = Math.min(1, room / sum);
-  const target = new Map<string, number>([[lead.name, r05(leadS)], ...others.map((l) => [l.name, r05(Math.max(floor, rec(l) * k))] as [string, number])]);
+  // a realism / detail LoRA below ~0.4 does nothing visible — that's where skin goes plastic again; it keeps 0.4
+  const floorOf = (l: LoraPick) => (roleOf(l, info(l.name)) === "detail" ? Math.min(0.4, rec(l)) : floor);
+  const target = new Map<string, number>([[lead.name, r05(leadS)], ...others.map((l) => [l.name, r05(Math.max(floorOf(l), rec(l) * k))] as [string, number])]);
   const changed: string[] = [];
   const loras = ls.map((l) => {
     const t = target.get(l.name);

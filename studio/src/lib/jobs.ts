@@ -474,7 +474,9 @@ const keepable = () => trimJobs(useJobs.getState().jobs).map(({ preview: _p, ...
   ...(i > 250 && j.meta?.snapshot ? { meta: { ...j.meta, snapshot: undefined } } : {}) }));
 /** result files that aren't on this rental (hidden right away; dropped from the list once no restore is still bringing
  *  files in). A fresh rental's list comes from your newest export, which can name pictures deleted after it was made. */
-export const useMissing = create<{ keys: Record<string, true> }>(() => ({ keys: {} }));
+export const useMissing = create<{ keys: Record<string, true>; epoch: number }>(() => ({ keys: {}, epoch: 0 }));
+/** an import / restore brought files back: look at every result again (what was missing may be here now) */
+export const resetMissing = () => useMissing.setState((m) => ({ keys: {}, epoch: m.epoch + 1 }));
 export const missingKey = (o: { subfolder: string; filename: string }) => `${o.subfolder}|${o.filename}`;
 export async function pruneMissing(): Promise<boolean> {
   const outs = useJobs.getState().jobs.filter((j) => j.status === "done")

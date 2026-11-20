@@ -55,6 +55,8 @@ export interface Row {
   locked?: string[];
   /** this row's own Krea 2 checkpoint (a fine-tune's name, or "official"), instead of Create's */
   checkpoint?: string;
+  /** that checkpoint is your own pick for this row (wins over the batch's) */
+  ckMine?: boolean;
   /** the PoseWear pose (its picture, for a character made from her sheet: then the pose goes in as a reference picture) */
   pose?: import("./posewear").PwPick;
   /** which "Add to batch" press made this row (so one press can be taken back) */
@@ -87,7 +89,7 @@ export function clearWaiting() { useBatch.setState((s) => ({ rows: s.rows.filter
 export interface BatchOpts {
   target: "video" | "image";
   /** realistic pictures: the checkpoint — 03 Create's, or one picked here ("" = Krea 2 official); locked = every row uses it */
-  ck?: { mode: "create" | "pick"; name: string; locked: boolean };
+  ck?: { mode: "create" | "pick" | "auto"; name: string; locked: boolean };
   characterId: string | null;
   seconds: number;
   aspect: "16:9" | "9:16" | "1:1";
@@ -359,6 +361,14 @@ function noteRowUse(r: Row, b: BatchState, charId: string | null, stars?: (strin
   const who = stars?.length ? stars : [charId ?? r.charId ?? b.characterId];
   import("./civitUsed").then(({ noteUsed }) => noteUsed([m[1]], b.target === "video" ? "animate" : "swap", who, r.takes)).catch(() => {});
 }
+/** a checkpoint that isn't on this rental stops the row with the reason, instead of quietly drawing with another one */
+const ckCache: { at: number; items: import("./api").MyModel[] } = { at: 0, items: [] };
+async function needCheckpoint(name: string) {
+  if (Date.now() - ckCache.at > 20000) { ckCache.items = (await (await import("./api")).myModels().catch(() => ({ items: [] }))).items; ckCache.at = Date.now(); }
+  const m = ckCache.items.find((x) => x.name === name);
+  if (m && !m.here) throw new Error(`Checkpoint “${m.title}” isn't on this rental${m.problem ? ` — ${m.problem}` : " yet (still downloading)"}. Pick another in Checkpoint, then Queue again.`);
+}
+
 export async function queueAll(only?: string[]): Promise<number> {
   // rows from saved scenes (or with their own expression) need their prompt written first
   if (useBatch.getState().target === "image" && picturesToWrite().some((r) => r.inspo || r.expression)) await writePicturePrompts();
@@ -486,8 +496,10 @@ export async function queueAll(only?: string[]): Promise<number> {
           // the row's own checkpoint (Cosplay: picked per character), and the LoRAs fitted to what Krea 2 holds without going blotchy
           const ma = modelArgs(st.create, mi);
           // the batch's checkpoint (locked: every row; else rows without their own), then the row's own (Cosplay: per character)
+          // picked (or "Same as 03 Create"): every row uses it; "DeepSeek picks": the row's own (Cosplay), else Create's
           const bck = b.ck?.mode === "pick" ? (b.ck.name || "official") : undefined;
-          const ck = b.ck?.locked && bck ? bck : r.checkpoint ?? bck;
+          const ck = r.ckMine || b.ck?.mode === "auto" ? r.checkpoint : bck;
+          if (!anime && ck && ck !== "official") await needCheckpoint(ck);
           const ckArgs = !anime && ck ? (ck === "official" ? { ...ma, unet: undefined } : { ...ma, unet: ck }) : ma;
           let rowLoras = [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])];
           if (!anime && r.loras?.length) {
