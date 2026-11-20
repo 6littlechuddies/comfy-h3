@@ -45,7 +45,7 @@ export async function charPictures(c: Character): Promise<{ file: FileRef; label
   const names = [...new Set([c.name, ...(c.names ?? [])].map((n) => (n || "").trim()).filter(Boolean))];
   const folders = new Set(names.map(folderName));
   const found: Item[] = [];
-  for (const f of folders) found.push(...await page(`folder=${encodeURIComponent(f)}`));
+  found.push(...await page(`folder=${encodeURIComponent([`@${c.id}`, ...folders].join("\n"))}`));
   found.push(...await page(`q=${encodeURIComponent(c.id.toLowerCase())}`));
   for (const n of names) found.push(...await page(`q=${encodeURIComponent(n.toLowerCase())}`));
   for (const it of found) {

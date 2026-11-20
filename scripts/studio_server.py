@@ -5580,7 +5580,8 @@ async def _site_push(job: dict, d: dict):
             appearance = {k: c.get(k, "") for k in ("hair", "eyes", "body", "outfit", "details")}
             manifest = {
                 "external_id": ext, "name": (str(site.get("name") or "").strip() or c.get("name")), "age": int(age), "gender": c.get("gender"), "style": c.get("style"),
-                "tags": site.get("tags") or [],
+                # a cosplay character carries the "cosplay" tag (the site's Cosplay section can pick them out)
+                "tags": list(dict.fromkeys((site.get("tags") or []) + (["cosplay"] if str(c.get("source") or "").startswith("Cosplay of ") else []))),
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
                             "greeting": site.get("greeting", ""), "appearance": appearance, "description": c.get("block") or ""},
                 "persona_prompt": _no_length((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or ""), "voice_notes": " ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x),
@@ -5667,13 +5668,21 @@ def _catalog_scan() -> list:
 
 
 async def catalog(req):
-    """GET ?folder=&kind=&q=&offset=&limit= → {items, total, folders: [{name, count}]}"""
+    """GET ?folder=&kind=&q=&offset=&limit= → {items, total, folders: [{name, count}]}. A result moved to (or made in) a project
+    is grouped under "@<project id>" — so renaming a character, or moving results to them, keeps them together; the
+    rest by their folder. folder= takes several keys, one per line (a character's id and every folder name they've had)."""
     items = await asyncio.to_thread(_catalog_scan)
     meta = _state_json("catalog_meta", {}) or {}
-    folder, kind, q = req.query.get("folder", ""), req.query.get("kind", ""), req.query.get("q", "").strip().lower()
+    want = {x for x in req.query.get("folder", "").split("\n") if x}
+    kind, q = req.query.get("kind", ""), req.query.get("q", "").strip().lower()
+    def key(it):
+        m = meta.get(f"{it['subfolder']}/{it['filename']}")
+        p = m.get("project") if isinstance(m, dict) else None
+        return f"@{p}" if p and p != "testing" else it["folder"]
     counts: dict = {}
-    for it in items: counts[it["folder"]] = counts.get(it["folder"], 0) + 1
-    sel = [it for it in items if (not folder or it["folder"] == folder) and (not kind or it["kind"] == kind) and it["folder"] != "Testing"]
+    for it in items:
+        k = key(it); counts[k] = counts.get(k, 0) + 1
+    sel = [it for it in items if (not want or key(it) in want or it["folder"] in want) and (not kind or it["kind"] == kind) and it["folder"] != "Testing"]
     if q:
         # every word must be there ("nun outfit" finds pictures whose words have both), in any order
         words = q.split()
@@ -5684,6 +5693,21 @@ async def catalog(req):
     off, lim = max(0, int(req.query.get("offset", 0) or 0)), min(500, max(1, int(req.query.get("limit", 120) or 120)))
     page = [{**it, **({"meta": meta[k]} if (k := f"{it['subfolder']}/{it['filename']}") in meta else {})} for it in sel[off:off + lim]]
     return web.json_response({"items": page, "total": len(sel), "folders": sorted(({"name": k, "count": v} for k, v in counts.items() if k != "Testing"), key=lambda x: -x["count"])})
+
+
+async def catalog_project(req):
+    """POST {files: [{subfolder, filename}], project} — results moved to another project (or Free work: project null)"""
+    d = await req.json()
+    meta = _state_json("catalog_meta", {}) or {}
+    for f in (d.get("files") or [])[:2000]:
+        if not isinstance(f, dict) or not f.get("filename"): continue
+        k = f"{f.get('subfolder', '')}/{f['filename']}"
+        m = dict(meta.get(k) or {})
+        if d.get("project"): m["project"] = str(d["project"])[:80]
+        else: m.pop("project", None)
+        meta[k] = m
+    _state_write("catalog_meta", meta)
+    return web.json_response({"ok": True})
 
 
 async def catalog_meta(req):
@@ -6136,7 +6160,7 @@ def main():
         web.post("/studio-api/transcribe", transcribe),
         web.get("/studio-api/characters/export", characters_export), web.post("/studio-api/characters/import", characters_import),
         web.post("/studio-api/import/start", import_start), web.put("/studio-api/import/{id}/chunk", import_chunk),
-        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/catalog/seen", catalog_seen), web.route("*", "/studio-api/cleanup", cleanup), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
+        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/catalog/project", catalog_project), web.post("/studio-api/catalog/seen", catalog_seen), web.route("*", "/studio-api/cleanup", cleanup), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
     ])
     if LOCAL:
         app.router.add_get("/h3-downloads", local_downloads)

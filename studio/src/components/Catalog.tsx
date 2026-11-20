@@ -11,7 +11,7 @@ import { openPictureMenu } from "./PictureMenu";
 import { openViewer } from "./Viewer";
 import { Icon, cx } from "./ui";
 
-interface CatItem extends FileRef { kind: "image" | "video"; mtime: number; folder: string; tab: string; meta?: { label?: string; prompt?: string; character?: string } }
+interface CatItem extends FileRef { kind: "image" | "video"; mtime: number; folder: string; tab: string; meta?: { label?: string; prompt?: string; character?: string; project?: string } }
 export const useCatalog = create<{ open: boolean; folder: string | null; q: string }>(() => ({ open: false, folder: null, q: "" }));
 /** open the catalog, on a project's folder (null = the project you're in) */
 export const openCatalog = (folder?: string | null, q = "") => useCatalog.setState({ open: true, folder: folder ?? null, q });
@@ -28,7 +28,10 @@ export function CatalogHost() {
 function CatalogPanel() {
   const want = useCatalog((s) => s.folder);
   const sel = useCharacters((s) => s.list.find((c) => c.id === s.sel) ?? null);
-  const [folder, setFolder] = useState<string>(() => want ?? (sel ? cleanFolder(sel.name) : ""));
+  const chars = useCharacters((s) => s.list);
+  /** a character's keys: their id (results made in or moved to their project) and every folder name they've had */
+  const keysOf = (c: { id: string; name: string; names?: string[] }) => [`@${c.id}`, ...new Set([c.name, ...(c.names ?? [])].filter(Boolean).map(cleanFolder))].join("\n");
+  const [folder, setFolder] = useState<string>(() => want ?? (sel ? keysOf(sel) : ""));
   const [kind, setKind] = useState<"" | "image" | "video">("");
   const [q, setQ] = useState(() => useCatalog.getState().q);
   const [items, setItems] = useState<CatItem[]>([]);
@@ -49,7 +52,7 @@ function CatalogPanel() {
       if (my !== req.current) return;
       setItems((old) => (offset ? [...old, ...d.items] : d.items)); setTotal(d.total); setFolders(d.folders); setErr("");
       // the project's folder doesn't exist yet (nothing made there): show everything
-      if (!offset && folder && !d.folders.some((f: { name: string }) => f.name === folder)) setFolder("");
+      if (!offset && folder && !folder.split("\n").some((k) => d.folders.some((f: { name: string }) => f.name === k))) setFolder("");
     } catch (e) { if (my === req.current) setErr((e as Error).message); } finally { if (my === req.current) setLoading(false); }
   };
   useEffect(() => { const t = setTimeout(() => load(0), q ? 300 : 0); return () => clearTimeout(t); }, [folder, kind, q]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,7 +65,7 @@ function CatalogPanel() {
     <div className="fade-in fixed inset-0 z-[80] flex flex-col bg-bg/95 backdrop-blur-[2px]" role="dialog" aria-modal aria-label="Catalog">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <b className="display text-[20px]">Catalog</b>
-        <span className="text-[12.5px] text-muted">every picture and video on this rental — {total.toLocaleString()} shown{folder ? ` in ${folder}` : ""}</span>
+        <span className="text-[12.5px] text-muted">every picture and video on this rental — {total.toLocaleString()} shown{folder ? ` in ${chars.find((c) => folder.split("\n").includes(`@${c.id}`))?.name ?? folder.split("\n")[0]}` : ""}</span>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the words they were made from" aria-label="Search the catalog"
           className="inset ml-auto h-9 w-72 border border-line px-2.5 text-[13px] focus:border-accent focus:outline-none" />
         <div className="flex gap-1">{([["", "All"], ["image", "Pictures"], ["video", "Videos"]] as const).map(([k, l]) => <button key={l} onClick={() => setKind(k)} className={cx("press tag-btn !h-8 !px-2.5 !text-[12px]", kind === k && "on")}>{l}</button>)}</div>
@@ -72,11 +75,21 @@ function CatalogPanel() {
         <aside className="flex w-56 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-line p-3">
           <span className="micro mb-1 text-dim">PROJECTS</span>
           <button onClick={() => setFolder("")} className={cx("press flex items-center justify-between px-2 py-1.5 text-left text-[13px]", !folder ? "bg-accent/10 text-ink" : "text-muted hover:text-ink")}><span>Everything</span><span className="text-[11px] text-dim">{all}</span></button>
-          {folders.map((f) => (
-            <button key={f.name} onClick={() => setFolder(f.name)} className={cx("press flex items-center justify-between gap-2 px-2 py-1.5 text-left text-[13px]", folder === f.name ? "bg-accent/10 text-ink" : "text-muted hover:text-ink")}>
-              <span className="truncate">{f.name || "Older (no project)"}</span><span className="shrink-0 text-[11px] text-dim">{f.count}</span>
-            </button>
-          ))}
+          {(() => {
+            // one row per character, under their CURRENT name (renames and moved results included); then Free work and any other folder
+            const count = new Map(folders.map((f) => [f.name, f.count]));
+            const used = new Set<string>();
+            const rows = chars.map((c) => {
+              const keys = keysOf(c).split("\n"); keys.forEach((k) => used.add(k));
+              return { key: keys.join("\n"), name: c.name, n: keys.reduce((a, k) => a + (count.get(k) ?? 0), 0) };
+            }).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
+            const rest = folders.filter((f) => !used.has(f.name) && !f.name.startsWith("@")).map((f) => ({ key: f.name, name: f.name || "Older (no project)", n: f.count }));
+            const gone = folders.filter((f) => f.name.startsWith("@") && !used.has(f.name)).reduce((a, f) => a + f.count, 0);
+            return [...rows, ...rest, ...(gone ? [{ key: folders.filter((f) => f.name.startsWith("@") && !used.has(f.name)).map((f) => f.name).join("\n"), name: "Deleted characters", n: gone }] : [])].map((f) => (
+              <button key={f.key} onClick={() => setFolder(f.key)} className={cx("press flex items-center justify-between gap-2 px-2 py-1.5 text-left text-[13px]", folder === f.key ? "bg-accent/10 text-ink" : "text-muted hover:text-ink")}>
+                <span className="truncate">{f.name}</span><span className="shrink-0 text-[11px] text-dim">{f.n}</span>
+              </button>));
+          })()}
         </aside>
         <div className="min-h-0 flex-1 overflow-y-auto p-4" onScroll={(e) => { const el = e.currentTarget; if (!loading && items.length < total && el.scrollTop + el.clientHeight > el.scrollHeight - 800) load(items.length); }}>
           {err && <p className="py-10 text-center text-[13px] text-bad">{err}</p>}
@@ -90,7 +103,7 @@ function CatalogPanel() {
                   ? <video src={viewUrl(it)} muted loop preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" />
                   : <img src={viewUrl(it)} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
                 <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-1.5 pb-1 pt-4 text-left text-[10.5px] leading-tight text-white/85 opacity-0 group-hover:opacity-100">
-                  {!folder && <b className="block truncate font-medium">{it.folder}</b>}{TAB_NAME[it.tab] ?? it.tab} · {new Date(it.mtime * 1000).toLocaleDateString()}
+                  {!folder && <b className="block truncate font-medium">{(it.meta as { project?: string } | undefined)?.project ? chars.find((c) => c.id === (it.meta as { project?: string }).project)?.name ?? it.folder : it.folder}</b>}{TAB_NAME[it.tab] ?? it.tab} · {new Date(it.mtime * 1000).toLocaleDateString()}
                 </span>
                 {it.kind === "video" && <span className="micro absolute left-1 top-1 bg-black/75 px-1 text-cyan">VIDEO</span>}
               </button>

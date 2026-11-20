@@ -38,6 +38,8 @@ export function moveResults(items: MoveItem[], project: string | null): number {
     }
     return { jobs: out };
   });
+  // the catalog follows too (it groups results by project, so a renamed character keeps them)
+  if (moved) fetch("/studio-api/catalog/project", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: items.map((x) => ({ subfolder: x.subfolder, filename: x.filename })), project }) }).catch(() => {});
   return moved;
 }
 

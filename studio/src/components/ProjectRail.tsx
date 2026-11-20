@@ -166,9 +166,9 @@ export function ProjectRail() {
       <button onClick={toggleSmall} title="Show the character list" aria-label="Show the character list" className="press flex h-8 w-8 items-center justify-center text-muted hover:text-ink"><Icon name="rail" size={16} /></button>
       <FreeDrop narrow on={!sel} onClick={() => pick(null)} />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto p-0.5">
-        {(["realistic", "anime"] as const).map((st) => {
-          const grp = list.filter((c) => (c.style === "anime" ? "anime" : "realistic") === st);
-          return grp.length ? <div key={st} className="flex flex-col items-center gap-2"><span className="micro mt-1 text-dim" title={st === "anime" ? "Anime projects" : "Realistic projects"}>{st === "anime" ? "ANI" : "REAL"}</span>
+        {(["realistic", "cosplay", "anime"] as const).map((st) => {
+          const grp = list.filter((c) => groupOf(c) === st);
+          return grp.length ? <div key={st} className="flex flex-col items-center gap-2"><span className="micro mt-1 text-dim" title={st === "anime" ? "Anime projects" : st === "cosplay" ? "Realistic cosplays" : "Realistic projects"}>{st === "anime" ? "ANI" : st === "cosplay" ? "COS" : "REAL"}</span>
             {grp.map((c) => <DropAvatar key={c.id} c={c} on={c.id === sel} onClick={() => pick(c.id)} />)}</div> : null;
         })}
       </div>
@@ -196,14 +196,14 @@ export function ProjectRail() {
         {!loaded && <p className="px-2 py-2 text-[12.5px] text-muted">Loading…</p>}
         {loaded && list.length === 0 && <p className="px-2 py-3 text-[12.5px] leading-relaxed text-muted">No characters yet. Press <b className="text-ink">New</b>, or import profiles in Characters.</p>}
         {/* realistic and anime projects apart, each group foldable (remembered) */}
-        {(["realistic", "anime"] as const).map((st) => {
-          const grp = shown.filter((c) => (c.style === "anime" ? "anime" : "realistic") === st);
+        {(["realistic", "cosplay", "anime"] as const).map((st) => {
+          const grp = shown.filter((c) => groupOf(c) === st);
           if (!grp.length) return null;
           const folded = foldedGroups.has(st);
           return (
             <div key={st} className="mt-2">
               <button onClick={() => foldGroup(st)} className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11.5px] font-semibold uppercase tracking-wide text-dim hover:text-ink" aria-expanded={!folded}>
-                <Icon name="chev" size={11} className={cx("transition-transform", folded && "-rotate-90")} />{st === "anime" ? "Anime" : "Realistic"}<span className="ml-auto font-normal">{grp.length}</span>
+                <Icon name="chev" size={11} className={cx("transition-transform", folded && "-rotate-90")} />{st === "anime" ? "Anime" : st === "cosplay" ? "Realistic cosplays" : "Realistic"}<span className="ml-auto font-normal">{grp.length}</span>
               </button>
               {!folded && grp.map((c) => (
                 <Project key={c.id} c={c} on={c.id === sel} tab={tab} open={open.has(c.id)}
@@ -302,7 +302,7 @@ function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean
         <Avatar c={c} on={on} onClick={() => { pick(); if (!open) toggle(); }} />
         <button onClick={() => { pick(); if (!open || on) toggle(); }} className="min-w-0 flex-1 text-left">
           <div className={cx("truncate text-[13px] font-medium", on ? "text-ink" : "text-ink/85")}>{c.name}</div>
-          <div className="text-[11.5px] text-dim">{drop.over ? <span className="text-accent">Drop to move {countLabel(drop.n)} here</span> : <>{c.style === "anime" ? "Anime" : "Realistic"} · {made} result{made === 1 ? "" : "s"}{views ? ` · ${views} sheet` : ""}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</>}</div>
+          <div className="text-[11.5px] text-dim">{drop.over ? <span className="text-accent">Drop to move {countLabel(drop.n)} here</span> : <>{c.style === "anime" ? "Anime" : isCosplay(c) ? "Cosplay" : "Realistic"} · {made} result{made === 1 ? "" : "s"}{views ? ` · ${views} sheet` : ""}{scenes.length ? ` · ${scenes.length} scene${scenes.length > 1 ? "s" : ""}` : ""}</>}</div>
         </button>
         <button onClick={toggle} aria-label={open ? "Fold" : "Unfold"} aria-expanded={open} className="press flex h-6 w-6 items-center justify-center text-dim hover:text-ink">
           <Icon name="chev" size={13} className={cx("transition-transform", !open && "-rotate-90")} />
@@ -335,3 +335,7 @@ function Project({ c, on, tab, open, toggle, pick }: { c: Character; on: boolean
     </div>
   );
 }
+
+/** a realistic character who is a cosplay (made from Batch → Cosplay results) */
+export const isCosplay = (c: { source?: string; style?: string }) => c.style !== "anime" && /^Cosplay of /.test(c.source ?? "");
+const groupOf = (c: { source?: string; style?: string }) => (c.style === "anime" ? "anime" : isCosplay(c) ? "cosplay" : "realistic");

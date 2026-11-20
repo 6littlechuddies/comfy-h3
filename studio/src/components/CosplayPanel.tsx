@@ -67,7 +67,8 @@ export function CosplayOptions() {
         <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
       <p className="-mt-2 text-[12px] leading-relaxed text-dim">Each picture is its own shot: a different camera angle, pose and place — never repeated across the batch.</p>
       <PoseSource />
-      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="🔒 Locked LoRAs (every picture, your strength)" />
+      <LoraList value={o.loras ?? []} onChange={(v) => set({ loras: v })} family="krea2" label="LoRAs on every picture" />
+      <LockRows list={o.loras ?? []} locked={o.lockedAll ?? {}} onChange={(m) => set({ lockedAll: m })} />
       <LockedCheckpoint value={o.checkpoint ?? ""} onChange={(v) => set({ checkpoint: v || undefined })} />
       <label className="-mt-1 flex cursor-pointer items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5" checked={!!o.director} onChange={(e) => set({ director: e.target.checked })} />
         <span>Let DeepSeek pick my LoRAs and checkpoint <span className="text-dim">— for each character it first works out her build (petite, athletic, hourglass…) from her official picture, two of her LoRA's most-liked CivitAI pictures and what people pair that LoRA with; then picks up to 5 of your Krea 2 LoRAs — up to 2 for realism, up to 2 body-shape ones her build needs (waist, thighs…), 1 style — and one of your Krea 2 checkpoints, with a reason for each. 🔒 Lock any LoRA or checkpoint and it stays at your strength on every rewrite; the rest are picked around it. Strengths are kept inside what Krea 2 holds (about 1.4 in total, counting her character LoRA and your locked ones), so nothing goes blotchy — and every row is balanced again before it's made. You can change any pick on each character.</span></span></label>
@@ -179,6 +180,7 @@ function CosRow({ it, busy, onRedo }: { it: CosItem; busy: boolean; onRedo: () =
             {[...(it.loras ?? []), ...(picks ?? []).filter((p) => !(it.loras ?? []).some((l) => l.version_id === p.version_id))].map((l) => <LoraCard key={l.version_id} l={l} on={!!picks?.some((p) => p.version_id === l.version_id)} pick={() => approve(it.key, l)} />)}
           </div> : <p className="text-dim">{it.status === "new" ? "Research finds them." : "None found by name."}</p>}
           <LoraList value={it.extra ?? []} onChange={(v) => useCosplay.getState().update(it.key, { extra: v })} family="krea2" label={`Your LoRAs for ${it.name}`} />
+          <LockRows list={it.extra ?? []} locked={it.aiLocked ?? {}} onChange={(m) => useCosplay.getState().update(it.key, { aiLocked: m })} />
           {useCosplay.getState().opts.director && (it.ai || it.build || it.aiCheckpoint) && <DirectorView it={it} />}
           {it.status === "ready" && <p className="text-[11.5px] text-dim">Changed the LoRAs? Press Redo so the prompts use their trigger words and costume wording (or just Add — triggers are put in front either way).</p>}
         </div>)}
@@ -203,7 +205,7 @@ function LoraCard({ l, on, pick }: { l: Candidate; on: boolean; pick: () => void
 function DirectorView({ it }: { it: CosItem }) {
   const [cks, setCks] = useState<{ name: string; title: string }[] | null>(null);
   const up = (p: Partial<CosItem>) => useCosplay.getState().update(it.key, p);
-  useEffect(() => { void import("../lib/api").then(({ myModels }) => myModels().then((d) => setCks(d.items.filter((m) => m.family === "krea2" && m.here))).catch(() => setCks([]))); }, []);
+  useEffect(() => { void import("../lib/api").then(({ myModels }) => myModels().then((d) => setCks(d.items.filter((m) => m.family === "krea2").map((m) => ({ ...m, title: m.here ? `${m.title}${m.version ? ` · ${m.version}` : ""}` : `${m.title} (downloading…)` })))).catch(() => setCks([]))); }, []);
   return (
     <div className="flex flex-col gap-1.5 border-l-2 border-accent/40 pl-2.5">
       <span className="lbl">DeepSeek's picks</span>
@@ -230,11 +232,26 @@ function DirectorView({ it }: { it: CosItem }) {
 /** one checkpoint for every cosplay picture: DeepSeek then doesn't pick one */
 function LockedCheckpoint({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [cks, setCks] = useState<{ name: string; title: string }[]>([]);
-  useEffect(() => { void import("../lib/api").then(({ myModels }) => myModels().then((d) => setCks(d.items.filter((m) => m.family === "krea2" && m.here))).catch(() => {})); }, []);
+  useEffect(() => { void import("../lib/api").then(({ myModels }) => myModels().then((d) => setCks(d.items.filter((m) => m.family === "krea2").map((m) => ({ ...m, title: m.here ? `${m.title}${m.version ? ` · ${m.version}` : ""}` : `${m.title} (downloading…)` })))).catch(() => {})); }, []);
   return (
     <label className="flex flex-col gap-1"><span className="lbl">🔒 Checkpoint for every picture</span>
       <DropSelect value={value} onChange={(e) => onChange(e.target.value)} className="inset h-9 border px-2 text-[13px]">
         <option value="">Not locked (DeepSeek picks per character, or Create's)</option><option value="official">Krea 2 official</option>
         {cks.map((m) => <option key={m.name} value={m.name}>{m.title}</option>)}
       </DropSelect></label>);
+}
+
+/** 🔓/🔒 per LoRA: nothing is locked until you lock it. Locked = kept at your strength on every rewrite and never turned down;
+ *  unlocked = DeepSeek may lower it (or drop its own picks) to keep the picture clean */
+function LockRows({ list, locked, onChange }: { list: { name: string; strength: number }[]; locked: Record<string, true>; onChange: (m: Record<string, true>) => void }) {
+  if (!list.length) return null;
+  return (
+    <div className="-mt-1 flex flex-col gap-0.5">
+      {list.map((l) => { const on = !!locked[l.name]; return (
+        <button key={l.name} onClick={() => { const m = { ...locked }; if (on) delete m[l.name]; else m[l.name] = true; onChange(m); }}
+          title={on ? "Locked: always at this strength, never turned down — click to unlock" : "Not locked: may be turned down to fit — click to lock at this strength"}
+          className={cx("press flex items-center gap-1.5 text-left text-[11.5px]", on ? "text-accent" : "text-dim hover:text-ink")}>
+          <span>{on ? "🔒" : "🔓"}</span><span className="truncate">{l.name.replace(/\.safetensors$/, "")} @{l.strength}</span><span className="ml-auto shrink-0">{on ? "locked" : "can be lowered"}</span>
+        </button>); })}
+    </div>);
 }

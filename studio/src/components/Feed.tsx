@@ -55,13 +55,13 @@ function actionsFor({ o, j }: Item): Act[] {
 }
 
 /** newest-first results with live progress, hover actions and a full-screen viewer */
-export function Feed({ tab, empty, kinds = ["image", "video"], extra }: {
-  tab: Tab; empty: ReactNode; kinds?: string[]; extra?: (it: Item) => Act[];
+export function Feed({ tab, empty, kinds = ["image", "video"], extra, allProjects }: {
+  tab: Tab; empty: ReactNode; kinds?: string[]; extra?: (it: Item) => Act[]; /** start on every project's results (Batch: its rows go to many projects) */ allProjects?: boolean;
 }) {
   // each project (character on the left) has its own results; "All projects" shows everything
   const sel = useCharacters((s) => s.sel);
   const selName = useCharacters((s) => s.list.find((x) => x.id === s.sel)?.name);
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useState(!!allProjects);
   const allJobs = useJobs(useShallow((s) => s.jobs.filter((j) => j.tab === tab && !j.meta?.styleKey && !j.meta?.quiet && !j.meta?.selfcheck && j.meta?.kind !== "selfcheck")));
   const mine = (j: Job) => (typeof j.meta?.project === "string" ? j.meta.project : null) === sel;
   const jobs = all ? allJobs : allJobs.filter(mine);

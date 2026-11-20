@@ -151,7 +151,7 @@ export default function BatchTab() {
           <Icon name="up" size={16} /> Drop clips or pictures here — files, or straight from a Pinterest / web tab — one row each
         </button>
         {b.rows.some((r) => r.status === "queued") && <button onClick={b.clearDone} className="self-start text-[12px] text-muted hover:text-ink">Clear queued rows</button>}
-        <div className="mt-4"><Feed tab="batch" empty={<span>Results from the batch show up here.</span>} /></div>
+        <div className="mt-4"><Feed tab="batch" allProjects empty={<span>Nothing made from the batch yet — press Queue above.</span>} /></div>
       </div>
     </Workspace>
   );

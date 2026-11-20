@@ -63,7 +63,7 @@ export function SelectionBar() {
         const several = [...names.values()].some((k) => k > 1);
         const gallery = several ? await askConfirm("Same character, several pictures", "Some of these are the same cosplay character: they become one character with the first picture as her look. Put the other pictures of her in a free “Gallery” set for your site?", "Yes, add them") : false;
         toast(`Making ${names.size ? `${names.size} cosplay character${names.size === 1 ? "" : "s"}` : ""}${names.size && pics.length > [...names.values()].reduce((a, b) => a + b, 0) ? " and " : ""}${pics.length - [...names.values()].reduce((a, b) => a + b, 0) ? `${pics.length - [...names.values()].reduce((a, b) => a + b, 0)} more` : ""} — each picture is read (~30 s each)`, "info", t);
-        const r = await charactersFromResults(pics.map((it) => ({ o: it.o, label: it.j.label, idea: it.j.meta?.idea })), { gallery, onStep: (m) => toast(m, "info", t) });
+        const r = await charactersFromResults(pics.map((it) => ({ o: it.o, label: it.j.label, idea: it.j.meta?.idea, jobId: it.j.id })), { gallery, onStep: (m) => toast(m, "info", t) });
         toast(`Made ${r.made.length} character${r.made.length === 1 ? "" : "s"}: ${r.made.map((c) => c.site?.name ? `${c.name} (site: ${c.site.name})` : c.name).join(", ")}${r.failed.length ? ` · didn't go: ${r.failed.join("; ").slice(0, 200)}` : ""}`, r.made.length ? "good" : "bad", t);
       },
     },

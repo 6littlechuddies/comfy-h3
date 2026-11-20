@@ -49,6 +49,8 @@ export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; aut
   look: string;
   /** the writer picks LoRAs from your library for each character and sets their strength (the locked ones stay as they are) */
   director: boolean;
+  /** which of the every-picture LoRAs you locked (kept at your strength, never balanced down); the rest can be turned down */
+  lockedAll?: Record<string, true>;
   /** one checkpoint for every cosplay picture (locked: DeepSeek doesn't pick one); empty = per character / Create's */
   checkpoint?: string;
 }
@@ -233,7 +235,7 @@ export async function researchAll(cosplayer: string, only?: string) {
   const deal = dealer(picksNow);
   // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
   let library = "(not used)", libNames = new Set<string>(), ckNames = new Set<string>();
-  const locked = st.opts.loras?.length ? st.opts.loras.map((l) => `${l.name} @${l.strength}`).join(", ") : "(none)";
+  const locked = st.opts.loras?.length ? st.opts.loras.map((l) => `${l.name} @${l.strength}${st.opts.lockedAll?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`).join(", ") : "(none)";
   if (st.opts.director) {
     const { loraLibrary } = await import("./api");
     const lib = (await loraLibrary()).filter((l) => l.family === "krea2" && l.role !== "character" && !st.opts.loras?.some((x) => x.name === l.name));
@@ -267,7 +269,7 @@ export async function researchAll(cosplayer: string, only?: string) {
       const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k));
       // your locked LoRAs for her (and every picture): the writer works around them and keeps their strength
       const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
-      const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}`)].filter(Boolean).join(", ") || "(none)";
+      const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}${cur.aiLocked?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`)].filter(Boolean).join(", ") || "(none)";
       const ckHere = cur.ckLocked || o.checkpoint ? new Set<string>() : ckNames;
       const lib = cur.ckLocked || o.checkpoint ? library.split("\nCHECKPOINTS")[0] : library;
       const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere);
@@ -333,7 +335,8 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
     const ai = st.opts.director ? it.ai ?? [] : (it.ai ?? []).filter((l) => it.aiLocked?.[l.name]);
     const loras = [...civ, ...(it.extra ?? []), ...ai, ...st.opts.loras].filter((l) => !seen.has(l.name) && !!seen.add(l.name));
     // never balanced away: everything you chose yourself (locked for every picture, your LoRAs for her, the picks you locked)
-    const lockedNames = [...st.opts.loras, ...(it.extra ?? []), ...ai.filter((l) => it.aiLocked?.[l.name])].map((l) => l.name);
+    // only what you locked keeps its strength; everything else may be turned down to fit
+    const lockedNames = [...st.opts.loras.filter((l) => st.opts.lockedAll?.[l.name]), ...[...(it.extra ?? []), ...ai].filter((l) => it.aiLocked?.[l.name])].map((l) => l.name);
     const trig = loras.map((l) => l.trigger).filter((t): t is string => !!t);
     const shots: Shot[] = it.shots?.length ? it.shots : [{ brief: "", pose: it.pose ?? "", prompt: it.prompt! }];
     for (const [i, sh] of shots.entries()) {

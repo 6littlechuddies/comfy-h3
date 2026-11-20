@@ -66,7 +66,7 @@ export async function createFromPicture(o: { pic: Media; gen: CivitGen | null; r
 }
 
 /** many results → characters: grouped by whose cosplay they are (the rest one each), read, named, recipe kept */
-export async function charactersFromResults(its: { o: FileRef & { type: string }; label: string; idea?: unknown }[], opts: { gallery: boolean; onStep?: (m: string) => void }): Promise<{ made: Character[]; failed: string[] }> {
+export async function charactersFromResults(its: { o: FileRef & { type: string }; label: string; idea?: unknown; jobId?: string }[], opts: { gallery: boolean; onStep?: (m: string) => void }): Promise<{ made: Character[]; failed: string[] }> {
   const [{ useTray }, { fileGen }] = await Promise.all([import("./tray"), import("./api")]);
   const groups = new Map<string, typeof its>();
   for (const it of its) {
@@ -94,6 +94,9 @@ export async function charactersFromResults(its: { o: FileRef & { type: string }
       const c = await createFromPicture({ pic, gen, read, name: cos?.name, siteName: alias, source: cos ? `Cosplay of ${cos.name}${cos.series ? ` (${cos.series})` : ""}` : undefined,
         gallery: opts.gallery ? list.slice(1).map((x) => ({ filename: x.o.filename, subfolder: x.o.subfolder, type: x.o.type as FileRef["type"] })) : [], onStep: opts.onStep });
       made.push(c);
+      // her pictures move into her project (they show under her on the left, and in the catalog under her name)
+      const { moveResults } = await import("./move");
+      moveResults(list.filter((x) => x.jobId).map((x) => ({ jobId: x.jobId!, filename: x.o.filename, subfolder: x.o.subfolder })), c.id);
     } catch (e) { failed.push(`${cos?.name ?? first.label}: ${(e as Error).message}`); }
   }
   return { made, failed };
