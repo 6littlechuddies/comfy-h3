@@ -7,7 +7,7 @@ import { create } from "zustand";
 import { viewUrl, type FileRef } from "../lib/api";
 import { useCharacters, type Character } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
-import { blockers, checkOnSite, fileUrl, jumpLevel, liveOf, makeAll, makeReel, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor,
+import { blockers, checkOnSite, planActions, fileUrl, jumpLevel, liveOf, makeAll, makeReel, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor,
   type LiveAction, type LiveClip, type LiveState } from "../lib/live";
 import { Btn, DropSelect, Icon, cx } from "./ui";
 
@@ -132,6 +132,11 @@ function LivePack({ c }: { c: Character }) {
           : l.sent ? <span className={l.sent.status < 300 ? "text-good" : "text-bad"}>{l.sent.status < 300 ? `Sent ${new Date(l.sent.at).toLocaleString()} — a draft until it's published on the site` : `Last send: the site answered ${l.sent.status} — ${l.sent.problems}`}</span>
           : block.length ? <span className="text-muted">Before sending: {block.join(" · ")}</span> : <span className="text-good">Ready to send</span>}
         <span className="ml-auto flex flex-wrap gap-2">
+          <Btn onClick={() => void run("The writer is planning her actions…", async () => {
+            const { liveExamples, liveExamplePics } = await import("./LiveBatch");
+            const n = await planActions(c.id, { examples: liveExamples(), pictures: liveExamplePics(), count: Math.max(4, l.actions.length), ratings: [...new Set(l.actions.map((a) => a.rating))].length ? [...new Set(l.actions.map((a) => a.rating))] : ["sfw"], keep: true });
+            toast(`${n} actions planned in her manner — made ones it kept stay`, "good");
+          })} disabled={!!busy} why="Busy" title="DeepSeek plans her actions and words her idle loops from her personality, learning from the examples in Batch → Live packs (the ones you've made and it keeps stay)"><Icon name="sparkle" size={14} /> Plan with the writer</Btn>
           <Btn onClick={() => void run("Making the clips… (they're in the GPU line — this can take a while)", () => makeAll(c.id))} disabled={!l.anchor || !!busy} why={!l.anchor ? "Pick her still first" : "Busy"}><Icon name="play" size={14} /> {made ? "Make the missing clips" : "Make all clips"}</Btn>
           <Btn onClick={() => void run("Putting the reel together…", async () => setReel(await makeReel(c.id)))} disabled={!made || !!busy} why="Make some clips first">Watch the reel</Btn>
           <Btn kind="primary" onClick={() => void run("Sending to the site…", async () => { const r = await sendLive(c.id); toast(`${c.name}'s live pack: ${r.note}`, r.ok ? "good" : "bad"); })}

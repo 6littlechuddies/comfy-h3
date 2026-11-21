@@ -1,3 +1,4 @@
+import { LiveBatchPanel } from "../components/LiveBatch";
 import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { addGroups, clearWaiting, removeDuplicates, undoGroup, DEFAULT_REC, FRAMES, picturesToWrite, postCharacter, queueAll, rowProblem, useBatch, writePicturePrompts, writePrompts, type RecreatePrefs, type Row } from "../lib/batch";
@@ -36,7 +37,7 @@ export default function BatchTab() {
   const setCompact = (v: boolean) => { setCompactS(v); try { localStorage.setItem("h3.batch.compact", v ? "1" : "0"); } catch { /* */ } };
   const video = b.target === "video";
   // Pictures: one way at a time, so the sidebar only shows what that way uses
-  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes" | "cosplay" | "poses">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
+  const [way, setWay] = useState<"recreate" | "swap" | "plan" | "recipes" | "cosplay" | "poses" | "live">(() => { try { return (localStorage.getItem("h3.batch.way") as "recreate") || "recreate"; } catch { return "recreate"; } });
   const pickWay = (v: typeof way) => { setWay(v); try { localStorage.setItem("h3.batch.way", v); } catch { /* */ } if (v === "swap") useBatch.getState().set({ take: useBatch.getState().take === "face" || useBatch.getState().take === "person" ? useBatch.getState().take : "swap" }); };
 
   useHandoffInto("batch", (items) => items.forEach(({ media }) => useBatch.getState().add({ imitate: media })));
@@ -99,7 +100,7 @@ export default function BatchTab() {
     <Workspace needs={video ? "video" : "edit"} tab="batch" title="Batch" sub="many at once, runs while you're away" bar={bar}
       drawer={<>
         <Seg label="Make" value={b.target} onChange={(v) => b.set({ target: v })} options={[{ value: "video", label: "Videos" }, { value: "image", label: "Pictures" }]} />
-        {!video && <Seg wrap label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }, { value: "poses", label: "Poses" }]} />}
+        {!video && <Seg wrap label="How" value={way} onChange={pickWay} options={[{ value: "recreate", label: "Recreate" }, { value: "swap", label: "Swap in" }, { value: "plan", label: "Plan" }, { value: "recipes", label: "Recipes" }, { value: "cosplay", label: "Cosplay" }, { value: "poses", label: "Poses" }, { value: "live", label: "Live packs" }]} />}
         {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
         {(video || way === "plan" || way === "cosplay") && <WriterChoice />}
         {!video && <BatchCheckpoint />}
@@ -133,6 +134,7 @@ export default function BatchTab() {
         {!video && way === "swap" && <PhotoSet chars={chars} />}
         {!video && way === "recipes" && <RecipePanel />}
         {!video && way === "poses" && <PosesPanel />}
+        {!video && way === "live" && <LiveBatchPanel />}
         {!video && way === "plan" && <ContentPlan />}
         {!video && way === "plan" && <p className="text-[12px] leading-relaxed text-dim">Rows with just words are made in Create's style with its LoRAs.</p>}
         <details className="border-t border-line pt-3 text-[13px]"><summary className="cursor-pointer text-muted hover:text-ink">Phone alerts</summary><div className="mt-2"><PhoneAlerts /></div></details>

@@ -7,6 +7,7 @@
 // Videos are made with H3 (loop / image → video / first → last), then re-encoded on the rental exactly as the site wants
 // (H.264 High, 24 fps constant, 720×1280, silent), each join eased onto the exact frame it meets, and how big the jump was
 // before that is shown on every clip — plus a reel of the whole pack to watch by eye before it's sent.
+import { create } from "zustand";
 import type { FileRef } from "./api";
 import type { Character } from "./characters";
 
@@ -94,7 +95,7 @@ export async function setAnchor(cid: string, ref: FileRef) {
 }
 
 /** one clip: H3 makes it, the rental re-encodes it onto its joins. Segments wait for the one before them */
-export async function makeClip(cid: string, key: string): Promise<void> {
+export async function makeClip(cid: string, key: string, attempt = 0): Promise<void> {
   const [{ buildAnimate }, { useJobs, waitForJob }, { useSettings, newSeed }, { h3Size }] = await Promise.all([import("./graphs"), import("./jobs"), import("./settings"), import("./models")]);
   const { c, l } = await get(cid);
   if (!l.anchor) throw new Error("Pick her still first");
@@ -132,6 +133,8 @@ export async function makeClip(cid: string, key: string): Promise<void> {
     await patchClip(cid, key, kind, { status: "encoding", src: { filename: src.filename, subfolder: src.subfolder, type: src.type } });
     const e = await post<{ d_start?: number | null; d_end?: number | null; last: string; seconds: number }>("/studio-api/live/encode", { cid, key, src, start, end });
     await patchClip(cid, key, kind, { status: "ready", enc: { ...e, at: Date.now() } });
+    // a join that visibly jumps: made again by itself (twice at most) before anyone has to look at it
+    if ((jumpLevel(e.d_start) === "jump" || jumpLevel(e.d_end) === "jump") && attempt < 2) return makeClip(cid, key, attempt + 1);
   } catch (err) {
     await patchClip(cid, key, kind, { status: "error", error: (err as Error).message });
     throw err;
@@ -216,4 +219,94 @@ export async function sendLive(cid: string): Promise<{ ok: boolean; note: string
 export async function checkOnSite(cid: string): Promise<{ status: number; body: unknown }> {
   const r = await fetch(`/studio-api/live/site?cid=${encodeURIComponent(cid)}`);
   return r.json();
+}
+
+
+// ---- planned by the writer: her actions and idle loops, in her manner, learning from examples of other creators
+
+/** what the writer knows about her: look, canon (for cosplay characters), her site profile and how she texts */
+async function whoShe(c: Character): Promise<string> {
+  const { describe } = await import("./characters");
+  const { canonNote } = await import("./siteAuto");
+  const st = c.site ?? {};
+  return [`Name: ${st.name || c.name}. Adult woman.`, describe(c), canonNote(c.source), st.direction && `Owner's direction: ${st.direction}`, st.bio && `Bio: ${st.bio}`,
+    st.personality && `Traits: ${st.personality}`, (st.personaCore || st.persona) && `Persona: ${String(st.personaCore || st.persona).slice(0, 1500)}`,
+    st.voice && `How she texts: ${st.voice}`, st.quirks && `Habits: ${st.quirks}`, c.personality && `Personality notes: ${c.personality}`].filter(Boolean).join("\n");
+}
+
+export interface PlanOpts { examples: string; pictures?: string[]; count: number; ratings: LiveAction["rating"][]; keep?: boolean }
+
+/** the writer plans her actions (and words her idle loops) — made clips of actions it keeps (same key) stay */
+export async function planActions(cid: string, o: PlanOpts): Promise<number> {
+  const { c, l } = await get(cid);
+  const { runWriter } = await import("./writer");
+  const { looseJson } = await import("./looseJson");
+  const keep = o.keep ? l.actions.filter((a) => a.on && l.clips[segKey(a.key, 0)]?.status === "ready") : [];
+  const raw = await runWriter("live", {
+    character: await whoShe(c), framing: l.framing === "full_body" ? "full body" : "waist up", count: String(o.count),
+    ratings: o.ratings.join(", "), keep: keep.length ? keep.map((a) => `${a.key}: ${a.title}`).join("\n") : "(none)",
+    examples: o.examples.trim() || "(none — use your own judgement of what live-stream creators offer)",
+  }, { tab: "characters", label: `${c.name} · planning her live pack`, big: true, images: [...(l.anchor ? [l.anchor.input] : []), ...(o.pictures ?? [])].slice(0, 8) });
+  type A = Partial<LiveAction> & { key?: string };
+  const d = looseJson<{ idle?: Record<string, string>; actions?: A[] }>(raw);
+  const STILL_END = " The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
+  const slug = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || `action_${Math.random().toString(36).slice(2, 7)}`;
+  const seen = new Set<string>();
+  const acts: LiveAction[] = (d.actions ?? []).flatMap((a) => {
+    const key = slug(a.key || a.title || "");
+    if (seen.has(key) || !a.prompt) return [];
+    seen.add(key);
+    const rating = (o.ratings.includes(a.rating as LiveAction["rating"]) ? a.rating : o.ratings[0]) as LiveAction["rating"];
+    return [{ key, title: String(a.title || key).slice(0, 40), prompt: String(a.prompt), hint: String(a.hint || "").slice(0, 200), rating,
+      seconds: Math.max(3, Math.min(15, Number(a.seconds) || 5)), segs: Math.max(1, Math.min(4, Number(a.segs) || 1)),
+      tier: (["free", "premium", "ultimate"].includes(String(a.tier)) ? a.tier : rating === "sfw" ? "free" : rating === "suggestive" ? "premium" : "ultimate") as LiveAction["tier"],
+      tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true }];
+  }).slice(0, 24);
+  if (!acts.length) throw new Error(`${c.name}: the writer planned no actions — try again`);
+  await saveLive(cid, (x) => ({
+    ...x,
+    idle: x.idle.map((y) => (d.idle?.[y.kind] ? { ...y, prompt: `${String(d.idle[y.kind]).replace(/\s*$/, "")}${STILL_END}` } : y)),
+    actions: acts,
+    // clips of actions that aren't in the plan any more go; the kept ones (same key) stay
+    clips: Object.fromEntries(Object.entries(x.clips).filter(([k]) => !k.startsWith("act_") || acts.some((a) => k.startsWith(`act_${a.key}_`)))),
+  }));
+  return acts.length;
+}
+
+// ---- Batch → Live packs: many characters, unattended until the eye check
+export interface LiveRun { cid: string; name: string; step: string; error?: string; done?: boolean }
+export const useLiveBatch = create<{ runs: LiveRun[]; running: boolean }>(() => ({ runs: [], running: false }));
+const setRun = (cid: string, p: Partial<LiveRun>) => useLiveBatch.setState((s) => ({ runs: s.runs.map((r) => (r.cid === cid ? { ...r, ...p } : r)) }));
+
+/** for each character: her still (her sheet's front picture unless she has one), her actions planned from the examples,
+ *  every clip made and fitted to its joins (big jumps made again by themselves). Sending waits for your eye check. */
+export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean }) {
+  const { useCharacters, coverOf } = await import("./characters");
+  const list = useCharacters.getState().list.filter((c) => cids.includes(c.id));
+  useLiveBatch.setState({ running: true, runs: list.map((c) => ({ cid: c.id, name: c.site?.name || c.name, step: "waiting" })) });
+  // the writer plans several side by side; the GPU line takes the clips one at a time anyway
+  let next = 0;
+  const one = async (c: Character) => {
+    try {
+      let l = liveOf(c);
+      if (!l.anchor) {
+        const face = c.views.front ?? coverOf(c);
+        if (!face) throw new Error("no picture of her to use as the still — pick one in her Live pack");
+        setRun(c.id, { step: "making her still" }); await setAnchor(c.id, face);
+      }
+      l = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
+      if (o.replan || l.actions.every((a) => DEFAULT_ACTIONS.some((d) => d.key === a.key && d.prompt === a.prompt))) {
+        setRun(c.id, { step: "planning her actions" });
+        const n = await planActions(c.id, o);
+        setRun(c.id, { step: `${n} actions planned — clips in the GPU line` });
+      } else setRun(c.id, { step: "clips in the GPU line" });
+      await makeAll(c.id);
+      const fin = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
+      const keys = packKeys(fin);
+      const bad = keys.filter((k) => fin.clips[k]?.status !== "ready").length;
+      setRun(c.id, { step: bad ? `${keys.length - bad}/${keys.length} clips made — open her pack to redo the rest` : `all ${keys.length} clips made — watch the reel and tick them`, done: true });
+    } catch (e) { setRun(c.id, { step: "stopped", error: (e as Error).message, done: true }); }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, list.length) }, async () => { while (next < list.length) await one(list[next++]); }));
+  useLiveBatch.setState({ running: false });
 }

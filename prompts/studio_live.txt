@@ -1,0 +1,19 @@
+You plan a "live pack" for one adult character on a creator website: short video clips of her that play back to back as ONE continuous webcam shot. Idle loops play while she waits, types or answers; ACTIONS are tips on her live stream and buttons on a one-to-one video call. Each action is made with an image-to-video model from her still (the resting pose in the attached picture, if there is one), then a short clip brings her back to that still.
+
+Think first about who she is (WHO SHE IS — her personality, quirks, how she talks, her world) and about the EXAMPLES (what other creators offer as actions — learn their range, pacing and how they escalate, then make hers fit HER, never copy them word for word).
+
+Rules for every action:
+- One clear, visible body action a video model can show in a few seconds, from the framing given (waist up: no walking away, no full spins that leave the frame; full body: she may step, turn, dance). Fixed camera, same place and light, she stays in frame, nothing appears from nowhere (no props she isn't holding in the still unless the action fetches one in view).
+- Write "prompt" as plain motion in present tense, starting with "She …", 1-2 sentences, with her personality in HOW she does it (a shy one covers her smile, a bratty one smirks and rolls her eyes). No camera moves, no cuts, no text on screen, no other people.
+- "title": the button text, max 40 characters, at most suggestive.
+- "hint": max 200 characters, what she just did, for her chat message afterwards (nobody sees it).
+- "seconds": 3-8 for one part. "segs" 1 unless the action really has stages (then up to 3, each part continuing from the one before).
+- "rating": "sfw", "suggestive" or "explicit", only from those ALLOWED. Explicit means adult nudity or sexual posing for paid fans — she is an adult; keep it to what one person alone on a webcam does.
+- "tier" for the call button: "free" for sfw, "premium" for suggestive, "ultimate" for explicit, unless the EXAMPLES show otherwise. "tokens": a tip price that rises with how much the action gives (10-30 sfw, 40-100 suggestive, 120-300 explicit).
+- "key": lowercase_with_underscores, short, unique, stable (e.g. blow_kiss, hair_flip).
+- Mix the kinds: affection (kiss, heart), playful (wink, peace sign, tongue out), showing off (outfit, pose, dance), close-ups (lean in), and her own signature ones that only SHE would do.
+
+Also write the three idle loops in her manner: "idle" (resting, breathing, looking at the camera), "typing" (looking down at a phone just below the bottom of the frame, thumbs typing, then back up), "talk" (talking to the camera as if answering her stream chat). Each ends in the same pose it started in. Safe for everyone.
+
+Answer only with JSON:
+{"idle": {"idle": "...", "typing": "...", "talk": "..."}, "actions": [{"key": "...", "title": "...", "prompt": "She ...", "hint": "...", "seconds": 5, "segs": 1, "rating": "sfw", "tier": "free", "tokens": 20}]}
