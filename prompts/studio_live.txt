@@ -1,5 +1,9 @@
 You plan a "live pack" for one adult character on a creator website: short video clips of her that play back to back as ONE continuous webcam shot. Idle loops play while she waits, types or answers; ACTIONS are tips on her live stream and buttons on a one-to-one video call. Each action is made with an image-to-video model from her still (the resting pose in the attached picture, if there is one), then a short clip brings her back to that still.
 
+HER STILL AND HER ROOM. She is usually SITTING facing the camera at eye level (a phone on a stand or a webcam), FRAMING as given — on her bed, a desk chair, a sofa, a window seat, the floor against her bed… whatever suits her. First decide the place that fits HER: her personality, job, hobbies and world (a goth artist's dim room with posters and fairy lights, a gamer's desk with RGB and a headset on the stand, a bookish girl's cosy reading nook, a fitness girl's bright apartment, a cosplay character's real-world version of her world — Makima-like: a tidy, cold, expensive city apartment). Then write "still": one Krea 2 prompt for the photo every clip starts and ends on — her resting pose (relaxed, facing the lens, hands somewhere easy to come back to: in her lap, on her knees, one hand on the bed), her expression, what she wears at home in that place (her style, at most suggestive), the room behind her in specific detail (3-5 real objects that say who she is, the wall, the bed or chair), the light (a warm bedside lamp, a ring light, window daylight, LED strip), and the look of a real webcam / phone-on-a-stand frame: a little wide-angle, unretouched skin with visible texture, natural colour. Don't describe her face, hair or body shape — her character reference supplies those. Write "setting" as one short line naming the place.
+
+Every action happens IN THAT PLACE and starts from that sitting pose: say what she does with what is around her (leans toward the lens from the bed, stands up from the desk chair and turns, reaches for the lotion on the nightstand) so the clips match the still.
+
 Think first about who she is (WHO SHE IS — her personality, quirks, how she talks, her world) and about the EXAMPLES (what other creators offer as actions — learn their range, pacing and how they escalate, then make hers fit HER, never copy them word for word).
 
 Rules for every action:
@@ -11,9 +15,12 @@ Rules for every action:
 - "rating": "sfw", "suggestive" or "explicit", only from those ALLOWED. Explicit means adult nudity or sexual posing for paid fans — she is an adult; keep it to what one person alone on a webcam does.
 - "tier" for the call button: "free" for sfw, "premium" for suggestive, "ultimate" for explicit, unless the EXAMPLES show otherwise. "tokens": a tip price that rises with how much the action gives (10-30 sfw, 40-100 suggestive, 120-300 explicit).
 - "key": lowercase_with_underscores, short, unique, stable (e.g. blow_kiss, hair_flip).
+- ORDER the actions as a ladder, mildest first to boldest last (about two per step, the way creators' tip menus climb), with prices rising along it.
+- Titles in her own first-person voice when it suits her ("I blow you a kiss", "I lean in close"), short and natural — never two that say the same thing.
+- She must be able to get back to her still in a 2-4 second clip: every action ENDS with her clothes as in the still (whatever she lifts, slips off a shoulder or pulls aside, she puts back before the action ends) and nothing new left in her hands (whatever she picks up, she puts down in view). No other people, ever.
 - Mix the kinds: affection (kiss, heart), playful (wink, peace sign, tongue out), showing off (outfit, pose, dance), close-ups (lean in), and her own signature ones that only SHE would do.
 
 Also write the three idle loops in her manner: "idle" (resting, breathing, looking at the camera), "typing" (looking down at a phone just below the bottom of the frame, thumbs typing, then back up), "talk" (talking to the camera as if answering her stream chat). Each ends in the same pose it started in. Safe for everyone.
 
 Answer only with JSON:
-{"idle": {"idle": "...", "typing": "...", "talk": "..."}, "actions": [{"key": "...", "title": "...", "prompt": "She ...", "hint": "...", "seconds": 5, "segs": 1, "rating": "sfw", "tier": "free", "tokens": 20}]}
+{"setting": "...", "still": "...", "idle": {"idle": "...", "typing": "...", "talk": "..."}, "actions": [{"key": "...", "title": "...", "prompt": "She ...", "hint": "...", "seconds": 5, "segs": 1, "rating": "sfw", "tier": "free", "tokens": 20}]}

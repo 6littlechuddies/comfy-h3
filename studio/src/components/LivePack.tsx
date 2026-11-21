@@ -78,6 +78,13 @@ function LivePack({ c }: { c: Character }) {
                     <img src={viewUrl(p)} alt="" loading="lazy" className="h-full w-full object-cover" />
                   </button>)) : <p className="col-span-3 text-[12px] text-dim">No pictures of her yet — make one in 03 Create first.</p>}
               </div>}
+          {c.style !== "anime" && <div className="flex flex-col gap-1.5 border border-line p-2">
+            <p className="text-[12.5px] font-semibold">Her room{l.setting ? <span className="font-normal text-muted"> · {l.setting}</span> : null}</p>
+            <textarea value={l.stillPrompt ?? ""} onChange={(e) => up((x) => ({ ...x, stillPrompt: e.target.value }))} rows={5} placeholder="Plan with the writer to get her room and still prompt — or write it: where she sits, what she wears at home, the room behind her, the light"
+              aria-label="Her still prompt" className="inset border border-line p-1.5 text-[11.5px] leading-relaxed" />
+            <Btn small onClick={() => void run("Making her webcam still (2 takes)…", async () => { const outs = await (await import("../lib/live")).makeStill(c.id, 2); toast(`${outs.length} new stills of her are at the top of the grid — pick one`, "good"); setPicking(true); })}
+              disabled={!!busy} why="Busy" title="Two takes of her in that place, with her face and body from her sheet — then pick one as the still">Make a new still</Btn>
+          </div>}
           <label className="flex flex-col gap-1 text-[12.5px] text-muted">Framing
             <DropSelect value={l.framing} onChange={(e) => up((x) => ({ ...x, framing: e.target.value as LiveState["framing"] }))} className="inset h-8 border border-line bg-raised px-2 text-[13px] text-ink">
               <option value="waist_up">Waist up</option><option value="full_body">Full body</option>

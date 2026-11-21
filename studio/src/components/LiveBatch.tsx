@@ -24,6 +24,7 @@ export function LiveBatchPanel() {
   const [count, setCount] = useState(() => Number(LS("h3.live.count", "8")) || 8);
   const [ratings, setRatings] = useState<LiveAction["rating"][]>(() => { try { return JSON.parse(LS("h3.live.ratings", '["sfw"]')); } catch { return ["sfw"]; } });
   const [replan, setReplan] = useState(false);
+  const [still, setStill] = useState<"new" | "sheet" | "keep">(() => (LS("h3.live.still", "new") as "new"));
   const file = useRef<HTMLInputElement>(null);
   const onSite = (c: (typeof chars)[number]) => !!c.site?.sent?.ok;
   const addPics = async (fs: File[]) => {
@@ -32,8 +33,8 @@ export function LiveBatchPanel() {
     const next = [...pics, ...names].slice(-6); setPics(next); SAVE("h3.live.pics", JSON.stringify(next));
   };
   const go = () => {
-    SAVE("h3.live.examples", examples); SAVE("h3.live.count", String(count)); SAVE("h3.live.ratings", JSON.stringify(ratings));
-    void liveBatch([...sel], { examples, pictures: pics, count, ratings, replan }).then(() => toast("Live packs: everything is made — open each one, watch its reel, tick the clips and send", "good"));
+    SAVE("h3.live.examples", examples); SAVE("h3.live.count", String(count)); SAVE("h3.live.ratings", JSON.stringify(ratings)); SAVE("h3.live.still", still);
+    void liveBatch([...sel], { examples, pictures: pics, count, ratings, replan, still }).then(() => toast("Live packs: everything is made — open each one, watch its reel, tick the clips and send", "good"));
   };
   return (
     <div className="flex flex-col gap-3 border border-line p-3">
@@ -76,6 +77,13 @@ export function LiveBatchPanel() {
         {(["sfw", "suggestive", "explicit"] as const).map((r) => (
           <label key={r} className="flex items-center gap-1"><input type="checkbox" checked={ratings.includes(r)} onChange={(e) => setRatings(e.target.checked ? [...ratings, r] : ratings.filter((x) => x !== r).length ? ratings.filter((x) => x !== r) : ratings)} />{r === "sfw" ? "SFW" : r === "suggestive" ? "Suggestive" : "Explicit (paid fans)"}</label>))}
         <label className="flex items-center gap-1" title="Plan again for characters that already have planned actions (clips of actions it keeps stay)"><input type="checkbox" checked={replan} onChange={(e) => setReplan(e.target.checked)} /> Plan again where planned</label>
+      </div>
+      <div className="flex flex-col gap-1 text-[12.5px] text-muted">Her still
+        <div className="flex flex-wrap gap-1">
+          {([["new", "A new webcam still (DeepSeek picks her room)"], ["sheet", "Her sheet picture"], ["keep", "Keep the one she has"]] as const).map(([v, t]) => (
+            <button key={v} onClick={() => setStill(v)} className={cx("press tag-btn !h-8 !px-2.5 !text-[12px]", still === v && "on")}>{t}</button>))}
+        </div>
+        {still === "new" && <span className="text-[11.5px] leading-relaxed text-dim">The writer decides where she'd sit in front of the camera — her bedroom, desk, sofa, whatever fits who she is — and every action is worded for that place. Two takes are made with her face and body from her sheet; the first becomes her still (swap it in her Live pack).</span>}
       </div>
       <p className="text-[11.5px] text-dim">About {Math.round(sel.size * (3 + count * 2))} clips — roughly {Math.max(1, Math.round(sel.size * (3 * 6 + count * 8) * 3.5 / 60))} min of GPU time. The site's first test was one character, 3 idle loops and 4 SFW actions.</p>
       <Btn kind="primary" onClick={go} disabled={!sel.size || running} why={running ? "Already running" : "Pick characters first"}><Icon name="play" size={14} /> Plan and make {sel.size || ""} live pack{sel.size === 1 ? "" : "s"}</Btn>

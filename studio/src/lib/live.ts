@@ -34,6 +34,8 @@ export interface LiveState {
   actions: LiveAction[];
   clips: Record<string, LiveClip>;
   sent?: { at: number; status: number; problems?: string };
+  /** the writer's place for her (one line) and the prompt her webcam still is made from */
+  setting?: string; stillPrompt?: string;
 }
 
 const STILL = "The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
@@ -246,9 +248,9 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
     character: await whoShe(c), framing: l.framing === "full_body" ? "full body" : "waist up", count: String(o.count),
     ratings: o.ratings.join(", "), keep: keep.length ? keep.map((a) => `${a.key}: ${a.title}`).join("\n") : "(none)",
     examples: o.examples.trim() || "(none — use your own judgement of what live-stream creators offer)",
-  }, { tab: "characters", label: `${c.name} · planning her live pack`, big: true, images: [...(l.anchor ? [l.anchor.input] : []), ...(o.pictures ?? [])].slice(0, 8) });
+  }, { tab: "characters", label: `${c.name} · planning her live pack`, big: true, images: [...(l.anchor ? [l.anchor.input] : await sheetPic(c)), ...(o.pictures ?? [])].slice(0, 8) });
   type A = Partial<LiveAction> & { key?: string };
-  const d = looseJson<{ idle?: Record<string, string>; actions?: A[] }>(raw);
+  const d = looseJson<{ setting?: string; still?: string; idle?: Record<string, string>; actions?: A[] }>(raw);
   const STILL_END = " The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
   const slug = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || `action_${Math.random().toString(36).slice(2, 7)}`;
   const seen = new Set<string>();
@@ -265,6 +267,7 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
   if (!acts.length) throw new Error(`${c.name}: the writer planned no actions — try again`);
   await saveLive(cid, (x) => ({
     ...x,
+    ...(d.setting ? { setting: String(d.setting).slice(0, 200) } : {}), ...(d.still ? { stillPrompt: String(d.still) } : {}),
     idle: x.idle.map((y) => (d.idle?.[y.kind] ? { ...y, prompt: `${String(d.idle[y.kind]).replace(/\s*$/, "")}${STILL_END}` } : y)),
     actions: acts,
     // clips of actions that aren't in the plan any more go; the kept ones (same key) stay
@@ -280,7 +283,7 @@ const setRun = (cid: string, p: Partial<LiveRun>) => useLiveBatch.setState((s) =
 
 /** for each character: her still (her sheet's front picture unless she has one), her actions planned from the examples,
  *  every clip made and fitted to its joins (big jumps made again by themselves). Sending waits for your eye check. */
-export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean }) {
+export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean; still: "new" | "sheet" | "keep" }) {
   const { useCharacters, coverOf } = await import("./characters");
   const list = useCharacters.getState().list.filter((c) => cids.includes(c.id));
   useLiveBatch.setState({ running: true, runs: list.map((c) => ({ cid: c.id, name: c.site?.name || c.name, step: "waiting" })) });
@@ -289,17 +292,24 @@ export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean 
   const one = async (c: Character) => {
     try {
       let l = liveOf(c);
-      if (!l.anchor) {
-        const face = c.views.front ?? coverOf(c);
-        if (!face) throw new Error("no picture of her to use as the still — pick one in her Live pack");
-        setRun(c.id, { step: "making her still" }); await setAnchor(c.id, face);
+      const newStill = o.still === "new" && c.style !== "anime" && !(l.anchor && !o.replan && l.stillPrompt);
+      // the plan comes first when she gets a new still: it writes her room and the still's prompt, and words every action for it
+      if (newStill || o.replan || l.actions.every((a) => DEFAULT_ACTIONS.some((d) => d.key === a.key && d.prompt === a.prompt))) {
+        setRun(c.id, { step: "the writer is planning her room and actions" });
+        const n = await planActions(c.id, o);
+        setRun(c.id, { step: `${n} actions planned` });
       }
       l = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
-      if (o.replan || l.actions.every((a) => DEFAULT_ACTIONS.some((d) => d.key === a.key && d.prompt === a.prompt))) {
-        setRun(c.id, { step: "planning her actions" });
-        const n = await planActions(c.id, o);
-        setRun(c.id, { step: `${n} actions planned — clips in the GPU line` });
-      } else setRun(c.id, { step: "clips in the GPU line" });
+      if (newStill) {
+        setRun(c.id, { step: `making her webcam still${l.setting ? ` · ${l.setting}` : ""}` });
+        const outs = await makeStill(c.id, 2);
+        await setAnchor(c.id, outs[0]);
+      } else if (!l.anchor || o.still === "sheet") {
+        const face = c.views.front ?? coverOf(c);
+        if (!face) throw new Error("no picture of her to use as the still — pick one in her Live pack");
+        setRun(c.id, { step: "using her sheet picture as the still" }); await setAnchor(c.id, face);
+      }
+      setRun(c.id, { step: "clips in the GPU line" });
       await makeAll(c.id);
       const fin = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
       const keys = packKeys(fin);
@@ -309,4 +319,34 @@ export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean 
   };
   await Promise.all(Array.from({ length: Math.min(4, list.length) }, async () => { while (next < list.length) await one(list[next++]); }));
   useLiveBatch.setState({ running: false });
+}
+
+
+async function sheetPic(c: Character): Promise<string[]> {
+  const { coverOf } = await import("./characters");
+  const f = c.views.front ?? coverOf(c);
+  if (!f) return [];
+  return [await (await import("./api")).toInput(f).then((x) => x.name).catch(() => "")].filter(Boolean);
+}
+
+/** her webcam still, made from the writer's still prompt with her character reference (Krea 2 identity edit on a 9:16
+ *  blank canvas — the same way Batch makes a character's pictures): `takes` pictures in her project; the first becomes
+ *  her still (pick another from her pictures in her Live pack) */
+export async function makeStill(cid: string, takes = 2): Promise<FileRef[]> {
+  const { c, l } = await get(cid);
+  if (c.style === "anime") throw new Error(`${c.name} is an anime character — pick her still yourself in her Live pack`);
+  const shot = l.stillPrompt || `She sits facing the camera at eye level in her bedroom, relaxed, hands in her lap, a soft smile, a warm bedside lamp. A phone-on-a-stand webcam frame, ${l.framing === "full_body" ? "full body" : "waist up"}, unretouched skin with visible texture.`;
+  const [{ characterShot }, { buildEdit }, { editArgs, newSeed, useSettings }, { useJobs, waitForJob }] = await Promise.all([import("./make"), import("./graphs"), import("./settings"), import("./jobs")]);
+  const cs = await characterShot(c, shot, `${shot} Framing: ${l.framing === "full_body" ? "full body, head to feet in frame" : "waist up"}, vertical 9:16 phone frame.`, "9:16", [], null);
+  const st = useSettings.getState().s;
+  const jobs = await Promise.all(Array.from({ length: takes }, () => useJobs.getState().run("characters", `${c.name} · live still`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
+    images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: `studio/live/${cid}` }), "edit:krea:1:raw", { project: cid, charId: cid, live: "still" })));
+  const outs: FileRef[] = [];
+  for (const j of jobs) {
+    const d = await waitForJob(j.id).catch(() => null);
+    const o = d?.outputs.find((x) => x.kind === "image" && x.type === "output");
+    if (o) outs.push({ filename: o.filename, subfolder: o.subfolder, type: o.type });
+  }
+  if (!outs.length) throw new Error(`${c.name}: her still didn't come out — try again`);
+  return outs;
 }
