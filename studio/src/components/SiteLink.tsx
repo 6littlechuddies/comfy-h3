@@ -559,7 +559,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   const [sending, setSending] = useState<string | null>(null);
   const [picking, setPicking] = useState<"avatar" | "cover" | null>(null);
   const [pickLoop, setPickLoop] = useState(false);
-  const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && c.views[v.id]);
+  const views = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "faces" && v.id !== "cutout" && c.views[v.id]);
   const sets = site.sets ?? [];
   const step = useSiteBusy((s) => s.busy[c.id]);
   const deep = async () => {

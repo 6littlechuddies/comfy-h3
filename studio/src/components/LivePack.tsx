@@ -144,6 +144,35 @@ function LivePack({ c }: { c: Character }) {
             <Btn small onClick={() => void run("Making her webcam still (2 takes)…", async () => { const outs = await (await import("../lib/live")).makeStill(c.id, 2); toast(`${outs.length} new stills of her are at the top of the grid — pick one`, "good"); setPicking(true); })}
               disabled={!!busy} why="Busy" title="Two takes of her in that place, with her face and body from her sheet — then pick one as the still">Make a new still here</Btn>
           </section>}
+          <section className="flex flex-col gap-2 border-t border-line pt-4">
+            <Switch on={l.refs !== false} set={(v) => up((x) => ({ ...x, refs: v }))} title="H3's reference mode: her sheets and her room go in as reference pictures beside the still, which is pinned as the first frame (and the last, for loops and the way back). If a clip fails that way, it's made the plain way by itself.">
+              Show every clip her sheets and room
+              <span className="block text-[11px] text-dim">Her face, body and room stay the same from part to part</span>
+            </Switch>
+            {l.refs !== false && <div className="grid grid-cols-3 gap-1.5">
+              {([["Angles", c.views.sheet ?? c.views.front, null], ["Expressions", c.views.faces, "faces"], ["Room", l.room?.ref, "room"]] as const).map(([t, f, make]) => (
+                <div key={t} className="flex flex-col gap-1">
+                  <span className="flex aspect-square items-center justify-center overflow-hidden border border-line bg-raised2 text-center text-[10px] leading-tight text-dim">
+                    {f ? <img src={viewUrl(f)} alt={t} className="h-full w-full object-cover" /> : make === "room" && !l.anchor ? "after her still" : "not made yet"}</span>
+                  <span className="flex items-center justify-between text-[10.5px] text-muted">{t}
+                    {make && <button disabled={!!busy || (make === "room" && !l.anchor) || (make === "faces" && !c.views.front)} className="text-accent hover:underline disabled:text-dim disabled:no-underline"
+                      title={make === "room" ? "Her room as a set sheet from her still: the same view empty, a wider view, the wall behind her" : "Her face in twelve expressions and four mouth shapes, one picture (it also lands in her sheet in Characters)"}
+                      onClick={() => void run(make === "room" ? "Making her room sheet…" : "Making her expression sheet…", async () => {
+                        const L = await import("../lib/live");
+                        if (make === "room") await L.makeRoom(c.id);
+                        else {
+                          const [{ facesGraph }, { useCharacters: uc }] = await Promise.all([import("../lib/sheet"), import("../lib/characters")]);
+                          const front = await uc.getState().asMedia(c.id, "front");
+                          if (!front) throw new Error("She needs a front picture first");
+                          const { waitForJob } = await import("../lib/jobs");
+                          const j = await useJobs.getState().run("characters", `${c.name}: expression sheet`, facesGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "faces" });
+                          await waitForJob(j.id);
+                        }
+                        toast(make === "room" ? "Her room sheet is in — clips made from now on use it" : "Her expression sheet is in", "good");
+                      })}>{f ? "Redo" : "Make"}</button>}</span>
+                </div>))}
+            </div>}
+          </section>
           <section className="flex flex-col gap-3 border-t border-line pt-4">
             <Switch on={l.faceFix !== false} set={(v) => up((x) => ({ ...x, faceFix: v }))} title="Before each next part (or the way back) starts, her face on the part's last frame is redrawn from her reference sheet, both are scored by DeepSeek's face match, and the better one goes on">
               Keep her face at every join

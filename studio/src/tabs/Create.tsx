@@ -578,7 +578,7 @@ function References({ ch, anime, words }: { ch: ReturnType<typeof useCharacters.
 /** which of the character's sheet pictures go in with Picture 1 — shown side by side to the edit model as one picture */
 function SheetPick({ ch }: { ch: Character }) {
   const views = useMakeRefs((st) => st.sheetViews);
-  const have = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "cutout" && ch.views[v.id]);
+  const have = VIEWS.filter((v) => v.id !== "sheet" && v.id !== "faces" && v.id !== "cutout" && ch.views[v.id]);
   const sheet = !!ch.views.sheet;
   const useSheet = sheet && views.includes("sheet");
   if (have.length < 2 && !sheet) return null;

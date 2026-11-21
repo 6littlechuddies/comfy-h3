@@ -13,7 +13,7 @@ import { useJobs } from "../lib/jobs";
 import { DEFAULTS, modelArgs, modelOf, newSeed, pickModel, qualityTags, useSettings } from "../lib/settings";
 import { charCkpt, charModel, familyOfModel, VIEWS, animeTags, describe, looks, exportCharacters, fromCreatorJson, importCharacters, isAdult, newCharacter, parseExtracted, useCharacters, type Character, type View } from "../lib/characters";
 import { makeRef, useWork } from "../lib/work";
-import { queueFullSheet, SHEET_MODELS, sheetStyle, viewEngine, viewGraph, viewMeta } from "../lib/sheet";
+import { facesGraph, queueFullSheet, SHEET_MODELS, sheetStyle, viewEngine, viewGraph, viewMeta } from "../lib/sheet";
 import { ModelsNotice } from "../components/Workspace";
 import { TrainSetMaker } from "../components/Builder";
 import { IdentityCard } from "../components/IdentityCard";
@@ -265,6 +265,7 @@ function SheetMaker({ c, back }: { c: Character; back: () => void }) {
     if (!front) throw new Error("Make the front view first");
     const g = v === "cutout"
       ? buildCutout(front.name, `studio/characters/${c.id}_cutout`)
+      : v === "faces" ? facesGraph(c, front.name)
       : viewGraph(c, front.name, `${VIEW_PROMPT[v]} ${v === "face" || ["smile", "angry", "surprised"].includes(v) ? "" : BG[bg]}`.trim(), v);
     await run("characters", `${c.name}: ${VIEWS.find((x) => x.id === v)!.label.toLowerCase()}`, g, `characters:${v === "cutout" ? "cutout" : "view"}`, { charId: c.id, view: v, ...(v === "cutout" ? {} : viewMeta(c)) });
   };

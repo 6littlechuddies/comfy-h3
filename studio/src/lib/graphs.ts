@@ -709,6 +709,9 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   /** copy a clip's motion exactly: its depth (Video Depth Anything, steady across frames) steers the video through the MiniMax H3 Fun
    *  ControlNet — your characters (reference pictures) or your first frame, moving like the people in the clip */
   motion?: { file: string; start: number; end: number; strength: number; endAt: number };
+  /** ref mode: pictures pinned at exact frames of the video (0 = first, -1 = last) with ComfyUI's MiniMax H3 Add Guide —
+   *  so a clip can start (and end) on her still while her sheets and her room go in as reference pictures */
+  guides?: { image: string; frame: number }[];
 }
 
 // Mouths: by default nobody in a video talks, mouths words, sings or lip-syncs. H3 follows what a prompt says is there far
@@ -763,6 +766,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   const length = h3Frames(p.seconds);
 
   let cond: string;
+  let pos: Link | undefined;
   if (ref) {
     const inputs: Inputs = {
       clip: o(clip), prompt: withAvoid(withMouth(withMusic(withTriggers(p.prompt, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
@@ -781,6 +785,11 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     });
     p.audios.slice(0, 3).forEach((f, i) => (inputs[`ref_audios.ref_audio_${i}`] = o(g.add("LoadAudio", { audio: f }))));
     cond = g.add("MiniMaxH3ReferenceToVideo", inputs);
+    // pinned frames: each Add Guide puts one picture at one frame (chained, so first and last can both be pinned)
+    for (const gd of p.guides ?? []) {
+      const img = g.add("LoadImage", { image: gd.image });
+      pos = o(g.add("MiniMaxH3AddGuide", { positive: pos ?? o(cond, 0), vae: o(vae), latent: o(cond, 1), image: o(img), frame_idx: gd.frame }, gd.frame === 0 ? "Start on this frame" : "End on this frame"));
+    }
   } else {
     const first = p.images[0] ? g.add("LoadImage", { image: p.images[0] }) : null;
     const lastFile = p.mode === "loop" ? p.images[0] : p.mode === "fl" ? p.images[1] : undefined;
@@ -812,12 +821,12 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     // Raylight (github.com/komikndr/raylight): the model loads on every card and each step's frames are split across them
     // (Ulysses sequence parallel) — the same model, LoRAs and sampler, just N cards working on one video
     const actors = rayActors(g, rayN, ref ? M.h3Ref : M.h3FL, rayLoras);
-    const guider = g.add("RayBasicGuider", { ray_actors: o(actors), conditioning: o(cond, 0) });
+    const guider = g.add("RayBasicGuider", { ray_actors: o(actors), conditioning: pos ?? o(cond, 0) });
     const sigmas = g.add("RayBasicScheduler", { ray_actors: o(actors), scheduler: p.scheduler, steps, denoise: 1 });
     out = g.add("XFuserSamplerCustomAdvanced", { add_noise: true, noise_seed: p.seed, guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
   } else {
     const noise = g.add("RandomNoise", { noise_seed: p.seed });
-    const guider = g.add("BasicGuider", { model, conditioning: o(cond, 0) });
+    const guider = g.add("BasicGuider", { model, conditioning: pos ?? o(cond, 0) });
     const sigmas = g.add("BasicScheduler", { model, scheduler: p.scheduler, steps, denoise: 1 });
     out = g.add("SamplerCustomAdvanced", { noise: o(noise), guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
   }

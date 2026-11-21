@@ -124,6 +124,32 @@ export function sheetGraph(c: Character, frontName: string, seed = newSeed()) {
     prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
 }
 
+/** her expression sheet: ONE picture, a grid of head-and-shoulders close-ups of her face in many moods plus four mouth shapes
+ *  (for the talking loops) — the same lighting in every panel. Video uses it as a second reference beside the turnaround, so
+ *  her face holds when she laughs, pouts or talks, which is where likeness drifts in long actions. */
+export const FACES_PROMPT = "Expression reference sheet of this exact same single person: one image, a neat grid of 12 head-and-shoulders close-ups, 4 columns by 3 rows, with thin even gaps between them, on a plain flat mid-grey studio background, no text, no labels, no borders. In every panel the same face, the same hair, the same skin with visible natural texture, the same outfit neckline, the same soft even front lighting and the same scale; only the expression changes. Row 1: neutral and relaxed, a soft closed-lip smile, laughing with eyes crinkled, a playful wink. Row 2: surprised with raised brows, shy and blushing looking slightly down, a small pout, a calm sultry half-lidded look. Row 3, mouth shapes while talking, facing the camera: saying \"ah\" (mouth open), saying \"ee\" (lips wide), saying \"oo\" (lips rounded), saying \"mm\" (lips pressed together). An adult woman. Sharp focus on the eyes, high detail.";
+export const FACES_CANVAS = { width: 1920, height: 1440 };
+export function facesGraph(c: Character, frontName: string, seed = newSeed()) {
+  const e = useSettings.getState().s.edit;
+  const anime = sheetStyle(c) === "anime";
+  const style = anime ? " Keep exactly the same art style, line art, shading and colours as the character picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
+  const unet = c.sheet?.ckpt?.krea || undefined;
+  const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
+  return buildEdit({ ...editArgs(e, "krea"), loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
+    blank: FACES_CANVAS, instruction: `The first picture is a blank canvas; the second picture is the person. ${FACES_PROMPT} These are twelve pictures of ONE single person, not different people.${style}`, negative: "", resolution: 1440,
+    prefix: `studio/characters/${c.id}_faces`, ...(unet ? { unet } : {}) });
+}
+
+/** her room as a set sheet, made from her webcam still: the same view with nobody in it, a wider view of the same room, and
+ *  the wall behind her up close — Live clips get it as a reference picture so the room can't drift from part to part */
+export const ROOM_PROMPT = "Location reference sheet of the exact room in the person picture, as a film set reference. One wide image, three panels side by side with thin even gaps, no text, no labels, no borders. Panel 1 (left): exactly the same camera position, angle, framing and light as the person picture, but the room is empty — nobody in it, the seat or bed she was on is empty with a natural dent. Panel 2 (middle): the same room seen from further back and a little higher, a wide view showing what is just outside the edges of the original frame (the rest of the bed, the walls on both sides, the window, the door, shelves and lamps), the same time of day and the same lamps on. Panel 3 (right): the background behind where she sat, closer, showing the wall, the decor and the objects behind her in sharp detail. Every panel is the same room with the same furniture, colours and light; nothing is added or moved. No people in any panel. A real photo, natural light falloff, no studio look.";
+export const ROOM_CANVAS = { width: 2304, height: 896 };
+export function roomGraph(stillName: string, prefix: string, seed = newSeed()) {
+  const e = useSettings.getState().s.edit;
+  return buildEdit({ ...editArgs(e, "krea"), enhance: false, seed, images: [stillName], blank: ROOM_CANVAS,
+    instruction: `The first picture is a blank canvas; the second picture is a woman in her room. ${ROOM_PROMPT}`, negative: "", resolution: 1440, prefix });
+}
+
 /** "Make sheet": one picture with every view, plus the cut-out. (The angles one by one are still in the sheet maker.) */
 export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "white") {
   const front = await useCharacters.getState().asMedia(c.id, "front");
@@ -131,6 +157,7 @@ export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "whit
   const run = useJobs.getState().run;
   // cut into her angles too (side, back, face, three-quarter), so "Every angle" and the sheet + face pair both have them
   await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", order: [...SHEET_ORDER] });
+  await run("characters", `${c.name}: expression sheet`, facesGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "faces" });
   await run("characters", `${c.name}: cut-out`, buildCutout(front.name, `studio/characters/${c.id}_cutout`), "characters:cutout", { charId: c.id, view: "cutout" });
 }
 

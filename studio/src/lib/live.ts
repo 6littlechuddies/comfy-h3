@@ -46,6 +46,11 @@ export interface LiveState {
   sent?: { at: number; status: number; problems?: string };
   /** the writer's place for her (one line) and the prompt her webcam still is made from */
   setting?: string; stillPrompt?: string;
+  /** her room as a set sheet (made from her still): the same view empty, a wider view, the wall behind her */
+  room?: { ref: FileRef; input: string; at: number };
+  /** every clip gets her turnaround, her expression sheet and her room sheet as reference pictures, with her still pinned
+   *  at the first frame (H3 reference mode + Add Guide) — off = plain image → video from the still, as before */
+  refs?: boolean;
 }
 
 const STILL = "The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
@@ -102,12 +107,12 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 /** the still: the picture cut to 9:16 and sized 720×1280. A new still means every clip has to be made again */
 export async function setAnchor(cid: string, ref: FileRef) {
   const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref });
-  await saveLive(cid, (l) => ({ ...l, anchor: { ref, input: d.input, at: Date.now() },
+  await saveLive(cid, (l) => ({ ...l, anchor: { ref, input: d.input, at: Date.now() }, room: undefined,
     clips: Object.fromEntries(Object.entries(l.clips).map(([k, c]) => [k, { ...c, status: "new" as const, enc: undefined, ok: false, jobId: undefined, src: undefined }])) }));
 }
 
 /** one clip: H3 makes it, the rental re-encodes it onto its joins. Segments wait for the one before them */
-export async function makeClip(cid: string, key: string, attempt = 0): Promise<void> {
+export async function makeClip(cid: string, key: string, attempt = 0, noRefs = false): Promise<void> {
   const [{ buildAnimate }, { useJobs, waitForJob }, { useSettings, newSeed }, { h3Size }] = await Promise.all([import("./graphs"), import("./jobs"), import("./settings"), import("./models")]);
   const { c, l } = await get(cid);
   if (!l.anchor) throw new Error("Pick her still first");
@@ -137,8 +142,14 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
   try {
     // the same planning as 02 Scenes: the plan line goes through the H3 prompt compiler (timing, motion beats, what stays
     // still), with her start frame attached — written once per plan line and reused when the clip is made again
+    // her references: the turnaround, the expression sheet and the room sheet go in as reference pictures and her start (and
+    // end) frame is pinned with Add Guide — H3's reference mode, so the clip both starts on the still and keeps her face and room
+    const R = !noRefs && l.refs !== false ? await clipRefs(c, l) : null;
+    const pics = R ? [start, ...(end && end !== start ? [end] : []), ...R.files] : [];
+    const refsLine = R ? refsText(R.labels, end !== undefined && end !== start, mode === "loop") : "";
+    const from = `${R ? `refs:${R.files.join(",")}|` : ""}${prompt}`;
     const old = l.clips[key];
-    let h3 = old?.h3 && old.h3From === prompt ? old.h3 : "";
+    let h3 = old?.h3 && old.h3From === from ? old.h3 : "";
     if (!h3) {
       try {
         const { runWriter } = await import("./writer");
@@ -147,25 +158,32 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
           : mode === "fl" ? "<Picture 1> is the actual first frame; the video must end exactly on her resting pose from her still (the last frame is given to the model)."
           : "<Picture 1> is the actual first frame of the target video.";
         h3 = (await runWriter("compiler", { blueprint: `${prompt}${l.setting ? `\nPlace: ${l.setting}.` : ""}\nOne fixed camera (a phone on a stand at eye level), one continuous shot — no cuts, no zoom, no camera moves, nothing else in the room changes. Silent.`,
-          MODE: "I2V", seconds: String(seconds), references: refs, characters: `${c.site?.name || c.name}: ${describe(c).slice(0, 400)}`, aspect: "9:16", description: prompt },
-          { tab: "characters", label: `${c.name} · live · H3 prompt · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, images: [images[0]] })).trim();
-        await patchClip(cid, key, kind, { h3, h3From: prompt });
+          MODE: R ? "REF+FRAME" : "I2V", seconds: String(seconds), references: R ? refsLine : refs, characters: `${c.site?.name || c.name}: ${describe(c).slice(0, 400)}`, aspect: "9:16", description: prompt },
+          { tab: "characters", label: `${c.name} · live · H3 prompt · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, images: R ? pics.slice(0, 6) : [images[0]] })).trim();
+        await patchClip(cid, key, kind, { h3, h3From: from });
       } catch { h3 = ""; } // no writer: the plan line goes in as it is
     }
     const a = useSettings.getState().s.animate;
     const { width, height } = h3Size("9:16", 0.88);
-    const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed: newSeed(), mode, prompt: h3 || prompt, images, videos: [], audios: [],
+    const guides = R ? [{ image: start, frame: 0 }, ...(end ? [{ image: end, frame: -1 }] : [])] : undefined;
+    const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed: newSeed(), mode: R ? "ref" : mode, prompt: h3 || (R ? `${refsLine}\n\n${prompt}` : prompt), images: R ? pics : images, videos: [], audios: [], guides,
       seconds, width, height, turbo: a.turbo, loras: a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: `studio/live/${cid}`, plain: true,
       mouth: talk ? "talk" : "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark" });
-    const j = await useJobs.getState().run("characters", `${c.name} · live · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, g, `animate:${mode}:live:${seconds}s`, { charId: cid, live: key });
+    const j = await useJobs.getState().run("characters", `${c.name} · live · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, g, `animate:${R ? "ref" : mode}:live:${seconds}s`, { charId: cid, live: key });
     await patchClip(cid, key, kind, { jobId: j.id });
-    const done = await waitForJob(j.id);
+    let done;
+    try { done = await waitForJob(j.id); }
+    catch (err) {
+      // reference mode refused (an older ComfyUI without Add Guide, or out of memory with the extra pictures): the plain way
+      if (R) { await patchClip(cid, key, kind, { error: `with her references it failed (${(err as Error).message.slice(0, 120)}) — making it the plain way` }); return makeClip(cid, key, attempt, true); }
+      throw err;
+    }
     const src = done.outputs.find((o) => o.kind === "video" && o.type === "output");
     if (!src) throw new Error("H3 finished without a video");
     await patchClip(cid, key, kind, { status: "encoding", src: { filename: src.filename, subfolder: src.subfolder, type: src.type } });
     const e = await post<{ d_start?: number | null; d_end?: number | null; last: string; seconds: number }>("/studio-api/live/encode", { cid, key, src, start, end });
     // a join that visibly jumps: made again by itself (twice at most) before anyone has to look at it
-    if ((jumpLevel(e.d_start) === "jump" || jumpLevel(e.d_end) === "jump") && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...e, at: Date.now() } }); return makeClip(cid, key, attempt + 1); }
+    if ((jumpLevel(e.d_start) === "jump" || jumpLevel(e.d_end) === "jump") && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...e, at: Date.now() } }); return makeClip(cid, key, attempt + 1, noRefs); }
     let enc = e;
     // an action part: her face on its last frame is fixed against her reference sheet before anything continues from it,
     // and both are scored — the fix is only used when it scores at least as well; a part whose likeness is still low is
@@ -176,7 +194,7 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
       if (fx.used === "fixed" && fx.last) enc = await post("/studio-api/live/encode", { cid, key, src, start, end: fx.last });
       await patchClip(cid, key, kind, { likeness: { before: fx.before, after: fx.after, used: fx.used, why: fx.why }, error: undefined });
       const final = fx.used === "fixed" ? fx.after : fx.before;
-      if (final != null && final < 6 && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...enc, at: Date.now() } }); return makeClip(cid, key, attempt + 1); }
+      if (final != null && final < 6 && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...enc, at: Date.now() } }); return makeClip(cid, key, attempt + 1, noRefs); }
     }
     await patchClip(cid, key, kind, { status: "ready", enc: { ...enc, at: Date.now() } });
   } catch (err) {
@@ -350,6 +368,10 @@ export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean;
         setRun(c.id, { step: "making her reference sheet (all angles) first" });
         if (!(await ensureSheet(c.id).catch(() => false))) setRun(c.id, { step: "no sheet came out — going on with her front picture" });
       }
+      if (l.refs !== false && !c.views.faces && c.views.front) {
+        setRun(c.id, { step: "making her expression sheet" });
+        await ensureFaces(c.id).catch(() => false);
+      }
       if (newStill) {
         setRun(c.id, { step: `making her webcam still${l.setting ? ` · ${l.setting}` : ""}` });
         const outs = await makeStill(c.id, 2);
@@ -358,6 +380,11 @@ export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean;
         const face = c.views.front ?? coverOf(c);
         if (!face) throw new Error("no picture of her to use as the still — pick one in her Live pack");
         setRun(c.id, { step: "using her sheet picture as the still" }); await setAnchor(c.id, face);
+      }
+      const l2 = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
+      if (l2.refs !== false && l2.anchor && !l2.room) {
+        setRun(c.id, { step: "making her room sheet from the still" });
+        await makeRoom(c.id).catch(() => false);
       }
       setRun(c.id, { step: "clips in the GPU line" });
       await makeAll(c.id);
@@ -483,6 +510,62 @@ async function fixJoin(c: Character, cid: string, last: string): Promise<{ used:
   return better ? { used: "fixed", last: (await toInput(fixedRef)).name, before: b.score, after: a.score, why: a.why } : { used: "original", before: b.score, after: a.score, why: b.why };
 }
 
+
+/** the reference pictures every clip gets (input names) and how the compiler should name them — after the pinned frame(s) */
+async function clipRefs(c: Character, l: LiveState): Promise<{ files: string[]; labels: string[] } | null> {
+  const { toInput } = await import("./api");
+  const files: string[] = [], labels: string[] = [];
+  const add = async (f: FileRef | undefined, label: string) => { if (!f) return; const n = await toInput(f).then((x) => x.name).catch(() => ""); if (n) { files.push(n); labels.push(label); } };
+  await add(c.views.sheet ?? c.views.front, c.views.sheet ? "her reference sheet: the same woman from several angles (front, back, side, face, three-quarter) — her identity, face, hair, body and outfit" : "a picture of her — her identity, face, hair, body and outfit");
+  await add(c.views.faces, "her expression sheet: her face in twelve expressions and four mouth shapes — how her face looks when it moves");
+  if (l.room) { files.push(l.room.input); labels.push("her room as a set sheet: the same view with nobody in it, a wider view of the room, and the wall behind her — the room's layout, furniture and light"); }
+  return files.length ? { files, labels } : null;
+}
+/** the references line for the compiler: the pinned frame(s) first, then her pictures */
+function refsText(labels: string[], hasEnd: boolean, loop: boolean): string {
+  const first = 1, endN = hasEnd ? 2 : 0, base = hasEnd ? 3 : 2;
+  const lines = [
+    loop ? `<Picture ${first}> is the actual first frame AND the last frame of the target video (a seamless loop: it ends exactly as it starts).` : `<Picture ${first}> is the actual first frame of the target video (pinned).`,
+    ...(endN ? [`<Picture ${endN}> is the actual last frame of the target video (pinned): she ends exactly in this pose.`] : []),
+    ...labels.map((t, i) => `<Picture ${base + i}> is ${t}. Use it only to keep her and the room the same; its layout, panels, grey background and studio light are not part of the video.`),
+  ];
+  return lines.join(" ");
+}
+
+/** her room sheet, made from her still (a new still drops it) */
+export async function makeRoom(cid: string): Promise<boolean> {
+  const { c, l } = await get(cid);
+  if (!l.anchor) throw new Error("Pick her still first");
+  const [{ roomGraph }, { useJobs, waitForJob }, { toInput }] = await Promise.all([import("./sheet"), import("./jobs"), import("./api")]);
+  const at = l.anchor.at;
+  const j = await useJobs.getState().run("characters", `${c.name} · live · room sheet`, roomGraph(l.anchor.input, `studio/live/${cid}_room`), "edit:krea:1:raw", { charId: cid, live: "room" });
+  const d = await waitForJob(j.id);
+  const o = d.outputs.find((x) => x.kind === "image" && x.type === "output");
+  if (!o) return false;
+  const ref: FileRef = { filename: o.filename, subfolder: o.subfolder, type: o.type };
+  const input = (await toInput(ref)).name;
+  // only if her still is still the one it was made from
+  await saveLive(cid, (x) => (x.anchor?.at === at ? { ...x, room: { ref, input, at: Date.now() } } : x));
+  return true;
+}
+
+/** her expression sheet, made first when she has none (Characters → sheet maker → Expressions does the same) */
+export async function ensureFaces(cid: string): Promise<boolean> {
+  const { useCharacters } = await import("./characters");
+  const c0 = useCharacters.getState().list.find((x) => x.id === cid);
+  if (!c0 || c0.views.faces) return !!c0?.views.faces;
+  if (!c0.views.front) return false;
+  const [{ facesGraph }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
+  const front = await useCharacters.getState().asMedia(cid, "front");
+  if (!front) return false;
+  const j = await useJobs.getState().run("characters", `${c0.name}: expression sheet`, facesGraph(c0, front.name), "characters:view:krea", { charId: cid, view: "faces" });
+  await waitForJob(j.id);
+  for (let i = 0; i < 40; i++) {
+    if (useCharacters.getState().list.find((x) => x.id === cid)?.views.faces) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
 
 /** her "All angles" reference sheet, made first when she has none (the same job as Characters → Make sheet, which also
  *  cuts it into her angles) — the still and the face fix at every join use it. Waits until it's on her character. */

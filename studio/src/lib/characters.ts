@@ -20,6 +20,7 @@ export const VIEWS = [
   { id: "angry", label: "Angry", hint: "expression" },
   { id: "surprised", label: "Surprised", hint: "expression" },
   { id: "sheet", label: "All angles", hint: "the whole sheet in one picture" },
+  { id: "faces", label: "Expressions", hint: "her face in 12 moods + mouth shapes, one picture" },
 ] as const;
 export type View = (typeof VIEWS)[number]["id"];
 
@@ -332,7 +333,7 @@ useJobs.subscribe((s, prev) => {
     saved.catch((e) => useJobs.getState().toast(`Couldn't save the view: ${e.message}`, "bad"));
     // copied by Krea 2 Edit, finished in their anime model
     const redraw = j.meta.redraw as "anima" | "noob" | undefined;
-    if (redraw && j.meta.view !== "cutout" && j.meta.view !== "sheet") saved.then(() => import("./sheet")).then(({ redrawView }) => redrawView(id, j.meta!.view as View, redraw))
+    if (redraw && j.meta.view !== "cutout" && j.meta.view !== "sheet" && j.meta.view !== "faces") saved.then(() => import("./sheet")).then(({ redrawView }) => redrawView(id, j.meta!.view as View, redraw))
       .catch((e) => useJobs.getState().toast(`Couldn't redraw it: ${e.message}`, "bad"));
     // made the front first because you asked for the full sheet: carry on with the sheet now
     if (j.meta.then === "sheet" && j.meta.view === "front") {
