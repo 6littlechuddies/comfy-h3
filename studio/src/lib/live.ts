@@ -345,6 +345,11 @@ export async function liveBatch(cids: string[], o: PlanOpts & { replan: boolean;
         setRun(c.id, { step: `${n} actions planned` });
       }
       l = liveOf(useCharacters.getState().list.find((x) => x.id === c.id)!);
+      // her reference sheet first, when she has none: the still and the face fix at every join are made from it
+      if (c.style !== "anime" && !c.views.sheet && (newStill || l.faceFix !== false)) {
+        setRun(c.id, { step: "making her reference sheet (all angles) first" });
+        if (!(await ensureSheet(c.id).catch(() => false))) setRun(c.id, { step: "no sheet came out — going on with her front picture" });
+      }
       if (newStill) {
         setRun(c.id, { step: `making her webcam still${l.setting ? ` · ${l.setting}` : ""}` });
         const outs = await makeStill(c.id, 2);
@@ -384,8 +389,12 @@ export async function makeStill(cid: string, takes = 2): Promise<FileRef[]> {
   const [{ characterShot }, { buildEdit }, { editArgs, newSeed, useSettings }, { useJobs, waitForJob }] = await Promise.all([import("./make"), import("./graphs"), import("./settings"), import("./jobs")]);
   const cs = await characterShot(c, shot, `${shot} Framing: ${l.framing === "full_body" ? "full body, head to feet in frame" : "waist up"}, vertical 9:16 phone frame.`, "9:16", [], null);
   const st = useSettings.getState().s;
+  // her reference sheet goes in beside her picture: every angle of the same woman, so the still gets her face and body right
+  const sheet = c.views.sheet ? (await (await import("./api")).toInput(c.views.sheet).catch(() => null))?.name : undefined;
+  const images = sheet ? [cs.ref.name, sheet] : [cs.ref.name];
+  const instruction = sheet ? cs.instruction.replace("do not copy the second picture in", "do not copy the second or third picture in").replace(/ Only this one /, " The third picture is her reference sheet — the same person from every angle (front, back, side, face, three-quarter); use it for her face, hair and body from any angle. Only this one ") : cs.instruction;
   const jobs = await Promise.all(Array.from({ length: takes }, () => useJobs.getState().run("characters", `${c.name} · live still`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
-    images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: `studio/live/${cid}` }), "edit:krea:1:raw", { project: cid, charId: cid, live: "still" })));
+    images, blank: cs.canvas, instruction, negative: "", resolution: 1024, refBoost: 4, prefix: `studio/live/${cid}` }), "edit:krea:1:raw", { project: cid, charId: cid, live: "still" })));
   const outs: FileRef[] = [];
   for (const j of jobs) {
     const d = await waitForJob(j.id).catch(() => null);
@@ -472,4 +481,25 @@ async function fixJoin(c: Character, cid: string, last: string): Promise<{ used:
   const [b, a] = await Promise.all([likeness(c, { filename: last, subfolder: "", type: "input" }), likeness(c, fixedRef)]);
   const better = a.score != null && (b.score == null || a.score >= b.score);
   return better ? { used: "fixed", last: (await toInput(fixedRef)).name, before: b.score, after: a.score, why: a.why } : { used: "original", before: b.score, after: a.score, why: b.why };
+}
+
+
+/** her "All angles" reference sheet, made first when she has none (the same job as Characters → Make sheet, which also
+ *  cuts it into her angles) — the still and the face fix at every join use it. Waits until it's on her character. */
+export async function ensureSheet(cid: string): Promise<boolean> {
+  const { useCharacters } = await import("./characters");
+  const c0 = useCharacters.getState().list.find((x) => x.id === cid);
+  if (!c0 || c0.views.sheet) return !!c0?.views.sheet;
+  if (c0.style === "anime" || !c0.views.front) return false;
+  const [{ sheetGraph, SHEET_ORDER }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
+  const front = await useCharacters.getState().asMedia(cid, "front");
+  if (!front) return false;
+  const j = await useJobs.getState().run("characters", `${c0.name}: character sheet`, sheetGraph(c0, front.name), "characters:view:krea", { charId: cid, view: "sheet", order: [...SHEET_ORDER] });
+  await waitForJob(j.id);
+  // the sheet lands on her character when the job's result is taken in — give it a moment
+  for (let i = 0; i < 40; i++) {
+    if (useCharacters.getState().list.find((x) => x.id === cid)?.views.sheet) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
