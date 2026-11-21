@@ -59,3 +59,6 @@ https://github.com/kijai/ComfyUI-DepthAnythingV2@553187872eeb1d52e50dc53209fa57e
 # --- Video Depth Anything (yuvraj108c; the Small model is Apache-2.0): depth for a whole clip at once, steady from frame to
 #     frame (Depth Anything V2 looks at each frame alone, so its depth flickers) — Animate → "Copy its motion exactly" ---
 https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything@a0db08e63d1ea571601c45cde4aaee0acdd0544d
+# --- ComfyUI-MiniMaxH3Mod (Luisacaotica, MIT): H3 RefMods — her pictures encoded once as an identity reference that goes into an
+#     image → video (no <Picture n> labels, less of the sheet's background bleeding in). Used by the Live pack's likeness test ---
+https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod@54f93eb6569fe35c9303e9bceb1c8b66c5722bbf

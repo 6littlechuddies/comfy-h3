@@ -1,6 +1,6 @@
 // Builds ComfyUI API-format prompts for each Studio tab.
 // Every builder here is validated against a real ComfyUI's /prompt by scripts/test-graphs.ts.
-import { KREA_BOOST_NODE, M, h3ErosOn, h3Frames, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
+import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
 import { fastAttnOn, speedOn } from "./speed";
 
 /** Speed-ups → Faster attention: ComfyUI's INT8 attention (only when this ComfyUI has it); off = the model as it was */
@@ -712,6 +712,11 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   /** ref mode: pictures pinned at exact frames of the video (0 = first, -1 = last) with ComfyUI's MiniMax H3 Add Guide —
    *  so a clip can start (and end) on her still while her sheets and her room go in as reference pictures */
   guides?: { image: string; frame: number }[];
+  /** an anime video: no realistic-skin LoRA */
+  anime?: boolean;
+  /** her pictures as an H3 RefMod (ComfyUI-MiniMaxH3Mod): encoded once into an identity reference and added to the conditioning —
+   *  works with plain image → video, no <Picture n> labels. `copies` repeats it for a stronger hold (2-3 is the sweet spot) */
+  refmod?: { images: string[]; copies: number };
 }
 
 // Mouths: by default nobody in a video talks, mouths words, sings or lip-syncs. H3 follows what a prompt says is there far
@@ -753,10 +758,14 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     steps = 8;
   }
   for (const l of activeLoras(p.loras)) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  // realistic skin (fal's Realism People LoRA, trigger word at the start of the prompt) — not for anime
+  const real = realismOn() && !p.anime;
+  if (real) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3Realism, strength_model: 0.8 }, "Realistic skin"));
+  const promptIn = real ? `${REALISM_TRIGGER} ${p.prompt}` : p.prompt;
   // several cards (Raylight): the same LoRAs, loaded into its workers instead (Eros Max needs its own shift patch: one card)
   const ray = (p.ray ?? 1) > 1 && !eros;
   const rayN = p.ray ?? 1;
-  const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : flTurbo ? [{ name: M.h3TurboFl8, strength: 1 }] : []), ...activeLoras(p.loras)];
+  const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : flTurbo ? [{ name: M.h3TurboFl8, strength: 1 }] : []), ...activeLoras(p.loras), ...(real ? [{ name: M.h3Realism, strength: 0.8 }] : [])];
   // Eros Max beta6: its author's "10/3 shift" (video 10, audio 3; the official files keep their own 12/3) — ComfyUI's own node
   if (eros) model = o(g.add("MiniMaxH3SigmaShift", { model, shift_video: 10, shift_audio: 3 }));
   model = fastAttn(g, model);
@@ -769,7 +778,7 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   let pos: Link | undefined;
   if (ref) {
     const inputs: Inputs = {
-      clip: o(clip), prompt: withAvoid(withMouth(withMusic(withTriggers(p.prompt, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
+      clip: o(clip), prompt: withAvoid(withMouth(withMusic(withTriggers(promptIn, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length, ref_image_size: p.refImageSize,
       vae: o(vae), audio_vae: o(avae),
     };
     p.images.slice(0, 9).forEach((f, i) => (inputs[`ref_images.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
@@ -795,9 +804,17 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     const lastFile = p.mode === "loop" ? p.images[0] : p.mode === "fl" ? p.images[1] : undefined;
     const last = lastFile ? (lastFile === p.images[0] && first ? first : g.add("LoadImage", { image: lastFile })) : null;
     cond = g.add("MiniMaxH3ImageToVideo", {
-      clip: o(clip), vae: o(vae), prompt: withAvoid(withMouth(withMusic(withTriggers(p.prompt, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length,
+      clip: o(clip), vae: o(vae), prompt: withAvoid(withMouth(withMusic(withTriggers(promptIn, p.loras), p.music), p.mouth), mouthAvoid(p.avoid, p.mouth)), width: p.width, height: p.height, length,
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
+  }
+  if (p.refmod?.images.length) {
+    // her pictures, encoded in memory as one identity RefMod (nothing saved), then added to the conditioning (after any pinned frames)
+    const ex: Inputs = { name: "her", mode: "Full Reference", concept_type: "identity", background_retention: 0, vae: o(vae), ref_resolution: 1024, pool_h: 16, pool_w: 16,
+      latent_frames: 16, identity: 0, merge: false, motion_only: false, multiplier: Math.max(1, Math.min(3, p.refmod.copies)), max_tokens: 0, description: "", save: false };
+    p.refmod.images.slice(0, 8).forEach((f, i) => (ex[`refs_image.ref_image_${i}`] = o(g.add("LoadImage", { image: f }))));
+    const mods = g.add("MiniMaxH3RefModExtract", ex, "Her identity (RefMod)");
+    pos = o(g.add("MiniMaxH3RefModApply", { conditioning: pos ?? o(cond, 0), mods: o(mods), override: false, retention: 1, curve_direction: "constant", scramble_seed: -1, curve_shape: "linear", curve_value: 1 }));
   }
   if (p.motion) {
     // the clip at 24 fps from its start, as many frames as this video has, cut to this video's size; its depth frame by frame;

@@ -7,7 +7,7 @@ import { create } from "zustand";
 import { viewUrl, type FileRef } from "../lib/api";
 import { useCharacters, type Character } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
-import { blockers, checkOnSite, planActions, fileUrl, jumpLevel, liveOf, makeAll, makeReel, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor,
+import { TEST_WAYS, blockers, checkOnSite, planActions, fileUrl, jumpLevel, liveOf, makeAll, makeReel, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor,
   type LiveAction, type LiveClip, type LiveState } from "../lib/live";
 import { Btn, DropSelect, Icon, cx } from "./ui";
 
@@ -173,6 +173,7 @@ function LivePack({ c }: { c: Character }) {
                 </div>))}
             </div>}
           </section>
+          <LikenessTestPanel c={c} l={l} busy={!!busy} run={run} />
           <section className="flex flex-col gap-3 border-t border-line pt-4">
             <Switch on={l.faceFix !== false} set={(v) => up((x) => ({ ...x, faceFix: v }))} title="Before each next part (or the way back) starts, her face on the part's last frame is redrawn from her reference sheet, both are scored by DeepSeek's face match, and the better one goes on">
               Keep her face at every join
@@ -320,5 +321,39 @@ function ClipCard({ cid, k, clip, label, note, onTick, onRedo, disabled }: { cid
           {st === "new" || st === "error" ? "Make" : <Icon name="refresh" size={12} />}</button>
       </div>
     </div>
+  );
+}
+
+/** the likeness test: one action's first part made three ways (plain, sheets as pictures, RefMod), same seed, each scored */
+function LikenessTestPanel({ c, l, busy, run }: { c: Character; l: LiveState; busy: boolean; run: (label: string, f: () => Promise<unknown>) => Promise<void> }) {
+  const t = l.test;
+  const on = l.actions.filter((a) => a.on);
+  const [act, setAct] = useState(on[0]?.key ?? "");
+  const making = !!t && Object.values(t.ways).some((w) => w?.status === "making");
+  const best = t ? Math.max(...TEST_WAYS.map(({ way }) => t.ways[way]?.score ?? -1)) : -1;
+  return (
+    <section className="flex flex-col gap-2 border-t border-line pt-4">
+      <div className="flex items-baseline justify-between"><h3 className="text-[13.5px] font-semibold">Which way keeps her best?</h3>
+        {t && <span className="text-[11px] text-dim">{t.title}</span>}</div>
+      <p className="text-[11.5px] leading-relaxed text-dim">One action's first part, made three ways with the same seed, each scored by DeepSeek's face match on its last frame. Watch them too — the score only sees the face.</p>
+      {t && <div className="grid grid-cols-3 gap-1.5">
+        {TEST_WAYS.map(({ way, label, what }) => { const w = t.ways[way]; return (
+          <div key={way} className="flex flex-col gap-1" title={what}>
+            <span className={cx("relative flex aspect-[9/16] items-center justify-center overflow-hidden border bg-raised2 text-center text-[10px] text-dim", w?.status === "ready" && w.score != null && w.score === best ? "border-good" : "border-line")}>
+              {w?.status === "ready" ? <video src={fileUrl(c.id, `test_${way}`, w.at)} muted loop playsInline autoPlay className="h-full w-full object-cover" />
+                : w?.status === "error" ? <span className="px-1 text-bad">{w.error}</span> : <span className="pulse">making…</span>}
+              {w?.status === "ready" && <span className="absolute bottom-0 left-0 right-0 bg-black/75 py-0.5 text-[10.5px] text-white">{w.score == null ? "no score" : `face ${w.score}/10`}</span>}
+            </span>
+            <span className="text-center text-[10.5px] text-muted">{label}</span>
+          </div>); })}
+      </div>}
+      <div className="flex gap-1.5">
+        <select value={act} onChange={(e) => setAct(e.target.value)} aria-label="Action to test" className="inset min-w-0 flex-1 border border-line px-1.5 text-[11.5px]">
+          {on.map((a) => <option key={a.key} value={a.key}>{a.title}</option>)}
+        </select>
+        <Btn small onClick={() => void run("Likeness test: three clips in the GPU line…", async () => { const { likenessTest } = await import("../lib/live"); await likenessTest(c.id, act); })}
+          disabled={busy || making || !l.anchor || !on.length} why={!l.anchor ? "Pick her still first" : !on.length ? "Turn on an action" : "Busy"}>{t ? "Test again" : "Run the test"}</Btn>
+      </div>
+    </section>
   );
 }

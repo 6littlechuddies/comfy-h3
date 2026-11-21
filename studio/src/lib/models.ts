@@ -33,8 +33,22 @@ const rtx = { on: false };
 export const setRtx = (on: boolean) => { rtx.on = on; };
 export const rtxOn = () => rtx.on;
 export const RTX_KEY = "h3.rtxUp"; // "off" = never
+/** realistic skin in videos: fal's H3 Realism People LoRA, when it's downloaded, unless you switched it off (Animate) */
+const realism = { on: false };
+export const setRealism = (on: boolean) => { realism.on = on; };
+export const realismOn = () => realism.on;
+export const REALISM_KEY = "h3.realism"; // "off" = never
+export const REALISM_TRIGGER = "r34l1sm";
+/** character sheets with the QuadView LoRA (Krea 2), when it's downloaded */
+const quad = { on: false };
+export const setQuadSheet = (on: boolean) => { quad.on = on; };
+export const quadSheetOn = () => quad.on;
 export const KREA_EDIT_KEY = "h3.kreaEdit"; // "v1" = always the v1.2 LoRA
 export const M = {
+  /** fal's MiniMax H3 Realism People LoRA (models.txt group "hreal") */
+  h3Realism: "minimax/h3-realism-people-t2v-i2v-r2v.safetensors",
+  /** Alissonerdx's QuadView character-sheet LoRA for Krea 2 (group "csheet") */
+  quadView: "QuadView_krea2_v1.safetensors",
   noob: "NoobAI-XL-v1.1.safetensors",
   /** IP-Adapter Plus (SDXL) + its image encoder: Illustrious character sheets that copy the front picture */
   ipadapterSdxl: "ip-adapter-plus_sdxl_vit-h.safetensors",

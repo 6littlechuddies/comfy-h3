@@ -4,6 +4,7 @@ import { useDownloads } from "./downloads";
 import { buildCreate, buildCutout, buildEdit, buildQwenEdit } from "./graphs";
 import { animeTags, charModel, familyOfModel, useCharacters, type Character, type View } from "./characters";
 import { useJobs } from "./jobs";
+import { M, quadSheetOn } from "./models";
 import { DEFAULTS, editArgs, modelArgs, modelOf, newSeed, qualityTags, useSettings } from "./settings";
 import type { EditEngine } from "./graphs";
 
@@ -112,8 +113,21 @@ export const SHEET_CANVAS = { width: 2304, height: 896 };
 
 /** the sheet as ONE Krea 2 Edit picture: a blank white landscape canvas as picture 1, the character's front picture as the subject.
  *  Krea 2 Edit keeps the face, outfit and art style of a drawing too, so it serves anime characters as well. */
+/** the QuadView LoRA's trained caption (Alissonerdx/CharacterSheet): face close-up + front, side and back full body on 1536×1024 */
+export const QUAD_CAPTION = "Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.";
+/** this character's sheet is made with the QuadView LoRA (realistic characters, once it's downloaded) */
+export const usesQuad = (c: Character) => quadSheetOn() && sheetStyle(c) === "realistic";
+/** what a sheet job carries: QuadView sheets stay one picture (their panels aren't the old five), the others are cut into her angles */
+export const sheetJobMeta = (c: Character): Record<string, unknown> => (usesQuad(c) ? { single: true } : { order: [...SHEET_ORDER] });
 export function sheetGraph(c: Character, frontName: string, seed = newSeed()) {
   const e = useSettings.getState().s.edit;
+  if (usesQuad(c)) {
+    const unet = c.sheet?.ckpt?.krea || undefined;
+    const base = editArgs(e, "krea").loras ?? [];
+    return buildEdit({ ...editArgs(e, "krea"), loras: [...base, ...(c.loras ?? []), { name: M.quadView, strength: 1 }], enhance: false, seed, images: [frontName],
+      blank: { width: 1536, height: 1024 }, instruction: `The first picture is a blank canvas; the second picture is the character. ${QUAD_CAPTION} One single person in every panel. Keep it a photo with the same skin texture, lighting quality and colours.`,
+      negative: "", resolution: 1024, refBoost: 4, prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
+  }
   const anime = sheetStyle(c) === "anime";
   const style = anime ? " Keep exactly the same art style, line art, shading and colours as the character picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
   const intro = "The first picture is a blank canvas; the second picture is the person. ";
@@ -156,7 +170,7 @@ export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "whit
   if (!front) throw new Error("Add their front picture first (drop one in, or make it)");
   const run = useJobs.getState().run;
   // cut into her angles too (side, back, face, three-quarter), so "Every angle" and the sheet + face pair both have them
-  await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", order: [...SHEET_ORDER] });
+  await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", ...sheetJobMeta(c) });
   await run("characters", `${c.name}: expression sheet`, facesGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "faces" });
   await run("characters", `${c.name}: cut-out`, buildCutout(front.name, `studio/characters/${c.id}_cutout`), "characters:cutout", { charId: c.id, view: "cutout" });
 }

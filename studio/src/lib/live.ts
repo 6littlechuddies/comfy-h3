@@ -51,7 +51,19 @@ export interface LiveState {
   /** every clip gets her turnaround, her expression sheet and her room sheet as reference pictures, with her still pinned
    *  at the first frame (H3 reference mode + Add Guide) — off = plain image → video from the still, as before */
   refs?: boolean;
+  /** the likeness test: one action's first part made three ways, each scored against her face */
+  test?: LikenessTest;
 }
+export type TestWay = "plain" | "refs" | "refmod";
+export interface LikenessTest {
+  action: string; title: string; at: number;
+  ways: Partial<Record<TestWay, { status: "making" | "ready" | "error"; score?: number | null; why?: string; error?: string; jump?: number | null; at?: number }>>;
+}
+export const TEST_WAYS: { way: TestWay; label: string; what: string }[] = [
+  { way: "plain", label: "Plain", what: "Image → video from her still, nothing else (how it was before)" },
+  { way: "refs", label: "Sheets as pictures", what: "Reference mode: her still pinned at frame 0, her sheets and room as reference pictures" },
+  { way: "refmod", label: "RefMod", what: "Image → video from her still, plus her sheets encoded as one identity reference (ComfyUI-MiniMaxH3Mod)" },
+];
 
 const STILL = "The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
 export const DEFAULT_IDLE: LiveState["idle"] = [
@@ -168,7 +180,7 @@ export async function makeClip(cid: string, key: string, attempt = 0, noRefs = f
     const guides = R ? [{ image: start, frame: 0 }, ...(end ? [{ image: end, frame: -1 }] : [])] : undefined;
     const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed: newSeed(), mode: R ? "ref" : mode, prompt: h3 || (R ? `${refsLine}\n\n${prompt}` : prompt), images: R ? pics : images, videos: [], audios: [], guides,
       seconds, width, height, turbo: a.turbo, loras: a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: `studio/live/${cid}`, plain: true,
-      mouth: talk ? "talk" : "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark" });
+      mouth: talk ? "talk" : "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark", anime: c.style === "anime" });
     const j = await useJobs.getState().run("characters", `${c.name} · live · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, g, `animate:${R ? "ref" : mode}:live:${seconds}s`, { charId: cid, live: key });
     await patchClip(cid, key, kind, { jobId: j.id });
     let done;
@@ -532,6 +544,56 @@ function refsText(labels: string[], hasEnd: boolean, loop: boolean): string {
   return lines.join(" ");
 }
 
+/** the likeness test: the first part of one action (the first one that's on) made the three ways side by side, each scored by
+ *  DeepSeek's face match on its last frame — the clips stay out of the pack (keys test_plain / test_refs / test_refmod) */
+export async function likenessTest(cid: string, actionKey?: string): Promise<void> {
+  const [{ buildAnimate }, { useJobs, waitForJob }, { useSettings, newSeed }, { h3Size }, { runWriter }, { describe }] = await Promise.all([
+    import("./graphs"), import("./jobs"), import("./settings"), import("./models"), import("./writer"), import("./characters")]);
+  const { c, l } = await get(cid);
+  if (!l.anchor) throw new Error("Pick her still first");
+  const act = l.actions.find((a) => a.key === actionKey) ?? l.actions.find((a) => a.on);
+  if (!act) throw new Error("Turn on at least one action");
+  const anchor = l.anchor.input;
+  const R = await clipRefs(c, l);
+  if (!R) throw new Error("She needs a front picture or a sheet first");
+  const beat = act.parts?.[0] ?? act.prompt;
+  const plan = `${beat}${act.parts && act.parts.length > 1 ? " The move is still going at the end of this part." : ""} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
+  const at = Date.now();
+  const setWay = (way: TestWay, p: Partial<NonNullable<LikenessTest["ways"][TestWay]>>) => saveLive(cid, (x) => (x.test?.at !== at ? x : { ...x, test: { ...x.test, ways: { ...x.test.ways, [way]: { ...(x.test.ways[way] ?? { status: "making" }), ...p } } } }));
+  await saveLive(cid, (x) => ({ ...x, test: { action: act.key, title: act.title, at, ways: { plain: { status: "making" }, refs: { status: "making" }, refmod: { status: "making" } } } }));
+  const a = useSettings.getState().s.animate;
+  const { width, height } = h3Size("9:16", 0.88);
+  const seconds = Math.min(15, act.seconds);
+  const seed = newSeed(); // the same seed for all three: only the way differs
+  const one = async (way: TestWay) => {
+    try {
+      const refs = way === "refs";
+      const pics = refs ? [anchor, ...R.files] : [anchor];
+      const refsLine = refs ? refsText(R.labels, false, false) : "<Picture 1> is the actual first frame of the target video.";
+      const h3 = (await runWriter("compiler", { blueprint: `${plan}${l.setting ? `\nPlace: ${l.setting}.` : ""}\nOne fixed camera (a phone on a stand at eye level), one continuous shot — no cuts, no zoom, no camera moves, nothing else in the room changes. Silent.`,
+        MODE: refs ? "REF+FRAME" : "I2V", seconds: String(seconds), references: refsLine, characters: `${c.site?.name || c.name}: ${describe(c).slice(0, 400)}`, aspect: "9:16", description: plan },
+        { tab: "characters", label: `${c.name} · likeness test · ${way}`, images: pics.slice(0, 6) }).catch(() => "")).trim();
+      const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed, mode: refs ? "ref" : "i2v", prompt: h3 || (refs ? `${refsLine}\n\n${plan}` : plan),
+        images: pics, videos: [], audios: [], seconds, width, height, turbo: a.turbo, loras: a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: `studio/live/${cid}_test`,
+        plain: true, mouth: "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark", anime: c.style === "anime",
+        ...(refs ? { guides: [{ image: anchor, frame: 0 }] } : {}),
+        // the room sheet stays out of the RefMod: it's an identity reference, the room comes from her still
+        ...(way === "refmod" ? { refmod: { images: R.files.filter((f) => f !== l.room?.input), copies: 2 } } : {}) });
+      const j = await useJobs.getState().run("characters", `${c.name} · likeness test · ${TEST_WAYS.find((t) => t.way === way)!.label}`, g, `animate:${refs ? "ref" : "i2v"}:live:${seconds}s`, { charId: cid, live: `test_${way}` });
+      const done = await waitForJob(j.id);
+      const src = done.outputs.find((o) => o.kind === "video" && o.type === "output");
+      if (!src) throw new Error("H3 finished without a video");
+      const e = await post<{ d_start?: number | null; last: string }>("/studio-api/live/encode", { cid, key: `test_${way}`, src, start: anchor });
+      const m = await likeness(c, { filename: e.last, subfolder: "", type: "input" });
+      await setWay(way, { status: "ready", score: m.score, why: m.why, jump: e.d_start, at: Date.now() });
+    } catch (err) {
+      const msg = (err as Error).message;
+      await setWay(way, { status: "error", error: way === "refmod" && /RefMod|not found|does not exist|Cannot find/i.test(msg) ? "The RefMod nodes aren't on this rental yet — restart it (they install at start-up)" : msg.slice(0, 200) });
+    }
+  };
+  await Promise.all(TEST_WAYS.map((t) => one(t.way)));
+}
+
 /** her room sheet, made from her still (a new still drops it) */
 export async function makeRoom(cid: string): Promise<boolean> {
   const { c, l } = await get(cid);
@@ -574,10 +636,10 @@ export async function ensureSheet(cid: string): Promise<boolean> {
   const c0 = useCharacters.getState().list.find((x) => x.id === cid);
   if (!c0 || c0.views.sheet) return !!c0?.views.sheet;
   if (c0.style === "anime" || !c0.views.front) return false;
-  const [{ sheetGraph, SHEET_ORDER }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
+  const [{ sheetGraph, sheetJobMeta }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
   const front = await useCharacters.getState().asMedia(cid, "front");
   if (!front) return false;
-  const j = await useJobs.getState().run("characters", `${c0.name}: character sheet`, sheetGraph(c0, front.name), "characters:view:krea", { charId: cid, view: "sheet", order: [...SHEET_ORDER] });
+  const j = await useJobs.getState().run("characters", `${c0.name}: character sheet`, sheetGraph(c0, front.name), "characters:view:krea", { charId: cid, view: "sheet", ...sheetJobMeta(c0) });
   await waitForJob(j.id);
   // the sheet lands on her character when the job's result is taken in — give it a moment
   for (let i = 0; i < 40; i++) {

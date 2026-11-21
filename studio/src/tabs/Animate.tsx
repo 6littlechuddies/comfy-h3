@@ -5,7 +5,7 @@ import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
 import { useJobs, type Job, type Output } from "../lib/jobs";
-import { RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { REALISM_KEY, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
 import { newSeed, seedFor, useSection, useSettings } from "../lib/settings";
 import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
@@ -386,6 +386,7 @@ export default function AnimateTab() {
           {ref && <Seg label="Reference detail" help="refImageSize" value={a.refImageSize} onChange={(v) => set({ refImageSize: v })} options={[{ value: "match", label: "Match (fast)" }, { value: "max", label: "Max (sharper)" }]} />}
           <WriterSetup />
           <SmoothCheck />
+          <RealismCheck />
           <RtxCheck />
           <Check checked={a.lowMemDecode} onChange={(v) => set({ lowMemDecode: v })} title="Low-memory decode" sub="If long videos run out of GPU memory" help="lowMem" />
         </Advanced>
@@ -457,6 +458,15 @@ function SmoothCheck() {
   const pick = (on: boolean) => { try { if (on) localStorage.removeItem(SMOOTH_KEY); else localStorage.setItem(SMOOTH_KEY, "off"); } catch { /* private mode */ } setOff(!on); syncKreaTE(); };
   return <Check checked={!off} onChange={pick} title="Smoother motion (48 fps)"
     sub={g && g.state !== "done" ? "Its small model is still downloading" : "Puts a frame between every two (RIFE) — same length and sound"} />;
+}
+
+/** fal's H3 Realism People LoRA on/off (it downloads as its own small group) */
+function RealismCheck() {
+  const g = useDownloads((st) => st.groups.find((x) => x.id === "hreal"));
+  const [off, setOff] = useState(() => { try { return localStorage.getItem(REALISM_KEY) === "off"; } catch { return false; } });
+  const pick = (on: boolean) => { try { if (on) localStorage.removeItem(REALISM_KEY); else localStorage.setItem(REALISM_KEY, "off"); } catch { /* private mode */ } setOff(!on); syncKreaTE(); };
+  return <Check checked={!off && g?.state === "done"} onChange={pick} title="Realistic skin"
+    sub={!g ? "Not in this rental's model list yet — restart it" : g.state !== "done" ? "Its LoRA is still downloading" : "fal's Realism People LoRA: skin keeps its texture instead of smoothing out (not used for anime)"} />;
 }
 
 /** RTX upscale of the finished video on/off */

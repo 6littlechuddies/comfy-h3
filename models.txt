@@ -151,3 +151,15 @@ loras/P-H3-Image  https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/l
 # Only used by the imported "MinimaxH3 Auto Prompter" workflow in the ComfyUI node editor (QwenVL GGUF node), not by the Studio
 LLM/GGUF/Qwen/Qwen3-VL-8B-Instruct-GGUF  https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q8_0.gguf
 LLM/GGUF/Qwen/Qwen3-VL-8B-Instruct-GGUF  https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-F16.gguf
+
+# @group hreal Realistic skin in videos (H3 Realism People LoRA)
+# --- fal's MiniMax H3 Realism People LoRA (huggingface.co/fal/MiniMax-H3-Realism-People-LoRA; MiniMax H3 Community License, rank 32):
+# real people that hold up in close-up — skin keeps its texture instead of smoothing out. Works on text, image and reference videos.
+# Trigger "r34l1sm" at the start of the prompt (the Studio adds it), strength 0.8. Animate → Realistic skin switches it off. ---
+loras/minimax     https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA/resolve/main/h3-realism-people-t2v-i2v-r2v.safetensors
+
+# @group csheet Character sheet LoRA (Krea 2)
+# --- QuadView for Krea 2 (huggingface.co/Alissonerdx/CharacterSheet; licence: its CivitAI listing): one picture of a character
+# becomes one sheet — a face close-up and front, side and back full body — trained for it, so the face holds across the panels
+# better than a prompt alone. Used by Make character sheet for realistic characters once it's here. ---
+loras             https://huggingface.co/Alissonerdx/CharacterSheet/resolve/main/QuadView_krea2_v1.safetensors
