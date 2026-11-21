@@ -15,7 +15,7 @@ Rules for every action:
 - "rating": "sfw", "suggestive" or "explicit", only from those ALLOWED. Explicit means adult nudity or sexual posing for paid fans — she is an adult; keep it to what one person alone on a webcam does.
 - "tier" for the call button: "free" for sfw, "premium" for suggestive, "ultimate" for explicit, unless the EXAMPLES show otherwise. "tokens": a tip price that rises with how much the action gives (10-30 sfw, 40-100 suggestive, 120-300 explicit).
 - "key": lowercase_with_underscores, short, unique, stable (e.g. blow_kiss, hair_flip).
-- ORDER the actions as a ladder, mildest first to boldest last (about two per step, the way creators' tip menus climb), with prices rising along it.
+- ORDER the actions as a ladder, mildest first to boldest last, and give each a "level": 1 for the one or two free openers, then about two per level up to the last (12-16 levels for 24 actions, fewer for fewer), the way creators' tip menus climb — prices and ratings rise with the level.
 - Titles in her own first-person voice when it suits her ("I blow you a kiss", "I lean in close"), short and natural — never two that say the same thing.
 - She must be able to get back to her still in a 2-4 second clip: every action ENDS with her clothes as in the still (whatever she lifts, slips off a shoulder or pulls aside, she puts back before the action ends) and nothing new left in her hands (whatever she picks up, she puts down in view). No other people, ever.
 - Mix the kinds: affection (kiss, heart), playful (wink, peace sign, tongue out), showing off (outfit, pose, dance), close-ups (lean in), and her own signature ones that only SHE would do.
@@ -23,4 +23,4 @@ Rules for every action:
 Also write the three idle loops in her manner: "idle" (resting, breathing, looking at the camera), "typing" (looking down at a phone just below the bottom of the frame, thumbs typing, then back up), "talk" (talking to the camera as if answering her stream chat). Each ends in the same pose it started in. Safe for everyone.
 
 Answer only with JSON:
-{"setting": "...", "still": "...", "idle": {"idle": "...", "typing": "...", "talk": "..."}, "actions": [{"key": "...", "title": "...", "prompt": "She ...", "hint": "...", "seconds": 5, "segs": 1, "rating": "sfw", "tier": "free", "tokens": 20}]}
+{"setting": "...", "still": "...", "idle": {"idle": "...", "typing": "...", "talk": "..."}, "actions": [{"key": "...", "title": "...", "prompt": "She ...", "hint": "...", "seconds": 5, "segs": 1, "level": 1, "rating": "sfw", "tier": "free", "tokens": 20}]}

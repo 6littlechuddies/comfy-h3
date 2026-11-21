@@ -21,10 +21,14 @@ export interface LiveClip {
   error?: string;
   /** you watched it and the joins look right */
   ok?: boolean;
+  /** the H3 prompt the compiler wrote from the plan (and what it was written from — a changed plan writes it again) */
+  h3?: string; h3From?: string;
 }
 export interface LiveAction {
   key: string; title: string; prompt: string; hint: string;
   rating: "sfw" | "suggestive" | "explicit"; seconds: number; segs: number;
+  /** its step on her ladder (1 = the free opener, higher = bolder), as on the tip menus — the order it's sent in */
+  level?: number;
   tier: "free" | "premium" | "ultimate"; tokens: number; on: boolean;
 }
 export interface LiveState {
@@ -122,9 +126,26 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
   } else throw new Error(`Unknown clip ${key}`);
   await patchClip(cid, key, kind, { status: "making", error: undefined, ok: false });
   try {
+    // the same planning as 02 Scenes: the plan line goes through the H3 prompt compiler (timing, motion beats, what stays
+    // still), with her start frame attached — written once per plan line and reused when the clip is made again
+    const old = l.clips[key];
+    let h3 = old?.h3 && old.h3From === prompt ? old.h3 : "";
+    if (!h3) {
+      try {
+        const { runWriter } = await import("./writer");
+        const { describe } = await import("./characters");
+        const refs = mode === "loop" ? "<Picture 1> is the actual first frame AND the last frame of the target video (a seamless loop — it must end exactly as it starts)."
+          : mode === "fl" ? "<Picture 1> is the actual first frame; the video must end exactly on her resting pose from her still (the last frame is given to the model)."
+          : "<Picture 1> is the actual first frame of the target video.";
+        h3 = (await runWriter("compiler", { blueprint: `${prompt}${l.setting ? `\nPlace: ${l.setting}.` : ""}\nOne fixed camera (a phone on a stand at eye level), one continuous shot — no cuts, no zoom, no camera moves, nothing else in the room changes. Silent.`,
+          MODE: "I2V", seconds: String(seconds), references: refs, characters: `${c.site?.name || c.name}: ${describe(c).slice(0, 400)}`, aspect: "9:16", description: prompt },
+          { tab: "characters", label: `${c.name} · live · H3 prompt · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, images: [images[0]] })).trim();
+        await patchClip(cid, key, kind, { h3, h3From: prompt });
+      } catch { h3 = ""; } // no writer: the plan line goes in as it is
+    }
     const a = useSettings.getState().s.animate;
     const { width, height } = h3Size("9:16", 0.88);
-    const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed: newSeed(), mode, prompt, images, videos: [], audios: [],
+    const g = buildAnimate({ sampler: a.adv.sampler, scheduler: a.adv.scheduler, steps: a.adv.steps, seed: newSeed(), mode, prompt: h3 || prompt, images, videos: [], audios: [],
       seconds, width, height, turbo: a.turbo, loras: a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: `studio/live/${cid}`, plain: true,
       mouth: talk ? "talk" : "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark" });
     const j = await useJobs.getState().run("characters", `${c.name} · live · ${key.replace(/^act_/, "").replace(/_/g, " ")}`, g, `animate:${mode}:live:${seconds}s`, { charId: cid, live: key });
@@ -207,7 +228,7 @@ export async function sendLive(cid: string): Promise<{ ok: boolean; note: string
   const pack = {
     framing: l.framing,
     idle: l.idle.filter((x) => x.on).map((x) => ({ key: x.key, kind: x.kind, rating: "sfw" })),
-    actions: l.actions.filter((a) => a.on).map((a) => ({
+    actions: l.actions.filter((a) => a.on).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).map((a) => ({
       key: a.key, title: a.title.slice(0, 40), segments: Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), return: retKey(a.key),
       rating: a.rating, reaction_hint: a.hint.slice(0, 200), live_action: { min_tier: a.tier }, live_stream: { tokens: a.tokens },
     })),
@@ -262,8 +283,8 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
     return [{ key, title: String(a.title || key).slice(0, 40), prompt: String(a.prompt), hint: String(a.hint || "").slice(0, 200), rating,
       seconds: Math.max(3, Math.min(15, Number(a.seconds) || 5)), segs: Math.max(1, Math.min(4, Number(a.segs) || 1)),
       tier: (["free", "premium", "ultimate"].includes(String(a.tier)) ? a.tier : rating === "sfw" ? "free" : rating === "suggestive" ? "premium" : "ultimate") as LiveAction["tier"],
-      tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true }];
-  }).slice(0, 24);
+      tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true, level: Math.max(1, Math.min(30, Math.round(Number((a as { level?: number }).level) || 0))) || undefined }];
+  }).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).slice(0, 24);
   if (!acts.length) throw new Error(`${c.name}: the writer planned no actions — try again`);
   await saveLive(cid, (x) => ({
     ...x,
