@@ -56,6 +56,7 @@ export const M = {
   kreaDepth: "depth-control-lora.safetensors",
   depthAnything: "depth_anything_v2_vits_fp16.safetensors",
   h3Motion: "minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors",
+  videoDepth: "video_depth_anything_vits.pth",
   h3Ref: "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
   /** H3 Eros Max beta6 int8 (one hybrid model for reference, text and first-frame videos) */
   h3Eros: "h3ErosMax_beta6_int8.safetensors",

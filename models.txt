@@ -132,10 +132,12 @@ depthanything     https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resol
 
 # @group hmotion Copy motion from a video (H3 depth control)
 # --- MiniMax H3 Fun ControlNet Union (alibaba-pai, packaged by Comfy-Org/MiniMax-H3; ComfyUI's own "Apply MiniMax H3 Fun
-# ControlNet" node): a video's depth (worked out with Depth Anything V2 Small from the Depth poses group) steers an H3 video, so
+# ControlNet" node): a video's depth (worked out with Video Depth Anything Small, below) steers an H3 video, so
 # your characters move exactly like the people in the clip you upload. Works with the Video (H3) models. Animate → a reference
 # video → "Copy its motion exactly" ---
 model_patches     https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors
+# Video Depth Anything Small (depth-anything/Video-Depth-Anything-Small, Apache-2.0): the clip's depth, steady across frames
+videodepthanything  https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth
 
 # @group ph3 Character sheets (P-H3, for the Character Sheet Designer)
 # --- PrunaAI's P-H3 Image set: turns the H3 first/last-frame video model (Video group) into a still-image model for the H3

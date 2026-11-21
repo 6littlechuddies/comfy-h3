@@ -11,7 +11,8 @@ grep -vE '^\s*(#|$)' "$LIST" | while read -r line; do
   echo "==> $name ${ref:+(@$ref)}"
   git clone --depth 1 "$repo" "$name"
   if [[ -n "$ref" ]]; then (cd "$name" && git fetch --depth 1 origin "$ref" && git checkout FETCH_HEAD); fi
-  if [[ -f "$name/requirements.txt" ]]; then pip install -r "$name/requirements.txt"; fi
+  # one node's extra requirement that won't install (an optional EXR writer, say) doesn't stop the whole image build
+  if [[ -f "$name/requirements.txt" ]]; then pip install -r "$name/requirements.txt" || echo "   ($name: its requirements didn't all install, continuing)"; fi
   if [[ -f "$name/install.py" ]]; then (cd "$name" && python install.py) || echo "   (install.py failed, continuing)"; fi
 done
 

@@ -706,7 +706,7 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   ray?: number;
   /** straight out of the model: no in-between frames, no upscale (Live pack clips are re-encoded to the site's size) */
   plain?: boolean;
-  /** copy a clip's motion exactly: its depth (Depth Anything V2, frame by frame) steers the video through the MiniMax H3 Fun
+  /** copy a clip's motion exactly: its depth (Video Depth Anything, steady across frames) steers the video through the MiniMax H3 Fun
    *  ControlNet — your characters (reference pictures) or your first frame, moving like the people in the clip */
   motion?: { file: string; start: number; end: number; strength: number; endAt: number };
 }
@@ -797,8 +797,12 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
     const clip0 = g.add("VHS_LoadVideo", { video: m.file, force_rate: 24, custom_width: 0, custom_height: 0,
       frame_load_cap: Math.max(1, Math.min(length, Math.round((m.end - m.start) * 24) || length)), skip_first_frames: Math.round(m.start * 24), select_every_nth: 1, format: "None" });
     const sized = g.add("ImageScale", { image: o(clip0, 0), upscale_method: "bilinear", width: p.width, height: p.height, crop: "center" });
-    const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything });
-    const depth = g.add("DepthAnything_V2", { da_model: o(da), images: o(sized) });
+    // Video Depth Anything: the whole clip at once (steady from frame to frame, one normalisation for the clip), then back
+    // to exactly this video's size — the control video has to match it
+    const vda = g.add("LoadVideoDepthAnythingModel", { model: M.videoDepth });
+    const vd = g.add("VideoDepthAnythingProcess", { vda_model: o(vda), images: o(sized), input_size: 518, max_res: 1280, precision: "fp16" });
+    const vdi = g.add("VideoDepthAnythingOutput", { depths: o(vd), colormap: "gray" });
+    const depth = g.add("ImageScale", { image: o(vdi), upscale_method: "bilinear", width: p.width, height: p.height, crop: "disabled" });
     const patch = g.add("ModelPatchLoader", { name: M.h3Motion });
     model = o(g.add("MiniMaxH3FunControlNetApply", { model, model_patch: o(patch), vae: o(vae), strength: m.strength, start_percent: 0, end_percent: m.endAt, control_video: o(depth) }, "Copy its motion (H3 depth control)"));
   }

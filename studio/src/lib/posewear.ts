@@ -127,8 +127,10 @@ export async function motionReady() {
   // ComfyUI's own H3 Fun ControlNet node (added to ComfyUI with H3's control support): an older ComfyUI on the rental lacks it
   const has = await fetch("/object_info/MiniMaxH3FunControlNetApply").then((r) => (r.ok ? r.json() : {})).then((b: Record<string, unknown>) => !!b?.MiniMaxH3FunControlNetApply).catch(() => true);
   if (!has) throw new Error("This rental's ComfyUI is too old for copying motion (no “Apply MiniMax H3 Fun ControlNet” node) — make a new rental from the latest image");
+  const vda = await fetch("/object_info/VideoDepthAnythingProcess").then((r) => (r.ok ? r.json() : {})).then((b: Record<string, unknown>) => !!b?.VideoDepthAnythingProcess).catch(() => true);
+  if (!vda) throw new Error("The Video Depth Anything nodes aren't on this rental yet — Reboot the instance (they install at start-up) and try again");
   const { useDownloads, setLater, refreshDownloads } = await import("./downloads");
-  const missing = ["kdepth", "hmotion"].map((id) => useDownloads.getState().groups.find((x) => x.id === id)).filter((g) => g && g.state !== "done");
+  const missing = ["hmotion"].map((id) => useDownloads.getState().groups.find((x) => x.id === id)).filter((g) => g && g.state !== "done");
   if (!missing.length) return;
   for (const g of missing) if (g!.state === "later" || g!.state === "skipped") await setLater(g!.id, false);
   refreshDownloads();

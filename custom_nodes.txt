@@ -56,3 +56,6 @@ https://github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer@63a24c3c6a2b5a28dc41
 #     Batch → "Depth pose" — a picture follows a depth map's pose (PoseWear's depth poses, or one worked out from any picture) ---
 https://github.com/facok/comfyui-krea2-controlnet@79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f
 https://github.com/kijai/ComfyUI-DepthAnythingV2@553187872eeb1d52e50dc53209fa57e569609a72
+# --- Video Depth Anything (yuvraj108c; the Small model is Apache-2.0): depth for a whole clip at once, steady from frame to
+#     frame (Depth Anything V2 looks at each frame alone, so its depth flickers) — Animate → "Copy its motion exactly" ---
+https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything@a0db08e63d1ea571601c45cde4aaee0acdd0544d
