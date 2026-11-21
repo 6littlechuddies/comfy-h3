@@ -27,6 +27,8 @@ export interface LiveClip {
 export interface LiveAction {
   key: string; title: string; prompt: string; hint: string;
   rating: "sfw" | "suggestive" | "explicit"; seconds: number; segs: number;
+  /** a longer action (over 15 s): what happens in each part, in order — the site plays them back to back as one take */
+  parts?: string[];
   /** its step on her ladder (1 = the free opener, higher = bolder), as on the tip menus — the order it's sent in */
   level?: number;
   tier: "free" | "premium" | "ultimate"; tokens: number; on: boolean;
@@ -121,7 +123,10 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
       prompt = `She settles smoothly back into her resting pose, facing the camera with a soft smile. ${STILL}`.replace(" She ends in exactly the pose she started in.", "");
     } else {
       kind = "seg"; seconds = Math.min(15, act.seconds); mode = "i2v"; images = [prev]; start = prev; end = undefined;
-      prompt = `${i > 0 ? "She carries on from where she is: " : ""}${act.prompt} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
+      // a longer action: each part its own beat, told what came before so it carries the move on instead of restarting it
+      const beat = act.parts?.[i] ?? act.prompt;
+      const before = i > 0 ? (act.parts?.[i - 1] ?? act.prompt) : "";
+      prompt = `${i > 0 ? `This continues a move already under way (the part before: ${before}) — from the first frame she is mid-motion and keeps the same direction and tempo, no restart: ` : ""}${beat}${act.parts && i < act.parts.length - 1 ? " The move is still going at the end of this part (it continues in the next)." : ""} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
     }
   } else throw new Error(`Unknown clip ${key}`);
   await patchClip(cid, key, kind, { status: "making", error: undefined, ok: false });
@@ -285,7 +290,8 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
     return [{ key, title: String(a.title || key).slice(0, 40), prompt: String(a.prompt), hint: String(a.hint || "").slice(0, 200), rating,
       seconds: Math.max(3, Math.min(15, Number(a.seconds) || 5)), segs: Math.max(1, Math.min(4, Number(a.segs) || 1)),
       tier: (["free", "premium", "ultimate"].includes(String(a.tier)) ? a.tier : rating === "sfw" ? "free" : rating === "suggestive" ? "premium" : "ultimate") as LiveAction["tier"],
-      tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true, level: Math.max(1, Math.min(30, Math.round(Number((a as { level?: number }).level) || 0))) || undefined }];
+      tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true,
+      ...(Array.isArray((a as { parts?: unknown }).parts) && ((a as { parts: unknown[] }).parts).length > 1 ? { parts: ((a as { parts: unknown[] }).parts).map(String).slice(0, 4), segs: Math.min(4, ((a as { parts: unknown[] }).parts).length) } : {}), level: Math.max(1, Math.min(30, Math.round(Number((a as { level?: number }).level) || 0))) || undefined }];
   }).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).slice(0, 24);
   if (!acts.length) throw new Error(`${c.name}: the writer planned no actions — try again`);
   await saveLive(cid, (x) => ({

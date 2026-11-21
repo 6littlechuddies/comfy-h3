@@ -113,6 +113,11 @@ function LivePack({ c }: { c: Character }) {
                     <input value={a.title} maxLength={40} onChange={(e) => act(a.key, { title: e.target.value })} aria-label="Button title" className="inset h-8 min-w-0 flex-1 border border-line px-2 text-[13px] font-medium" />
                   </div>
                   <textarea value={a.prompt} onChange={(e) => act(a.key, { prompt: e.target.value })} rows={3} aria-label="What she does" className="inset border border-line p-2 text-[12.5px] leading-relaxed" />
+                  {a.segs > 1 && Array.from({ length: a.segs }, (_, i) => (
+                    <textarea key={i} value={a.parts?.[i] ?? ""} rows={2} placeholder={`Part ${i + 1}: what happens in this part (it carries on from part ${i || "the still"})`} aria-label={`Part ${i + 1}`}
+                      onChange={(e) => { const parts = Array.from({ length: a.segs }, (_, j) => a.parts?.[j] ?? ""); parts[i] = e.target.value; act(a.key, { parts }); }}
+                      className="inset border border-line p-1.5 text-[12px] leading-relaxed" />))}
+                  {a.segs > 1 && <span className="text-[11px] text-dim">{a.segs} parts × {a.seconds} s = {a.segs * a.seconds} s, played back to back as one take</span>}
                   <input value={a.hint} maxLength={200} onChange={(e) => act(a.key, { hint: e.target.value })} placeholder="What she did, for her message after (nobody sees it)" aria-label="Reaction hint" className="inset h-8 border border-line px-2 text-[12px]" />
                   <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
                     <label className="flex items-center gap-1" title="Its step on her ladder: 1 = the free opener, higher = bolder (the order the site gets them in)">Level <input type="number" min={1} max={30} value={a.level ?? ""} onChange={(e) => act(a.key, { level: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })} className="inset h-7 w-12 border border-line px-1" /></label>
