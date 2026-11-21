@@ -85,6 +85,10 @@ function LivePack({ c }: { c: Character }) {
             <Btn small onClick={() => void run("Making her webcam still (2 takes)…", async () => { const outs = await (await import("../lib/live")).makeStill(c.id, 2); toast(`${outs.length} new stills of her are at the top of the grid — pick one`, "good"); setPicking(true); })}
               disabled={!!busy} why="Busy" title="Two takes of her in that place, with her face and body from her sheet — then pick one as the still">Make a new still</Btn>
           </div>}
+          <label className="flex items-start gap-1.5 text-[12px] text-muted" title="Before each next part (or the way back) starts, her face on the part's last frame is redrawn from her reference sheet, both are scored by DeepSeek's face match, and the better one goes on — so her likeness can't drift from part to part">
+            <input type="checkbox" className="mt-0.5" checked={l.faceFix !== false} onChange={(e) => up((x) => ({ ...x, faceFix: e.target.checked }))} />
+            <span>Keep her face at every join{!c.views.sheet && <span className="block text-[11px] text-amber-300">{c.views.front ? "Uses her front picture — her All angles sheet (Characters → Make sheet) works better" : "She needs a front picture or a sheet first"}</span>}</span>
+          </label>
           <label className="flex flex-col gap-1 text-[12.5px] text-muted">Framing
             <DropSelect value={l.framing} onChange={(e) => up((x) => ({ ...x, framing: e.target.value as LiveState["framing"] }))} className="inset h-8 border border-line bg-raised px-2 text-[13px] text-ink">
               <option value="waist_up">Waist up</option><option value="full_body">Full body</option>
@@ -183,6 +187,10 @@ function ClipCard({ cid, k, clip, label, note, onTick, onRedo, disabled }: { cid
       </div>
       <b className="truncate text-[12.5px]">{label}</b>
       {note && <span className="text-[11px] leading-snug text-dim">{note}</span>}
+      {clip?.likeness && clip.likeness.used !== "no sheet" && (
+        <span className={cx("text-[11px] leading-snug", (clip.likeness.used === "fixed" ? clip.likeness.after : clip.likeness.before) != null && (clip.likeness.used === "fixed" ? clip.likeness.after! : clip.likeness.before!) < 7 ? "text-amber-300" : "text-good")}
+          title={`DeepSeek's face match against her face picture, 0-10, on this part's last frame — before and after fixing her face against her reference sheet. ${clip.likeness.used === "fixed" ? "The fixed frame went on (the next part starts from it)." : "The fix didn't score better, so the original frame went on."}${clip.likeness.why ? ` ${clip.likeness.why}` : ""}`}>
+          Likeness {clip.likeness.before ?? "?"} → {clip.likeness.after ?? "?"} · {clip.likeness.used === "fixed" ? "fix used" : "kept original"}</span>)}
       <div className="flex items-center gap-2 text-[11.5px]">
         {st === "ready" && <label className="flex items-center gap-1 text-muted" title="You watched it (and its joins in the reel) and it looks right"><input type="checkbox" checked={!!clip?.ok} onChange={(e) => onTick(e.target.checked)} /> Looks right</label>}
         <button disabled={disabled || st === "making" || st === "encoding"} onClick={onRedo} className="ml-auto text-muted hover:text-ink disabled:opacity-40">{st === "new" ? "Make" : "Again"}</button>

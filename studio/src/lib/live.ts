@@ -23,6 +23,8 @@ export interface LiveClip {
   ok?: boolean;
   /** the H3 prompt the compiler wrote from the plan (and what it was written from — a changed plan writes it again) */
   h3?: string; h3From?: string;
+  /** her likeness on this part's last frame (DeepSeek's face match, 0-10) before and after the face fix, and which went on */
+  likeness?: { before?: number | null; after?: number | null; used: "fixed" | "original" | "no sheet"; why?: string };
 }
 export interface LiveAction {
   key: string; title: string; prompt: string; hint: string;
@@ -36,6 +38,8 @@ export interface LiveAction {
 export interface LiveState {
   anchor?: { ref: FileRef; input: string; at: number };
   framing: "waist_up" | "full_body";
+  /** fix her face on the last frame of every action part before the next part starts from it (on unless turned off) */
+  faceFix?: boolean;
   idle: { key: string; kind: "idle" | "typing" | "talk"; prompt: string; seconds: number; on: boolean }[];
   actions: LiveAction[];
   clips: Record<string, LiveClip>;
@@ -160,9 +164,21 @@ export async function makeClip(cid: string, key: string, attempt = 0): Promise<v
     if (!src) throw new Error("H3 finished without a video");
     await patchClip(cid, key, kind, { status: "encoding", src: { filename: src.filename, subfolder: src.subfolder, type: src.type } });
     const e = await post<{ d_start?: number | null; d_end?: number | null; last: string; seconds: number }>("/studio-api/live/encode", { cid, key, src, start, end });
-    await patchClip(cid, key, kind, { status: "ready", enc: { ...e, at: Date.now() } });
     // a join that visibly jumps: made again by itself (twice at most) before anyone has to look at it
-    if ((jumpLevel(e.d_start) === "jump" || jumpLevel(e.d_end) === "jump") && attempt < 2) return makeClip(cid, key, attempt + 1);
+    if ((jumpLevel(e.d_start) === "jump" || jumpLevel(e.d_end) === "jump") && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...e, at: Date.now() } }); return makeClip(cid, key, attempt + 1); }
+    let enc = e;
+    // an action part: her face on its last frame is fixed against her reference sheet before anything continues from it,
+    // and both are scored — the fix is only used when it scores at least as well; a part whose likeness is still low is
+    // made again (twice at most)
+    if (kind === "seg" && l.faceFix !== false) {
+      await patchClip(cid, key, kind, { status: "encoding", error: "fixing her face on the last frame…" });
+      const fx = await fixJoin(c, cid, e.last).catch((err) => ({ used: "original" as const, why: (err as Error).message, last: undefined, before: undefined, after: undefined }));
+      if (fx.used === "fixed" && fx.last) enc = await post("/studio-api/live/encode", { cid, key, src, start, end: fx.last });
+      await patchClip(cid, key, kind, { likeness: { before: fx.before, after: fx.after, used: fx.used, why: fx.why }, error: undefined });
+      const final = fx.used === "fixed" ? fx.after : fx.before;
+      if (final != null && final < 6 && attempt < 2) { await patchClip(cid, key, kind, { enc: { ...enc, at: Date.now() } }); return makeClip(cid, key, attempt + 1); }
+    }
+    await patchClip(cid, key, kind, { status: "ready", enc: { ...enc, at: Date.now() } });
   } catch (err) {
     await patchClip(cid, key, kind, { status: "error", error: (err as Error).message });
     throw err;
@@ -425,4 +441,35 @@ export async function sendReady(cids: string[]): Promise<{ sent: string[]; skipp
     try { const r = await sendLive(cid); (r.ok ? out.sent : out.failed).push(name); } catch { out.failed.push(name); }
   }
   return out;
+}
+
+
+/** her reference: the "All angles" sheet (front, back, side, face, three-quarter in one picture) — else her front picture */
+const sheetOf = (c: Character): FileRef | undefined => c.views.sheet ?? c.views.front;
+const faceRefOf = (c: Character): FileRef | undefined => c.views.face ?? c.views.front ?? c.views.sheet;
+
+async function likeness(c: Character, file: FileRef): Promise<{ score: number | null | undefined; why: string }> {
+  const ref = faceRefOf(c);
+  if (!ref) return { score: undefined, why: "no picture of her to compare with" };
+  const [{ makeBoard }, { runWriter }, { parseScore }] = await Promise.all([import("./api"), import("./writer"), import("./builder")]);
+  const board = await makeBoard([ref, file]);
+  return parseScore(await runWriter("match", { who: `${c.name}, the reference`, what: "a frame from her video" }, { tab: "characters", label: `${c.name} · live · likeness check`, images: [board.name], big: false }));
+}
+
+/** the face fix at a join: Krea 2 edit of the part's last frame with her reference sheet — only her face and hair change */
+async function fixJoin(c: Character, cid: string, last: string): Promise<{ used: "fixed" | "original" | "no sheet"; last?: string; before?: number | null; after?: number | null; why?: string }> {
+  const sheet = sheetOf(c);
+  if (!sheet) return { used: "no sheet", why: "she has no reference sheet or front picture" };
+  const [{ buildEdit }, { editArgs, newSeed, useSettings }, { useJobs, waitForJob }, { toInput }] = await Promise.all([import("./graphs"), import("./settings"), import("./jobs"), import("./api")]);
+  const sheetIn = (await toInput(sheet)).name;
+  const instruction = `Picture 1 is one frame from a video of a woman; picture 2 is her reference sheet (${c.views.sheet ? "several views of the same woman" : "a picture of her"}). Redraw ONLY her face and hair in picture 1 so they match the woman in picture 2 exactly — face shape, jaw, eyes, eyebrows, nose, lips, skin tone, hair colour and hairline — keeping the head angle, expression and gaze direction of picture 1. Everything else in picture 1 stays exactly as it is: body, pose, hands, clothes, the room, the light, the colours, the framing and the sharpness. Nothing from picture 2 is added (no grey background, no second person). She is an adult.`;
+  const j = await useJobs.getState().run("characters", `${c.name} · live · face fix`, buildEdit({ ...editArgs(useSettings.getState().s.edit, "krea"), enhance: false, seed: newSeed(),
+    images: [last, sheetIn], instruction, negative: "", resolution: 1280, prefix: `studio/live/${cid}` }), "edit:krea:2:raw", { charId: cid, live: "facefix" });
+  const d = await waitForJob(j.id);
+  const o = d.outputs.find((x) => x.kind === "image" && x.type === "output");
+  if (!o) return { used: "original", why: "the face fix made no picture" };
+  const fixedRef: FileRef = { filename: o.filename, subfolder: o.subfolder, type: o.type };
+  const [b, a] = await Promise.all([likeness(c, { filename: last, subfolder: "", type: "input" }), likeness(c, fixedRef)]);
+  const better = a.score != null && (b.score == null || a.score >= b.score);
+  return better ? { used: "fixed", last: (await toInput(fixedRef)).name, before: b.score, after: a.score, why: a.why } : { used: "original", before: b.score, after: a.score, why: b.why };
 }
