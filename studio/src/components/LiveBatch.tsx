@@ -87,6 +87,11 @@ export function LiveBatchPanel() {
       </div>
       <p className="text-[11.5px] text-dim">About {Math.round(sel.size * (3 + count * 2))} clips — roughly {Math.max(1, Math.round(sel.size * (3 * 6 + count * 8) * 3.5 / 60))} min of GPU time. The site's first test was one character, 3 idle loops and 4 SFW actions.</p>
       <Btn kind="primary" onClick={go} disabled={!sel.size || running} why={running ? "Already running" : "Pick characters first"}><Icon name="play" size={14} /> Plan and make {sel.size || ""} live pack{sel.size === 1 ? "" : "s"}</Btn>
+      <Btn onClick={async () => {
+        const { sendReady } = await import("../lib/live");
+        const r = await sendReady([...sel]);
+        toast(`Live packs: ${r.sent.length} sent${r.skipped.length ? ` · ${r.skipped.length} not ready (clips to make or tick: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""})` : ""}${r.failed.length ? ` · ${r.failed.length} refused — open them to see why` : ""}`, r.failed.length ? "bad" : "good");
+      }} disabled={!sel.size || running} why={running ? "Still making" : "Pick characters first"} title="Every ticked character whose pack is made and checked by eye goes to the site in one go (drafts until published there)"><Icon name="up" size={14} /> Send the ready packs</Btn>
       {runs.length > 0 && (
         <ul className="flex flex-col divide-y divide-line border border-line">
           {runs.map((r) => (

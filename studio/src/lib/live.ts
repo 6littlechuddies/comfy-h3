@@ -203,6 +203,7 @@ export function reelKeys(l: LiveState): string[] {
   return out;
 }
 export async function makeReel(cid: string): Promise<string> {
+  await ensureFitted(cid);
   const { l } = await get(cid);
   await post("/studio-api/live/reel", { cid, keys: reelKeys(l) });
   return fileUrl(cid, "reel", Date.now());
@@ -225,6 +226,7 @@ export function blockers(l: LiveState): string[] {
 export async function sendLive(cid: string): Promise<{ ok: boolean; note: string }> {
   const { c, l } = await get(cid);
   if (!c.site?.sent?.ok) throw new Error(`${c.name} isn't on the site yet — send her first (the site answers 409 otherwise)`);
+  await ensureFitted(cid);
   const pack = {
     framing: l.framing,
     idle: l.idle.filter((x) => x.on).map((x) => ({ key: x.key, kind: x.kind, rating: "sfw" })),
@@ -370,4 +372,51 @@ export async function makeStill(cid: string, takes = 2): Promise<FileRef[]> {
   }
   if (!outs.length) throw new Error(`${c.name}: her still didn't come out — try again`);
   return outs;
+}
+
+
+/** a new rental: the fitted clips (and her still) stay on the old one, but every raw video is in your results — fit them
+ *  again, in order (each part starts on the new last frame of the one before), keeping your "Looks right" ticks */
+export async function ensureFitted(cid: string): Promise<number> {
+  const { l } = await get(cid);
+  const have = await (await fetch(`/studio-api/live/have?cid=${encodeURIComponent(cid)}`)).json() as { have: string[]; anchor: boolean };
+  const keys = packKeys(l).filter((k) => l.clips[k]?.status === "ready");
+  if (have.anchor && keys.every((k) => have.have.includes(k))) return 0;
+  if (!l.anchor) return 0;
+  let anchor = l.anchor.input;
+  if (!have.anchor) {
+    const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref: l.anchor.ref });
+    anchor = d.input;
+    await saveLive(cid, (x) => ({ ...x, anchor: x.anchor ? { ...x.anchor, input: anchor } : x.anchor }));
+  }
+  let n = 0;
+  const fit = async (key: string, start: string, end: string | undefined) => {
+    const cl = (await get(cid)).l.clips[key];
+    if (!cl?.src) return undefined;
+    const e = await post<{ d_start?: number | null; d_end?: number | null; last: string; seconds: number }>("/studio-api/live/encode", { cid, key, src: cl.src, start, end });
+    await saveLive(cid, (x) => ({ ...x, clips: { ...x.clips, [key]: { ...x.clips[key], enc: { ...e, at: Date.now() } } } }));
+    n++; return e.last;
+  };
+  for (const x of l.idle.filter((y) => y.on)) if (l.clips[x.key]?.status === "ready") await fit(x.key, anchor, anchor);
+  for (const a of l.actions.filter((y) => y.on)) {
+    let prev: string | undefined = anchor;
+    for (let i = 0; i < a.segs && prev; i++) prev = await fit(segKey(a.key, i), prev, undefined);
+    if (prev) await fit(retKey(a.key), prev, anchor);
+  }
+  return n;
+}
+
+
+/** Batch: send every ticked character whose pack is ready (made and checked by eye) */
+export async function sendReady(cids: string[]): Promise<{ sent: string[]; skipped: string[]; failed: string[] }> {
+  const { useCharacters } = await import("./characters");
+  const out = { sent: [] as string[], skipped: [] as string[], failed: [] as string[] };
+  for (const cid of cids) {
+    const c = useCharacters.getState().list.find((x) => x.id === cid);
+    if (!c) continue;
+    const name = c.site?.name || c.name;
+    if (blockers(liveOf(c)).length || !c.site?.sent?.ok) { out.skipped.push(name); continue; }
+    try { const r = await sendLive(cid); (r.ok ? out.sent : out.failed).push(name); } catch { out.failed.push(name); }
+  }
+  return out;
 }

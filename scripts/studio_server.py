@@ -4141,6 +4141,7 @@ def _live_encode(src: str, dst: str, start: str | None, end: str | None, last_na
     ease = lambda i: 0.5 - 0.5 * np.cos(np.pi * min(1.0, i / LIVE_EASE))  # 0 at the join → 1 after LIVE_EASE frames
     tail = collections.deque(maxlen=LIVE_EASE + 1)
     n, d0, d1, last = 0, None, None, None
+    marks: list = []  # (frame number, frame) once a second — the middle one is the action's button picture
     try:
         while True:
             buf = dec.stdout.read(fb)
@@ -4148,6 +4149,7 @@ def _live_encode(src: str, dst: str, start: str | None, end: str | None, last_na
             f = np.frombuffer(buf, dtype=np.uint8).reshape(LIVE_H, LIVE_W, 3).astype(np.float32)
             if n == 0 and A is not None: d0 = float(np.abs(f - A).mean()) / 2.55
             if A is not None and n <= LIVE_EASE: f = A + (f - A) * ease(n)
+            if n % LIVE_FPS == LIVE_FPS // 2: marks.append((n, f.astype(np.uint8)))
             n += 1
             if B is None: enc.stdin.write(f.clip(0, 255).astype(np.uint8).tobytes()); last = f
             else:
@@ -4164,6 +4166,9 @@ def _live_encode(src: str, dst: str, start: str | None, end: str | None, last_na
     if n == 0 or enc.returncode not in (0, None): raise RuntimeError("couldn't re-encode that clip (no frames, or ffmpeg failed)")
     # its own last frame, for the next segment / the return clip to start from
     Image.fromarray(last.clip(0, 255).astype(np.uint8)).save(os.path.join(INPUT, last_name))
+    if marks:
+        mid = min(marks, key=lambda m: abs(m[0] - n // 2))[1]
+        Image.fromarray(mid).save(dst[:-4] + "_thumb.jpg", quality=88)
     return {"frames": n, "seconds": round(n / LIVE_FPS, 2), "d_start": None if d0 is None else round(d0, 1), "d_end": None if d1 is None else round(d1, 1),
             "last": last_name, "size": os.path.getsize(dst)}
 
@@ -4187,6 +4192,12 @@ async def live_file(req):
     p = os.path.join(_live_dir(cid), "anchor.png" if key == "anchor" else f"{key}.mp4")
     if not os.path.isfile(p): raise web.HTTPNotFound()
     return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+
+async def live_have(req):
+    cid = req.query.get("cid", "")
+    folder_ = _live_dir(cid)
+    return web.json_response({"have": sorted(f[:-4] for f in os.listdir(folder_) if f.endswith(".mp4") and f != "reel.mp4"), "anchor": os.path.isfile(os.path.join(folder_, "anchor.png"))})
 
 
 async def live_reel(req):
@@ -4217,7 +4228,10 @@ async def live_send(req):
     except (OSError, ValueError): sent = {}
     need = ["anchor"] + [x["key"] for x in pack.get("idle") or []] + [k for a in pack.get("actions") or [] for k in [*(a.get("segments") or []), a.get("return")] if k]
     paths = {k: os.path.join(folder_, "anchor.png" if k == "anchor" else f"{k}.mp4") for k in need}
-    missing = [k for k, pth in paths.items() if not os.path.isfile(pth)]
+    for a in pack.get("actions") or []:  # the button picture: the middle of its first part
+        t = (a.get("segments") or [None])[0]
+        if t and os.path.isfile(os.path.join(folder_, f"{t}_thumb.jpg")): paths[f"{t}_thumb"] = os.path.join(folder_, f"{t}_thumb.jpg"); a["thumb"] = f"{t}_thumb"
+    missing = [k for k, pth in paths.items() if not os.path.isfile(pth) and not k.endswith("_thumb")]
     if missing: return web.json_response({"error": f"not made yet: {', '.join(missing)}"}, status=400)
     ids: dict = {}; sem = asyncio.Semaphore(SITE_UPLOAD_PARALLEL)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
@@ -6519,7 +6533,7 @@ def main():
         web.get("/studio-api/packs", packs_list), web.post("/studio-api/packs", packs_add), web.put("/studio-api/packs/active", packs_activate),
         web.patch("/studio-api/packs/{id}", packs_update), web.delete("/studio-api/packs/{id}", packs_delete), web.get("/studio-api/packs/{id}/text", packs_text),
         web.post("/studio-api/last-frame", last_frame),
-        web.post("/studio-api/live/anchor", live_anchor), web.post("/studio-api/live/encode", live_encode), web.get("/studio-api/live/file", live_file),
+        web.post("/studio-api/live/anchor", live_anchor), web.post("/studio-api/live/encode", live_encode), web.get("/studio-api/live/file", live_file), web.get("/studio-api/live/have", live_have),
         web.post("/studio-api/live/reel", live_reel), web.post("/studio-api/live/send", live_send), web.get("/studio-api/live/site", live_site),
         web.post("/studio-api/media-meta", media_meta), web.post("/studio-api/workflow/save", workflow_save),
         web.post("/studio-api/downloads/later", downloads_later),
