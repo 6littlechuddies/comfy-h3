@@ -96,6 +96,9 @@ export function RefList({ refs, onChange, allow = ["image", "video", "audio"], c
               <Trim r={r} onChange={(p) => patch(r.id, p)} />
               <label className="flex items-center gap-2"><input type="checkbox" checked={r.useSound} onChange={(e) => patch(r.id, { useSound: e.target.checked })} disabled={r.media.has_audio === false} />
                 Use its sound too {r.media.has_audio === false && <span className="text-dim">(this clip has no sound)</span>}<Help k="useSound" /></label>
+              <label className="flex items-start gap-2" title="Its depth, frame by frame, steers the video (MiniMax H3 Fun ControlNet): the people from your reference pictures — one character or a man and a woman — move exactly like the people in this clip, in the same places in the frame. Their looks are never copied: this clip isn't shown to H3 as a picture, only its depth.">
+                <input type="checkbox" className="mt-0.5" checked={!!r.motion} onChange={(e) => onChange(refs.map((x) => ({ ...x, motion: x.id === r.id ? e.target.checked : false })))} />
+                <span>Copy its motion exactly (depth) <span className="text-dim">— your characters move like the people in it</span></span></label>
             </div>
           )}
         </div>

@@ -167,8 +167,10 @@ export default function AnimateTab() {
     ...a.adv, seed, mode: a.mode === "swap" ? "ref" : a.mode, prompt: a.prompt, avoid: a.avoid, music: a.music, mouth: a.mouth, seconds: a.seconds, width, height, turbo, loras: a.loras, ...over,
     refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: "studio/animate/h3", ray: rayVideoCards(),
     images: ref ? refs.filter((r) => r.media.kind === "image").map((r) => r.media.name) : (frames.filter(Boolean) as Media[]).map((m) => m.name),
-    videos: ref ? refs.filter((r) => r.media.kind === "video").map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
+    // a clip whose motion is copied exactly goes in as depth only (its people's looks never reach H3)
+    videos: ref ? refs.filter((r) => r.media.kind === "video" && !r.motion).map((r) => ({ file: r.media.name, start: r.start, end: r.end, useSound: r.useSound })) : [],
     audios: ref ? refs.filter((r) => r.media.kind === "audio").map((r) => r.media.name) : [],
+    ...(ref && refs.some((r) => r.motion && r.media.kind === "video") ? { motion: (() => { const m = refs.find((r) => r.motion && r.media.kind === "video")!; return { file: m.media.name, start: m.start, end: m.end, strength: 0.8, endAt: 0.7 }; })() } : {}),
   });
   const label = (extra = "") => `${a.seconds} s video${extra}`;
   /** "Plan it in Plan a video": your references (or first/last frames), words, length and type go along — LoRAs stay shared */
@@ -246,6 +248,7 @@ export default function AnimateTab() {
     setBusy(true);
     setTimeout(() => setBusy(false), 600); // keep the button free: you can line up more while it plans
     try {
+      if (ref && refs.some((r) => r.motion && r.media.kind === "video")) await (await import("../lib/posewear")).motionReady();
       // a character among the references: who's who said first ("<Picture 1> is her reference sheet… the woman in the video is her")
       const planned = await planFirst();
       const id = ref ? identityLine(refs, useCharacters.getState().list, planned) : "";

@@ -706,6 +706,9 @@ export interface AnimateOpts extends Omit<SamplerOpts, "cfg"> {
   ray?: number;
   /** straight out of the model: no in-between frames, no upscale (Live pack clips are re-encoded to the site's size) */
   plain?: boolean;
+  /** copy a clip's motion exactly: its depth (Depth Anything V2, frame by frame) steers the video through the MiniMax H3 Fun
+   *  ControlNet — your characters (reference pictures) or your first frame, moving like the people in the clip */
+  motion?: { file: string; start: number; end: number; strength: number; endAt: number };
 }
 
 // Mouths: by default nobody in a video talks, mouths words, sings or lip-syncs. H3 follows what a prompt says is there far
@@ -787,9 +790,21 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
       ...(first ? { first_frame: o(first) } : {}), ...(last ? { last_frame: o(last) } : {}),
     });
   }
+  if (p.motion) {
+    // the clip at 24 fps from its start, as many frames as this video has, cut to this video's size; its depth frame by frame;
+    // then ComfyUI's own H3 Fun ControlNet on the model (a shorter clip holds its last frame; a longer one is cut)
+    const m = p.motion;
+    const clip0 = g.add("VHS_LoadVideo", { video: m.file, force_rate: 24, custom_width: 0, custom_height: 0,
+      frame_load_cap: Math.max(1, Math.min(length, Math.round((m.end - m.start) * 24) || length)), skip_first_frames: Math.round(m.start * 24), select_every_nth: 1, format: "None" });
+    const sized = g.add("ImageScale", { image: o(clip0, 0), upscale_method: "bilinear", width: p.width, height: p.height, crop: "center" });
+    const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything });
+    const depth = g.add("DepthAnything_V2", { da_model: o(da), images: o(sized) });
+    const patch = g.add("ModelPatchLoader", { name: M.h3Motion });
+    model = o(g.add("MiniMaxH3FunControlNetApply", { model, model_patch: o(patch), vae: o(vae), strength: m.strength, start_percent: 0, end_percent: m.endAt, control_video: o(depth) }, "Copy its motion (H3 depth control)"));
+  }
   const sampler = g.add("KSamplerSelect", { sampler_name: p.sampler });
   let out: string;
-  if (ray && rayN > 1) {
+  if (ray && rayN > 1 && !p.motion) {
     // Raylight (github.com/komikndr/raylight): the model loads on every card and each step's frames are split across them
     // (Ulysses sequence parallel) — the same model, LoRAs and sampler, just N cards working on one video
     const actors = rayActors(g, rayN, ref ? M.h3Ref : M.h3FL, rayLoras);

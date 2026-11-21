@@ -121,3 +121,16 @@ export async function depthReady() {
   if (g.state === "later" || g.state === "skipped") { await setLater("kdepth", false); refreshDownloads(); }
   throw new Error(`The depth-pose models are downloading (${g.state === "downloading" ? `${Math.round(g.pct)}%` : "starting"}, ~0.9 GB) — try again when they're in`);
 }
+
+/** "Copy its motion exactly": the H3 depth-control patch (and the depth model from Depth poses) are on the rental — or start them */
+export async function motionReady() {
+  // ComfyUI's own H3 Fun ControlNet node (added to ComfyUI with H3's control support): an older ComfyUI on the rental lacks it
+  const has = await fetch("/object_info/MiniMaxH3FunControlNetApply").then((r) => (r.ok ? r.json() : {})).then((b) => !!b?.MiniMaxH3FunControlNetApply).catch(() => true);
+  if (!has) throw new Error("This rental's ComfyUI is too old for copying motion (no “Apply MiniMax H3 Fun ControlNet” node) — make a new rental from the latest image");
+  const { useDownloads, setLater, refreshDownloads } = await import("./downloads");
+  const missing = ["kdepth", "hmotion"].map((id) => useDownloads.getState().groups.find((x) => x.id === id)).filter((g) => g && g.state !== "done");
+  if (!missing.length) return;
+  for (const g of missing) if (g!.state === "later" || g!.state === "skipped") await setLater(g!.id, false);
+  refreshDownloads();
+  throw new Error(`The motion-copy models are downloading (${missing.map((g) => `${g!.label}${g!.state === "downloading" ? ` ${Math.round(g!.pct)}%` : ""}`).join(", ")}) — try again when they're in`);
+}

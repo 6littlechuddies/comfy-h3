@@ -5,7 +5,7 @@ import type { Media } from "./tray";
 import type { Timeline } from "./timeline";
 import type { Kind } from "./api";
 
-export interface Ref { id: string; media: Media; label: string; start: number; end: number; useSound: boolean; /** set when the picture is a view of a saved character */ charId?: string }
+export interface Ref { id: string; media: Media; label: string; start: number; end: number; useSound: boolean; /** copy this clip's motion exactly (its depth steers the video) instead of showing it to H3 */ motion?: boolean; /** set when the picture is a view of a saved character */ charId?: string }
 export const LIMITS: Record<Kind, number> = { image: 9, video: 3, audio: 3 };
 const TAGS: Record<Kind, string> = { image: "Picture", video: "Video", audio: "Audio" };
 
