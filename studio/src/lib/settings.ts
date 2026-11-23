@@ -99,7 +99,17 @@ export interface PromptS {
   writer?: "small" | "big";
 }
 export interface AnimateS {
-  mode: "ref" | "i2v" | "fl" | "loop" | "swap";
+  mode: "ref" | "i2v" | "fl" | "loop" | "swap" | "long";
+  /** Long video (past 15 s): the parts in order — what happens in each and how long it is; the parts are joined into one take */
+  longParts?: { text: string; seconds: number }[];
+  /** frames of the previous part each next part starts from (H3 Relay: 18 ≈ 0.75 s, 35 ≈ 1.5 s, 52, 69) */
+  longOverlap?: 18 | 35 | 52 | 69;
+  /** the first reference picture is also the video's exact first frame */
+  longStart?: boolean;
+  /** Swap the person: lock the motion with each window's depth (needs "Copy motion from a video") */
+  swapDepth?: boolean;
+  /** Swap the person: put her head on frame 1 with BFS first and give H3 that still as her first picture (needs BFS + SAM 3) */
+  swapBfs?: boolean;
   /** Swap the person: who in the video to replace (words SAM looks for), which one if several match, and the working size */
   swapWho?: string; swapPick?: "largest" | "leftmost" | "rightmost"; swapRes?: "480" | "768";
   /** the character's name in the swap prompt ("nothing swapped? add the name") and what else to keep ("it removed X? add X") */

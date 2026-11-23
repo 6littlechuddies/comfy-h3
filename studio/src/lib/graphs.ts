@@ -893,7 +893,10 @@ export interface PromptRefPicture { file: string; tag: string; label: string }
  *  from the reference pictures, by Ref2VA + the FL2V 8-step turbo + the Character Swap LoRA. Long clips go in overlapping
  *  windows (124 frames, 18 carried over) inside a native loop, then the source's own audio is put back. */
 export function buildSwap(p: { video: string; pictures: string[]; who: string; pick: "largest" | "leftmost" | "rightmost"; resolution: "480" | "768";
-  seconds: number; /** the whole prompt (swapPrompt, or your own edit of it) */ prompt: string; seed: number; kitchen: boolean; prefix: string }): ApiGraph {
+  seconds: number; /** the whole prompt (swapPrompt, or your own edit of it) */ prompt: string; seed: number; kitchen: boolean; prefix: string;
+  /** lock the motion: each window's depth (Video Depth Anything) steers H3 through the Fun ControlNet, so she moves exactly like the
+   *  person she replaces — and takes on their outline (hair length, build), so it's for people of a similar shape */
+  depth?: { strength: number; endAt: number } }): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: M.h3Ref, weight_dtype: "default" });
   let model: Link = o(g.add("MiniMaxH3SigmaShift", { model: o(unet), shift_video: 12, shift_audio: 3 }));
@@ -932,7 +935,17 @@ export function buildSwap(p: { video: string; pictures: string[]; who: string; p
   const enc = g.add("VAEEncode", { pixels: o(win), vae: o(vvae) });
   const edit = g.add("H3RelayApplyEditMask", { latent: o(hist, 1), source_latent: o(enc), mask: o(win, 1) });
   const guide = g.add("MiniMaxH3AddGuide", { positive: o(hist), latent: o(edit), frame_idx: 0, audio_vae: o(avae), audio: o(win, 2) });
-  const mem = g.add("H3RelaySamplingMemory", { model: o(adapter), latent: o(edit), conditioning: o(guide), activation_memory_gib: 17 });
+  let swapModel: Link = o(adapter);
+  if (p.depth) {
+    // this window's frames (history included, so it lines up with the latent) → depth, steady across frames → H3's own depth ControlNet
+    const vda = g.add("LoadVideoDepthAnythingModel", { model: M.videoDepth });
+    const vd = g.add("VideoDepthAnythingProcess", { vda_model: o(vda), images: o(win), input_size: 518, max_res: 1280, precision: "fp16" });
+    const vdi = g.add("VideoDepthAnythingOutput", { depths: o(vd), colormap: "gray" });
+    const depthImg = g.add("ImageScale", { image: o(vdi), upscale_method: "bilinear", width: o(dims, 0), height: o(dims, 1), crop: "disabled" });
+    const patch = g.add("ModelPatchLoader", { name: M.h3Motion });
+    swapModel = o(g.add("MiniMaxH3FunControlNetApply", { model: swapModel, model_patch: o(patch), vae: o(vvae), strength: p.depth.strength, start_percent: 0, end_percent: p.depth.endAt, control_video: o(depthImg) }, "Lock the motion (depth)"));
+  }
+  const mem = g.add("H3RelaySamplingMemory", { model: swapModel, latent: o(edit), conditioning: o(guide), activation_memory_gib: 17 });
   const guider = g.add("CFGGuider", { model: o(mem), positive: o(guide), negative: o(guide), cfg: 1 });
   const sample = g.add("SamplerCustomAdvanced", { noise: o(g.add("RandomNoise", { noise_seed: o(win, 10) })), guider: o(guider),
     sampler: o(g.add("KSamplerSelect", { sampler_name: "er_sde" })), sigmas: o(g.add("BasicScheduler", { model: o(adapter), scheduler: "normal", steps: 8, denoise: 1 })), latent_image: o(edit) });
@@ -1080,6 +1093,43 @@ function describeClip(g: G, v: { file: string; start: number; end: number }, see
 }
 
 /** "Read the clip for me": one clip → a plain description of what happens in it */
+/** one part of a long video: what happens, how long, and its own fixed seed (so a rerun finds it in H3 Relay's cache) */
+export interface LongShot { prompt: string; seconds: number; seed: number }
+/** Long video (past H3's 15 s): H3 Relay's native continuation — Sequence Start → Generate Shot → Generate Shot …. Each part
+ *  after the first starts from the last `overlap` frames of the one before (picture AND sound, inside the model), so motion,
+ *  light and audio carry across the join; those frames are trimmed when the parts are joined. Her pictures (up to 9) go into
+ *  every part. Parts are cached on disk by Relay: a graph with parts 1…k runs only the ones not made yet, so a crash or a
+ *  rerun picks up where it stopped. `upTo` = the last part this job makes; `assemble` joins them all (the last job). */
+export function buildLong(p: { run: string; global: string; shots: LongShot[]; upTo: number; images: string[]; firstFrame?: string; lastFrame?: string;
+  width: number; height: number; overlap: 18 | 35 | 52 | 69; turbo: boolean; loras: LoraPick[]; anime?: boolean; refImageSize: "match" | "max";
+  kitchen: boolean; assemble: boolean; prefix: string }): ApiGraph {
+  const g = new G();
+  let model: Link = o(g.add("H3RelayH3ModelLoader", { model_name: M.h3Ref, weight_dtype: "default", manual_cache_revision: "v1" }));
+  if (p.turbo) model = o(g.add("H3RelayModelLoRA", { model, lora_name: M.h3TurboRef, strength: 1 }, "Turbo (4 steps)"));
+  for (const l of activeLoras(p.loras)) model = o(g.add("H3RelayModelLoRA", { model, lora_name: l.name, strength: l.strength }));
+  const real = realismOn() && !p.anime;
+  if (real) model = o(g.add("H3RelayModelLoRA", { model, lora_name: M.h3Realism, strength: 0.8 }, "Realistic skin"));
+  if (p.kitchen) model = o(g.add("H3RelayAttention", { model, attention: "comfy kitchen attention" }));
+  // turbo: its 4 steps on euler/simple; full: Relay's own default (euler + its beta57 curve + Spectrum, 16 steps)
+  let seq: Link = o(g.add("H3RelaySequenceStart", { run_name: p.run, global_prompt: real ? `${REALISM_TRIGGER} ${p.global}`.trim() : p.global, width: p.width, height: p.height,
+    h3_overlap_frames: p.overlap, sampler: "euler", scheduler: p.turbo ? "simple" : "beta57", spectrum_enabled: !p.turbo }));
+  const pics = p.images.slice(0, 9).map((f) => o(g.add("LoadImage", { image: f })));
+  const refs: Inputs = {};
+  pics.forEach((l, i) => { refs[i < 3 ? `reference_image_${i + 1}` : `additional_reference_images.reference_image_${i + 1}`] = l; });
+  const first = p.firstFrame ? o(g.add("LoadImage", { image: p.firstFrame })) : null;
+  const lastIdx = Math.min(p.upTo, p.shots.length - 1);
+  for (let i = 0; i <= lastIdx; i++) {
+    const s = p.shots[i];
+    const lastOfAll = i === p.shots.length - 1;
+    const end = lastOfAll && p.lastFrame ? o(g.add("LoadImage", { image: p.lastFrame })) : null;
+    seq = o(g.add("H3RelayGenerateShot", { h3_model: model, sequence: seq, prompt: s.prompt, seed: s.seed, duration_seconds: Math.max(1, Math.min(15, s.seconds)),
+      h3_steps: p.turbo ? 4 : 16, output_crf: 18, ref_image_size: p.refImageSize, shot_id: `part_${String(i + 1).padStart(2, "0")}`,
+      ...(i === 0 && first ? { first_frame: first } : {}), ...(end ? { last_frame: end } : {}), ...refs }, `Part ${i + 1}`));
+  }
+  if (p.assemble) g.add("H3RelayAssembleRaw", { sequence: seq, filename: p.prefix, audio_bitrate: 256 }, "result");
+  return g.graph;
+}
+
 export function buildDescribeVideo(v: { file: string; start: number; end: number }, seed: number, detail: "motion" | "full"): ApiGraph {
   const g = new G();
   g.add("PreviewAny", { source: o(describeClip(g, v, seed, detail)) }, "seen");

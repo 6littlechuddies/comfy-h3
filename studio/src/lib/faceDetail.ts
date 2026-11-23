@@ -157,3 +157,30 @@ export async function selectPerson(name: string, b: Box, W: number, H: number) {
   const x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad), x1 = Math.min(W, b.x + b.width + pad), y1 = Math.min(H, b.y + b.height + pad);
   return { mask: { ...f, url: inputUrl(f.name) }, box: { x: Math.round(x0), y: Math.round(y0), width: Math.round(x1 - x0), height: Math.round(y1 - y0), W, H } };
 }
+
+/** Swap the person → "Start from a BFS still": the video's first frame with her head put on the person being replaced (BFS on
+ *  Krea 2, only inside that person's outline). It goes in as the swap's first reference picture: her, already in that scene,
+ *  pose and light — so H3 doesn't have to work out what she looks like there. Resolves with the still's input file name. */
+export async function bfsFirstFrame(video: string, herPic: string, pick: "largest" | "leftmost" | "rightmost" = "largest"): Promise<string> {
+  const { TEMPLATES, editArgs } = await import("./settings");
+  // frame 1 of the clip, as a picture
+  const frameGraph = { "1": { class_type: "VHS_LoadVideo", inputs: { video, force_rate: 0, custom_width: 0, custom_height: 0, frame_load_cap: 1, skip_first_frames: 0, select_every_nth: 1, format: "None" } },
+    "2": { class_type: "SaveImage", inputs: { images: ["1", 0], filename_prefix: "studio/_work/frame1" }, _meta: { title: "result" } } };
+  const fj = await useJobs.getState().run("animate", "Swap · taking the first frame", frameGraph as never, "frame:first", { quiet: true, front: true, noTray: true });
+  const fd = await waitForJob(fj.id);
+  const fo = fd.outputs.find((x) => x.kind === "image");
+  if (fd.status !== "done" || !fo) throw new Error(fd.error ?? "Couldn't take the video's first frame");
+  const frame = (await toInput(fo)).name;
+  const { boxes, W, H } = await findPeople(frame);
+  if (!boxes.length) throw new Error("SAM 3 found nobody in the first frame");
+  const b = pick === "leftmost" ? [...boxes].sort((p, q) => p.x - q.x)[0] : pick === "rightmost" ? [...boxes].sort((p, q) => q.x + q.width - (p.x + p.width))[0] : boxes[0];
+  const { mask } = await selectPerson(frame, b, W, H);
+  const e = (await import("./settings")).useSettings.getState().s.edit;
+  const g = buildEdit({ ...editArgs(e, "krea"), loras: [], seed: newSeed(), images: [frame, herPic], instruction: TEMPLATES("krea").head, negative: "", resolution: 1024,
+    swap: "head", mask: mask.name, maskSoftness: 12, prefix: "studio/animate/bfs_first" });
+  const j = await useJobs.getState().run("animate", "Swap · her head on frame 1 (BFS)", g, "edit:krea:2:raw", { front: true });
+  const d = await waitForJob(j.id);
+  const out = d.outputs.find((x) => x.kind === "image" && x.type === "output");
+  if (d.status !== "done" || !out) throw new Error(d.error ?? "The BFS still didn't finish");
+  return (await toInput(out)).name;
+}
