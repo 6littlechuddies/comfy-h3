@@ -3798,7 +3798,7 @@ def _save_packs(d: dict):
 
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
-            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 2200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {}), **({"temperature": 0.85, "max_tokens": 6000} if stage == "live" else {})), "template": TEMPLATES[stage],
+            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 4200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {}), **({"temperature": 0.85, "max_tokens": 6000} if stage == "live" else {})), "template": TEMPLATES[stage],
             # the cosplay planner thinks first (who she is, her world, her build) — DeepSeek's reasoning, kept short
             "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "on" if stage in ("cosplay", "live") else "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias")}
 
@@ -5774,6 +5774,40 @@ def _plain(v):
 # The site refuses a persona that sets how long her messages are ("keep it brief", "short replies", "match their
 # length"): length comes from her texting style on its side. Sentences like that are taken out before sending.
 _LENGTH_RULE = re.compile(r"\b(keep (it|things|messages|replies|your (replies|messages|answers))? ?(brief|short|concise)|brief(ly)?\b.{0,20}\b(repl|message|answer|text)|short (replies|messages|answers|texts)|(one|two|1|2|a few|1-2|one or two|one to (two|three)) (short )?(sentences?|lines?)( (max|at most|long))?|match (their|his|the other person's|the user's) (length|energy and length)|mirror (their|the user's) (length|message length)|(reply|replies|messages?|answers?|texts?) (are|stay|should be|kept) (short|brief|concise)|never (write|send) (long|walls of text)|no (long|walls of) (messages|paragraphs|text)|under \d+ words|concise)\b", re.I)
+_TEXTING = {"texts": {"one", "one_or_two", "two", "two_or_three"}, "length": {"short", "medium", "long"}, "emoji": {"none", "rare", "some", "often"},
+            "casing": {"lowercase", "lowercase_names", "sentence"}, "slang": {"none", "some", "lots"}, "swearing": {"none", "light", "heavy"},
+            "exclaim": {"rare", "bubbly"}, "questions": {"rarely", "sometimes", "most"}, "tone": {"sweet", "playful", "bratty"},
+            "forward": {"waits", "steers"}, "goodbye": {"lets_go", "resists_once"}, "useName": {"never", "sometimes"}}
+_VOICES = {"matilda", "jessica", "lily", "sarah", "laura", "bella", "alice"}
+
+
+def _site_block(site: dict, cosplay: bool) -> dict:
+    """Studio's profile fields → the factory API's "site" object (cells capped at the site's limits; only what's filled).
+    levels and speech_voice are settings an admin can also change on the site: the site keeps its own when they're left
+    out, so they go only when written (seven names / a known preset)."""
+    def cell(k: str, n: int | None = None) -> str:
+        v = str(site.get(k) or "").strip()
+        return v[:n].rsplit(" ", 1)[0] if n and len(v) > n else v
+    out: dict = {}
+    for key, src, n in (("tagline", "tagline", 120), ("occupation", "occupation", 40), ("status_line", "statusLine", 40), ("voice_line", "voiceLine", None),
+                        ("ethnicity", "ethnicity", 40), ("language", "language", 40), ("hobbies", "hobbies", 80)):
+        if cell(src): out[key] = cell(src, n)
+    if cosplay: out["category"] = "cosplay"
+    tx = {k: str(v) for k, v in (site.get("texting") or {}).items() if str(v) in _TEXTING.get(k, set())}
+    emo = [str(e).strip() for e in (site.get("signatureEmojis") or []) if str(e).strip()][:5]
+    if emo: tx["signatureEmoji"] = emo
+    if tx: out["texting"] = tx
+    sheet = {k: cell(src) for k, src in (("likes", "likes"), ("setting", "setting"), ("relationship", "relationship"), ("inBed", "inBed"), ("scenario", "scenario")) if cell(src)}
+    ppl = [{"name": str(p.get("name", ""))[:40], "relation": str(p.get("relation", ""))[:40], "note": str(p.get("note", ""))[:160]}
+           for p in (site.get("people") or []) if isinstance(p, dict) and str(p.get("name", "")).strip()][:3]
+    if ppl: sheet["people"] = ppl
+    if sheet: out["sheet"] = sheet
+    lv = [str(x).strip()[:24] for x in (site.get("levels") or []) if str(x).strip()]
+    if len(lv) == 7: out["levels"] = lv
+    if str(site.get("speechVoice") or "").lower() in _VOICES: out["speech_voice"] = str(site["speechVoice"]).lower()
+    return out
+
+
 def _no_length(text: str) -> str:
     if not text or not _LENGTH_RULE.search(text): return text or ""
     # line by line, so the deep persona's sections and "You:" lines keep their line breaks
@@ -5962,10 +5996,12 @@ async def _site_push(job: dict, d: dict):
                 "persona_prompt": _no_length((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or ""), "voice_notes": " ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x),
                 "provenance": {"ai_generated": True, "generator": gen, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
             }
-            # a cosplay character goes in the site's Cosplay section (since 23 Nov: listed there only, not in Girls or Anime);
-            # everyone else is left to the category her style gives her
-            if str(c.get("source") or "").startswith("Cosplay of "):
-                manifest["site"] = {"category": "cosplay"}
+            # the site's own fields (factory API "site" block): only what's written is sent. A cosplay character goes in the
+            # Cosplay section (since 23 Nov: listed there only); everyone else is left to the category her style gives her
+            manifest["site"] = _site_block(site, str(c.get("source") or "").startswith("Cosplay of "))
+            if not manifest["site"]: manifest.pop("site")
+            sig = [str(w).strip() for w in (site.get("signatureWords") or []) if str(w).strip()]
+            if sig: manifest["voice_notes"] = (manifest["voice_notes"] + f" Words she reaches for: {', '.join(sig)}.").strip()
             job["step"] = "character"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")

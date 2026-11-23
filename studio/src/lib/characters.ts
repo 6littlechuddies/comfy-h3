@@ -27,7 +27,7 @@ export type View = (typeof VIEWS)[number]["id"];
 export interface SiteItem extends FileRef { rating?: "sfw" | "suggestive" | "explicit"; caption?: string; duration?: number }
 export interface SiteSet { set_key: string; title: string; description: string; tier: "free" | "premium"; price?: number; rating: "sfw" | "suggestive" | "explicit"; items: SiteItem[] }
 export interface SiteInfo {
-  /** the name on your site, when it isn't their name here (a cosplay: a near-twin of the character's name) */
+  /** the name on your site, when it isn't their name here (a cosplay: her own name, never the character's) */
   name?: string;
   bio?: string; greeting?: string; backstory?: string; personality?: string; persona?: string; voice?: string; /** the short persona from the first pass, kept when the deep one is used (sent instead if the site refuses the long one) */ personaCore?: string; /** when the deep profile was written */ deepAt?: number; /** deep-profile notes from the first pass */ quirks?: string; opinions?: string; flaw?: string; summary?: string; tags?: string[];
   avatar?: View; cover?: View; send_reference?: boolean; sets?: SiteSet[];
@@ -39,6 +39,18 @@ export interface SiteInfo {
   loopFile?: FileRef;
   /** your few words on who they are ("shy art student who games all night") — the profile writer builds on them */
   direction?: string;
+  /** the rest of the site's own fields (factory API: site.* and site.sheet.*), written by the profile writer */
+  tagline?: string; occupation?: string; statusLine?: string; voiceLine?: string; hobbies?: string; ethnicity?: string; language?: string;
+  likes?: string; setting?: string; relationship?: string; scenario?: string; inBed?: string;
+  people?: { name: string; relation: string; note: string }[];
+  /** her seven relationship level names, lowest first */
+  levels?: string[];
+  /** words and emoji only she uses (the words go into how she sounds; the emoji are site.texting.signatureEmoji) */
+  signatureWords?: string[]; signatureEmojis?: string[];
+  /** site.texting: how she types (texts, length, emoji, casing, slang, swearing, exclaim, questions, tone, forward, goodbye, useName) */
+  texting?: Record<string, string>;
+  /** her voice notes' preset (matilda, jessica, lily, sarah, laura, bella, alice) */
+  speechVoice?: string;
   /** when it was last sent, and what the site said */
   sent?: { at: number; ok: boolean; note: string; hash?: string };
 }

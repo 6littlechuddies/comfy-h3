@@ -94,7 +94,16 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
 const json = (raw: string) => looseJson<any>(raw);
 
 // ------------------------------------------------------------------ 1. the whole profile
-const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary"] as const;
+const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary",
+  "tagline", "occupation", "statusLine", "voiceLine", "hobbies", "ethnicity", "language", "likes", "setting", "relationship", "scenario", "inBed"] as const;
+/** the site's limits on its short cells (longer is refused or cut) */
+const CAP: Partial<Record<(typeof FIELDS)[number], number>> = { tagline: 120, occupation: 40, statusLine: 40, hobbies: 80, ethnicity: 40, language: 40 };
+const TEXTING: Record<string, string[]> = { texts: ["one", "one_or_two", "two", "two_or_three"], length: ["short", "medium", "long"], emoji: ["none", "rare", "some", "often"],
+  casing: ["lowercase", "lowercase_names", "sentence"], slang: ["none", "some", "lots"], swearing: ["none", "light", "heavy"], exclaim: ["rare", "bubbly"],
+  questions: ["rarely", "sometimes", "most"], tone: ["sweet", "playful", "bratty"], forward: ["waits", "steers"], goodbye: ["lets_go", "resists_once"], useName: ["never", "sometimes"] };
+const VOICES = ["matilda", "jessica", "lily", "sarah", "laura", "bella", "alice"];
+/** clock times ("2am", "at midnight", "11:30") — the site tells her his real time on every message, so a fixed hour reads wrong */
+const CLOCK = /\b(\d{1,2}(:\d{2})?\s?(am|pm|a\.m\.|p\.m\.)|\d{1,2}:\d{2}|midnight|noon)\b/i;
 
 // The writer kept giving everyone the same hometown (Seattle / "the Pacific Northwest" / "the west coast"). Each profile now
 // gets a few places drawn at random from all over — places other characters already use left out — to pick from, plus a
@@ -228,6 +237,22 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   // the deep profile runs when this pass wrote her persona — or her persona is there but was never made deep (older ones)
   const wrotePersona = (!!next.persona && next.persona !== s0.persona) || (!!next.persona && s0.deepAt === undefined);
   if (next.persona !== s0.persona) { next.personaCore = next.persona; next.deepAt = undefined; }
+  for (const k of FIELDS) { const cap = CAP[k]; if (cap && next[k] && next[k]!.length > cap) next[k] = next[k]!.slice(0, cap).replace(/\s+\S*$/, ""); }
+  const strs = (v: unknown, max: number, len = 60) => Array.isArray(v) ? v.map(String).map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)).slice(0, max) : [];
+  const keep = <T,>(cur: T | undefined, got: T | undefined, has: (x: T) => boolean) => (o.all || !cur || !has(cur)) && got && has(got) ? got : cur;
+  next.people = keep(s0.people, Array.isArray(d.people) ? (d.people as Record<string, unknown>[]).filter((x) => x && typeof x === "object" && x.name)
+    .map((x) => ({ name: String(x.name).slice(0, 40), relation: String(x.relation ?? "").slice(0, 40), note: stripAges(String(x.note ?? "")).slice(0, 160) })).slice(0, 3) : undefined, (x) => x.length > 0);
+  const lv = strs(d.levels, 7, 24);
+  next.levels = keep(s0.levels, lv.length === 7 && !lv.some((x) => AGE.test(x)) ? lv : undefined, (x) => x.length === 7);
+  next.signatureWords = keep(s0.signatureWords, strs(d.signatureWords, 6, 30), (x) => x.length > 0);
+  next.signatureEmojis = keep(s0.signatureEmojis, strs(d.signatureEmojis, 3, 8), (x) => x.length > 0);
+  const tx = d.texting && typeof d.texting === "object" ? Object.fromEntries(Object.entries(d.texting as Record<string, unknown>).map(([k, v]) => [k, String(v).trim()]).filter(([k, v]) => TEXTING[k]?.includes(v))) : {};
+  next.texting = keep(s0.texting, Object.keys(tx).length ? tx : undefined, (x) => Object.keys(x).length > 0);
+  const sv = String(d.speechVoice ?? "").trim().toLowerCase();
+  next.speechVoice = keep(s0.speechVoice, VOICES.includes(sv) ? sv : undefined, (x) => !!x);
+  // a fixed hour in what she says reads wrong when he opens the chat at noon: written once more without it
+  const clockIn = (["greeting", "statusLine", "scenario"] as const).filter((k) => next[k] && CLOCK.test(next[k]!) && next[k] !== s0[k]);
+  if (clockIn.length && !o.again) o.onStep?.(`Note: ${clockIn.join(", ")} mention${clockIn.length > 1 ? "" : "s"} a clock time — the site reads it as his real time; edit it if it matters`);
   if (o.all || !s0.tags?.length) next.tags = Array.isArray(d.tags) ? (d.tags as unknown[]).map(String).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10) : s0.tags;
   useCharacters.getState().save({ ...cur, site: next });
   // the site won't take her without a bio and a persona: an answer that missed them (cut off, or not JSON) is written once more
@@ -257,8 +282,8 @@ const TAIL = "\n\nOutput only the section(s), starting with the heading. Plain t
 const REACT_A = ['Bare "hey" opener:', "Crude opener:", "Compliment on her looks:", "He returns after a week of silence:", "He goes quiet mid-chat:", "He is needy or wants constant reassurance:", "He brags:",
   "He sincerely asks if she is real or an AI: (she never claims to be human; she admits it plainly in her own voice, without a speech, and stays herself)"];
 const REACT_B = ["He had a bad day: (she reacts as a friend, not a counsellor; no advice lists)", "He has good news:", "Disagreement he won't drop: (she holds her view, or changes the subject on her terms; never sulks to punish)",
-  "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "Late at night:",
-  "He asks for pictures: (she teases or changes the subject in her own way; never promises, offers, prices or trades anything, and never mentions a site, page, profile or app)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
+  "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "He texts while she's busy with her day:",
+  "He asks for pictures or a voice note: (she likes sending him what she's up to and does, in her own way and mood; never prices or trades anything, and never mentions a site, page, profile or app)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
 const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion. Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
 /** HOW YOU SOUND as a description of her register — never written-out example messages: a worked example gets copied
  *  almost word for word in chats (the site refuses personas with "You: …" lines for that reason) */
@@ -296,6 +321,7 @@ export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, comple
 8. HOW YOU SOUND must DESCRIBE her register in bullets, never demonstrate it: delete any example message, quoted line, or "Him:" / "You:" line and describe what it showed instead. Vary repeated phrases.
 9. Anything that points at the medium (avatar, profile, pictures on a page, pixels, the app or site, being digital) - rewrite it as something from her real life. Only the real-or-AI line may say she isn't human.
 10. Random poetic lines - rewrite them as how a real woman texts.
+11. Stock lines every character ends up saying - "earn it", "not tonight", "maybe later", "you still owe me", "tell me something real", "what's on your mind", "talk to me", "hey yourself" - and any clock time ("2am", "midnight") - rewrite in her own words, as a situation not an hour.
 Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, claiming to be human when sincerely asked, pressure about money or loyalty) plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
 const NEVER_DEFAULT = "NEVER SAY\n- Anything about an avatar, profile, pictures on a page, the app or site, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
 
@@ -310,13 +336,15 @@ const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
 /** a phrase of three or more words used twice in the sample texts = a catchphrase she'd repeat forever */
 const repeats3 = (t: string) => { const w = t.toLowerCase().replace(/^(him|you):/gm, "").match(/[a-z']+/g) ?? []; const seen = new Set<string>(); for (let i = 0; i + 2 < w.length; i++) { const k = w.slice(i, i + 3).join(" "); if (seen.has(k) && !/^(i don't|you know|i'm not|it's a|i was|in the|of the)/.test(k)) return true; seen.add(k); } return false; };
 
-/** a cosplay character ("Cosplay of Makima (Chainsaw Man)"): her personality IS that character's — researched from the
- *  source (anime, manga, game, comics): temperament, how she talks, her habits and quirks, what she wants, how she treats
- *  people — as a real adult woman living a real-world version of that life. The name stays off the site (titles, bio). */
+/** a cosplay character ("Cosplay of Makima (Chainsaw Man)"): her PERSONALITY is that character's — temperament, how she
+ *  talks, quirks, what she wants, how she treats people — but she is a real woman who cosplays her: her life, places, job,
+ *  people and history are her own and real-world, with nothing from the source (no place, organisation, event, item, power or
+ *  person from it), and the character's and series' names never appear on the site. */
 export function canonNote(source?: string): string {
   const m = /^Cosplay of (.+)$/.exec(source ?? "");
   if (!m) return "";
-  return `HER PERSONALITY IS ${m[1].toUpperCase()}'S — think it through from the source material first (the anime, manga, game or comics: how she acts across the story, what she says and how, what she wants, fears and loves, how she treats people she likes and people she doesn't). Model her on that character exactly: the same temperament, the same way of talking (sentence length, formality, teasing or bluntness, verbal habits — paraphrased into her own texting, never quoting lines from the show), the same quirks, habits, tastes, values, pet peeves and contradictions, the same way she flirts or holds people at arm's length. She is an adult woman who IS like that, living a real-world version of that life (her job, home and hobbies echo the character's world). Never write the character's or series' name into her bio, title, greeting or messages, and she never claims to be that character.`;
+  return `HER PERSONALITY IS ${m[1].toUpperCase()}'S — think it through from the source material first (the anime, manga, game or comics: how she acts across the story, what she says and how, what she wants, fears and loves, how she treats people she likes and people she doesn't). Give her that character's temperament, way of talking (sentence length, formality, teasing or bluntness, verbal habits — paraphrased into her own texting, never quoting lines from the show), quirks, tastes, values, pet peeves and contradictions, and the same way she flirts or holds people at arm's length.
+HER LIFE IS HER OWN: she is a real adult woman who loves cosplaying that character — she is NOT the character and never claims to be. Her job, home, city, hobbies, friends and backstory are ordinary real-world ones that suit her temperament. Nothing from the source in them: no place, city, school, organisation, team, rank, event, item, power, creature or other character from that story, not even renamed. Never write the character's or the series' name, or a near-copy of either, in her bio, tagline, greeting, persona, level names or anything else.`;
 }
 
 /** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.

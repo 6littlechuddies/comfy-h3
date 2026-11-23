@@ -608,10 +608,11 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <div className="flex items-end gap-2">
           <TextIn className="flex-1" label={`Name on the site · blank = “${c.name}”`} value={site.name ?? ""} onChange={(v) => up({ name: v })} placeholder={c.name} />
           <Btn small onClick={async () => { try { const { siteAlias } = await import("../lib/newChar"); const a = await siteAlias([c.name]); if (a[0]) { up({ name: a[0] }); toast(`Site name: ${a[0]}`, "good"); } } catch (e) { toast((e as Error).message, "bad"); } }}
-            title="A name nearly the same as theirs — a few letters changed, still natural">Near-twin name</Btn>
+            title="A name of her own that suits her — never a variant of a character's name">New name</Btn>
         </div>
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
+        <TextIn label="Tagline · under her name: who she is to him, her situation, a challenge (120 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 120) })} />
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
@@ -619,6 +620,29 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <TextIn label="Texting habits · added to the voice notes" value={site.quirks ?? ""} onChange={(v) => up({ quirks: v })} placeholder="sends ? on its own, trailing lol, corrects typos with *" />
         <TextIn label="Opinions she'll argue about · fuel for pushback" value={site.opinions ?? ""} onChange={(v) => up({ opinions: v })} placeholder="pineapple on pizza is fine, voice notes over 1 min are a crime…" />
         <TextIn label="Her flaw" value={site.flaw ?? ""} onChange={(v) => up({ flaw: v })} placeholder="flaky with plans" />
+        <details className="card rounded-lg border border-line p-2.5 text-[12.5px]">
+          <summary className="cursor-pointer text-ink">Her details for the site · job, status, setting, how you know each other, in bed, people, levels, texting, voice</summary>
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2">
+              <TextIn label="Job (40 max)" value={site.occupation ?? ""} onChange={(v) => up({ occupation: v.slice(0, 40) })} />
+              <TextIn label="Status line · what she's doing now, no clock times" value={site.statusLine ?? ""} onChange={(v) => up({ statusLine: v.slice(0, 40) })} />
+              <TextIn label="Hobbies (80 max)" value={site.hobbies ?? ""} onChange={(v) => up({ hobbies: v.slice(0, 80) })} />
+              <TextIn label="Language" value={site.language ?? ""} onChange={(v) => up({ language: v.slice(0, 40) })} />
+            </div>
+            <TextIn label="A line in her voice · sets her tone, never sent" value={site.voiceLine ?? ""} onChange={(v) => up({ voiceLine: v })} />
+            <TextIn label="Signature words · only she uses them" value={(site.signatureWords ?? []).join(", ")} onChange={(v) => up({ signatureWords: v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 6) })} />
+            <TextIn label="Signature emoji" value={(site.signatureEmojis ?? []).join(" ")} onChange={(v) => up({ signatureEmojis: v.split(/\s+/).filter(Boolean).slice(0, 3) })} />
+            <TextArea label="How you know each other · her role in his life first" rows={2} value={site.relationship ?? ""} onChange={(v) => up({ relationship: v })} />
+            <TextArea label="Right now · where she is, what she's wearing, what's going on" rows={2} value={site.scenario ?? ""} onChange={(v) => up({ scenario: v })} />
+            <TextArea label="Her world · the city and places she goes" rows={2} value={site.setting ?? ""} onChange={(v) => up({ setting: v })} />
+            <TextArea label="Likes" rows={2} value={site.likes ?? ""} onChange={(v) => up({ likes: v })} />
+            <TextArea label="In bed" rows={2} value={site.inBed ?? ""} onChange={(v) => up({ inBed: v })} />
+            <TextArea label="People in her life · one per line: name — relation — note" rows={3} value={(site.people ?? []).map((x) => [x.name, x.relation, x.note].join(" — ")).join("\n")}
+              onChange={(v) => up({ people: v.split("\n").map((l) => l.split(/\s+[—-]\s+/)).filter((x) => x[0]?.trim()).slice(0, 3).map(([name, relation = "", ...note]) => ({ name: name.trim(), relation: relation.trim(), note: note.join(" — ").trim() })) })} />
+            <TextIn label="Her 7 level names, lowest first · blank = the site's ladder" value={(site.levels ?? []).join(", ")} onChange={(v) => { const l = v.split(",").map((x) => x.trim().slice(0, 24)).filter(Boolean); up({ levels: l.length ? l.slice(0, 7) : undefined }); }} />
+            <p className="text-dim">Texting style: {site.texting && Object.keys(site.texting).length ? Object.entries(site.texting).map(([k, v]) => `${k} ${v.replace(/_/g, " ")}`).join(" · ") : "the site's house style"} · Voice notes: {site.speechVoice ?? "the site's default"}. Level names and the voice are sent only once there are seven names / a voice; the site keeps an admin's own change when they're left out.</p>
+          </div>
+        </details>
         <TextIn label="Tags" value={(site.tags ?? []).join(", ")} onChange={(v) => up({ tags: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="fitness, playful, gym" />
         <TextArea label="Backstory" rows={3} value={site.backstory ?? ""} onChange={(v) => up({ backstory: v })} />
         <TextArea label={`Chat persona · private, the site's chat model reads it${site.deepAt ? ` · deep, ${site.persona?.split(/\s+/).length ?? 0} words` : ""}`} rows={site.deepAt ? 14 : 6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />

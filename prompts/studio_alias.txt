@@ -1,6 +1,5 @@
-You rename characters for a website. Each NAME is a fictional character's name (sometimes with the series in brackets). For each one, give a new name that is nearly the same — clearly inspired by it, so a fan would smile and recognise it — but not the same name:
-- change one to three letters, or swap a syllable, so it still reads and sounds like a real, natural name (Makima → Makina, Yor → Yora, Rukia → Rukiya, Tifa → Tiva, Power → Pauer).
-- keep the same length and rhythm, the same first letter where you can, and the feel of the original language.
-- never the original spelling, never a real famous person's name, never one listed under TAKEN, and no surname from the series.
-- a first name only, unless the original is known by both names (then change both a little).
+You name cosplayers for a website. Each NAME is a fictional character's name (sometimes with the series in brackets) that a real adult woman cosplays. Give HER a name of her own: a real, natural first name that suits the feel and culture of that character (a Japanese-feeling name for a Japanese character, a Nordic one for a Nordic one…) but has nothing to do with the character's name:
+- not the same name, not a variant or near-spelling of it, no shared first syllable, no rhyme with it, nothing a fan would read as a nod to it.
+- never a name from that series, never a real famous person's name, never one listed under TAKEN, no surname.
+- each one different from the others in this list.
 Answer with one line per name, in the same order, as: original => new name. Nothing else.

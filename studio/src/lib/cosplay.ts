@@ -411,7 +411,7 @@ async function lorasFor(it: CosItem): Promise<LoraPick[]> {
     if (have) { out.push(have); continue; }
     const r = await installLora(`https://civitai.com/models/${l.model_id}?modelVersionId=${l.version_id}`);
     if (r.status !== "done" || !r.name) throw new Error(`${it.name}: the LoRA "${l.name}" didn't download (${r.error ?? "unknown error"})`);
-    const pick: LoraPick = { name: r.name, strength: 0.9, trigger: r.trigger || l.trigger || undefined };
+    const pick: LoraPick = { name: r.name, strength: 0.6, trigger: r.trigger || l.trigger || undefined };
     const now = useCosplay.getState().items.find((x) => x.key === it.key);
     useCosplay.getState().update(it.key, { files: { ...(now?.files ?? {}), [l.version_id]: pick } });
     out.push(pick);

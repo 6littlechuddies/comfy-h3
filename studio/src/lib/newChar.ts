@@ -1,7 +1,7 @@
 // New characters from pictures — one, or many at once (pick results → New characters from these).
 // Each picture is read (the writer looks at it and writes down hair, eyes, body, outfit, details — the character's
 // description), its LoRAs come along, and how it was made (its prompt, the RECIPE) stays with the character.
-// Cosplay results know whose cosplay they are: the character is named after them, and gets a near-twin name for your
+// Cosplay results know whose cosplay they are: the character is named after them here, and gets a name of her own for your
 // site (Makima → Makina). Several pictures of the same cosplay become ONE character; the others go into a free
 // "Gallery" set for the site (unless you say not to).
 import type { FileRef, CivitGen } from "./api";
@@ -14,24 +14,28 @@ export function cosplayOf(idea?: unknown): { name: string; series: string } | nu
   return m ? { name: m[1].trim(), series: (m[2] ?? "").trim() } : null;
 }
 
-/** near-twin names for the site (the writer; a letter swap if it can't) */
+/** her own name for the site: a cosplayer's name that suits the character's feel but isn't a variant of it (the writer;
+ *  a name from a plain list if it can't, or if what it gave still reads like the character's name) */
 export async function siteAlias(names: string[]): Promise<string[]> {
   const { useCharacters } = await import("./characters");
   const taken = useCharacters.getState().list.flatMap((c) => [c.name, c.site?.name ?? ""]).filter(Boolean);
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  const own = (n: string, a: string) => !!a && !used.has(a.toLowerCase()) && !close(n, a);
   try {
     const { runWriter } = await import("./writer");
     const out = await runWriter("alias", { names: names.join("\n"), taken: taken.join(", ") || "(none)" }, { tab: "characters", label: "Site names" });
     const lines = out.split(/\n+/).map((l) => l.split("=>")[1]?.trim()).filter((x): x is string => !!x);
-    return names.map((n, i) => { const a = (lines[i] || "").replace(/^["“]|["”]$/g, "").trim(); return a && a.toLowerCase() !== n.toLowerCase() ? a : twin(n); });
-  } catch { return names.map(twin); }
+    return names.map((n, i) => { const a = (lines[i] || "").replace(/^["“]|["”]$/g, "").trim(); const r = own(n, a) ? a : spare(n, used); used.add(r.toLowerCase()); return r; });
+  } catch { return names.map((n) => { const r = spare(n, used); used.add(r.toLowerCase()); return r; }); }
 }
-/** a plain near-twin: the last vowel changed to its neighbour (Makima → Makimo, Power → Powar) */
-function twin(n: string): string {
-  const swap: Record<string, string> = { a: "e", e: "a", i: "y", o: "a", u: "o", y: "i" };
-  const i = Math.max(...[...n.toLowerCase()].map((ch, k) => (swap[ch] ? k : -1)));
-  if (i < 1) return `${n}e`;
-  const rep = swap[n[i].toLowerCase()];
-  return n.slice(0, i) + (n[i] === n[i].toUpperCase() ? rep.toUpperCase() : rep) + n.slice(i + 1);
+/** reads like the character's name: the same first three letters, or one inside the other */
+function close(n: string, a: string): boolean {
+  const x = n.toLowerCase().split(/[\s(]/)[0], y = a.toLowerCase().split(/\s/)[0];
+  return x.slice(0, 3) === y.slice(0, 3) || x.includes(y) || y.includes(x);
+}
+const SPARE = ["Noor", "Saskia", "Ines", "Mirela", "Odette", "Keiko", "Dalia", "Petra", "Ilse", "Marisa", "Yuna", "Lior", "Esme", "Talia", "Renata", "Signe", "Amara", "Jolie", "Vesna", "Carys"];
+function spare(n: string, used: Set<string>): string {
+  return SPARE.find((x) => !used.has(x.toLowerCase()) && !close(n, x)) ?? `${SPARE[n.length % SPARE.length]} ${String.fromCharCode(65 + (n.length % 26))}.`;
 }
 
 /** read a picture: the writer describes the person in it. Refuses anyone who reads as under 18 */

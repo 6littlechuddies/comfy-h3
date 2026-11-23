@@ -184,7 +184,7 @@ export function PictureMenuHost() {
         const m = await toMedia(t);
         const [{ useNewFromPicture }, gen, { madeBy }, { cosplayOf, siteAlias }] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null), import("../lib/made"), import("../lib/newChar")]);
         useCharacters.getState().select(null);
-        // a cosplay result: named after the character, with a near-twin name for your site
+        // a cosplay result: named after the character here, with a name of her own for your site
         const cos = cosplayOf(t.output ? madeBy(t.output)?.j.meta?.idea : undefined);
         useNewFromPicture.setState({ pic: m, gen, name: cos?.name, siteName: cos ? (await siteAlias([cos.name]).catch(() => []))[0] : undefined, source: cos ? `Cosplay of ${cos.name}${cos.series ? ` (${cos.series})` : ""}` : undefined });
         useSettings.getState().setTab("characters");
