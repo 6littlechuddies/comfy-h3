@@ -5962,6 +5962,10 @@ async def _site_push(job: dict, d: dict):
                 "persona_prompt": _no_length((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or ""), "voice_notes": " ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x),
                 "provenance": {"ai_generated": True, "generator": gen, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
             }
+            # a cosplay character goes in the site's Cosplay section (since 23 Nov: listed there only, not in Girls or Anime);
+            # everyone else is left to the category her style gives her
+            if str(c.get("source") or "").startswith("Cosplay of "):
+                manifest["site"] = {"category": "cosplay"}
             job["step"] = "character"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
