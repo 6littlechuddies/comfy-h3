@@ -33,6 +33,9 @@ export interface LiveAction {
   parts?: string[];
   /** its step on her ladder (1 = the free opener, higher = bolder), as on the tip menus — the order it's sent in */
   level?: number;
+  /** the relationship level (1–7) her Live Action button opens at; unset = the site's default for its rating */
+  unlock?: number;
+  /** kept for old packs: the site no longer locks Live Action by plan (20 Nov) */
   tier: "free" | "premium" | "ultimate"; tokens: number; on: boolean;
 }
 export interface LiveState {
@@ -283,7 +286,9 @@ export async function sendLive(cid: string): Promise<{ ok: boolean; note: string
     idle: l.idle.filter((x) => x.on).map((x) => ({ key: x.key, kind: x.kind, rating: "sfw" })),
     actions: l.actions.filter((a) => a.on).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).map((a) => ({
       key: a.key, title: a.title.slice(0, 40), segments: Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), return: retKey(a.key),
-      rating: a.rating, reaction_hint: a.hint.slice(0, 200), live_action: { min_tier: a.tier }, live_stream: { tokens: a.tokens },
+      rating: a.rating, reaction_hint: a.hint.slice(0, 200), // the site unlocks Live Action buttons by her relationship level with him (1–7, since 20 Nov); without one it uses
+      // 1 for sfw, 2 for suggestive and her intimate level for explicit — and never opens explicit earlier than that
+      live_action: a.unlock && a.unlock >= 1 && a.unlock <= 7 ? { min_level: a.unlock } : {}, live_stream: { tokens: a.tokens },
     })),
   };
   const r = await post<{ status: number; body: unknown; problems: string }>("/studio-api/live/send", { cid, pack });
