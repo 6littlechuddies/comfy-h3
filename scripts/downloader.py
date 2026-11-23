@@ -392,7 +392,7 @@ def resolve(fl: dict, quiet: bool = False) -> None:
             headers = {"Authorization": f"Bearer {tok}"} if tok and url.startswith(HF_BASE) else {}
             fl["hf"] = bool(headers)
             r = requests.head(url, headers=headers, allow_redirects=True, timeout=30)
-        fl["size"] = int(r.headers.get("Content-Length") or 0)
+        fl["size"] = size_of(r, url, headers)
         # Hugging Face: download from the file server it redirects to, not from huggingface.co/…/resolve/. aria2 asks the
         # original link again for every 16 MB piece on every connection, and each of those asks counts against the account's
         # "resolver" limit (5,000 per 5 minutes on a free account): 100+ GB burns through it in minutes, then everything
@@ -414,12 +414,29 @@ def resolve(fl: dict, quiet: bool = False) -> None:
             fl["hf"] = bool(tok and fl["get"].startswith(HF_BASE))
             try:
                 h = {"Authorization": f"Bearer {tok}"} if fl["hf"] else {}
-                fl["size"] = int(requests.head(fl["get"], headers=h, allow_redirects=True, timeout=30).headers.get("Content-Length") or 0)
+                fl["size"] = size_of(requests.head(fl["get"], headers=h, allow_redirects=True, timeout=30), fl["get"], h)
                 return
             except Exception:  # noqa: BLE001
                 pass
         fl.setdefault("get", url); fl["size"] = 0
         log("couldn't size", fl["name"], e)
+
+
+def size_of(r, url: str, headers: dict) -> int:
+    """a file's size in bytes, or 0. HEAD's Content-Length isn't always there: Hugging Face's Xet file servers can answer a
+    HEAD without one (every file then showed 0 GB, so the screen had no total, no % and no time left). Its first answer
+    (the redirect) carries the size as X-Linked-Size; failing that, a request for one byte names the size in Content-Range."""
+    try:
+        n = int(r.headers.get("Content-Length") or 0) if r is not None and r.status_code < 400 else 0
+        if n > 1024: return n
+        for h in ([*(r.history or []), r] if r is not None else []):
+            n = int(h.headers.get("X-Linked-Size") or 0)
+            if n: return n
+        g = requests.get(url, headers={**headers, "Range": "bytes=0-0"}, allow_redirects=True, timeout=30, stream=True)
+        m = re.search(r"/(\d+)\s*$", g.headers.get("Content-Range") or ""); g.close()
+        return int(m.group(1)) if m else 0
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def refused(url: str, code: int) -> str:
@@ -533,11 +550,11 @@ DEFAULT_LATER |= RETIRED
 # screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
 # "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
 PRESETS = {
-    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam"]},
+    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam", "bfs"]},
     "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "kdepth", "writer", "sam"]},
-    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam"]},
+    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam", "bfs"]},
     "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "kdepth", "writer", "sam"]},
-    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "video", "sam", "smooth"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "video", "sam", "smooth", "bfs"]},
     "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth"]},
     "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "kdepth", "writer", "video", "sam", "smooth"]},
     "all":        {"label": "Everything",                  "groups": []},
