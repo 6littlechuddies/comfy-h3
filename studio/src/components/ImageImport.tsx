@@ -28,6 +28,30 @@ export const pickFromCivitai = (p: PickPurpose) => { usePickPurpose.setState({ p
 export const openImageImport = (link = "", mode?: Mode, picking = false) => (picking || usePickPurpose.setState({ p: null }), useImport.setState({ open: true, link, file: null, mode: mode ?? (link ? (COLLECTION_LINK.test(link) ? "collections" : "link") : lastView?.mode === "link" ? "link" : "collections") }));
 /** "How was this made?" for one of your files */
 export const openFileMeta = (file: InputFile) => useImport.setState({ open: true, link: "", mode: "file", file });
+/** "Read it from the file" on a result: through the tray (a copy into inputs), else straight from the picture the viewer is
+ *  showing (fetched and uploaded as it is, so its embedded prompt comes with it). Resolves true once the reader is open;
+ *  a failure is said, never silent — it used to do nothing when the copy failed (e.g. a result restored from a drive). */
+export async function readFromFile(ref: { filename: string; subfolder: string; type: string } | null, url: string, label: string, video = false): Promise<boolean> {
+  try {
+    if (ref) {
+      const { useTray } = await import("../lib/tray");
+      const t = useTray.getState().addOutput({ ...ref, kind: video ? "video" : "image" } as never, label);
+      if (t) { openFileMeta(await useTray.getState().asMedia(t.id)); return true; }
+    }
+  } catch { /* fall through to the picture itself */ }
+  try {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(`the file isn't on this rental yet (${r.status})`);
+    const blob = await r.blob();
+    const name = (ref?.filename || url.split("filename=")[1]?.split("&")[0] || "result.png").replace(/[^\w.-]/g, "_");
+    const { uploadFile } = await import("../lib/api");
+    openFileMeta(await uploadFile(blob, decodeURIComponent(name)));
+    return true;
+  } catch (e) {
+    useJobs.getState().toast(`Couldn't read that file: ${(e as Error).message}`, "bad");
+    return false;
+  }
+}
 const close = () => useImport.setState({ open: false, recreate: false });
 const pref = (k: string, d: string) => { try { return localStorage.getItem(`h3.lorabrowser.${k}`) ?? d; } catch { return d; } };
 const setPref = (k: string, v: string) => { try { localStorage.setItem(`h3.lorabrowser.${k}`, v); } catch { /* */ } };

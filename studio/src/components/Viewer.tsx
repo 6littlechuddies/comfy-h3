@@ -157,11 +157,10 @@ export function Viewer() {
             <div className="mb-2 flex items-center"><span className="micro text-white/60">HOW IT WAS MADE</span><button onClick={() => setInfo(false)} aria-label="Close" className="ml-auto text-white/60 hover:text-white"><Icon name="x" size={14} /></button></div>
             <p className="text-white/70">Not one of this browser's results (an upload, or made on another rental) — whatever's inside the file can still be read.</p>
             <CharSource url={it.url} />
-            {ref && <button className="press btn-primary mt-3 h-9 w-full text-[12.5px] font-semibold text-accentink" onClick={async () => {
-              const { useTray } = await import("../lib/tray"); const { openFileMeta } = await import("./ImageImport");
-              const t = useTray.getState().addOutput({ ...ref, kind: it.kind === "video" ? "video" : "image" } as never, it.label ?? ref.filename);
-              if (t) { openFileMeta(await useTray.getState().asMedia(t.id)); close(); }
-            }}>Read it from the file</button>}
+            <button className="press btn-primary mt-3 h-9 w-full text-[12.5px] font-semibold text-accentink" onClick={async () => {
+              const { readFromFile } = await import("./ImageImport");
+              if (await readFromFile(ref ?? null, it.url, it.label ?? ref?.filename ?? "result", it.kind === "video")) close();
+            }}>Read it from the file</button>
           </aside>)}
       </div>
     </div>, document.body);

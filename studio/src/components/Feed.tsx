@@ -407,11 +407,9 @@ export function HowMade({ it, onClose, done }: { it: Item; onClose: () => void; 
     }).catch((e) => toast((e as Error).message, "bad"));
   };
   const full = async () => {
-    const item = useTray.getState().addOutput(it.o, it.j.label);
-    if (!item) return;
-    const m = await useTray.getState().asMedia(item.id);
-    const { openFileMeta } = await import("./ImageImport");
-    openFileMeta(m); done();
+    const { readFromFile } = await import("./ImageImport");
+    const { viewUrl } = await import("../lib/api");
+    if (await readFromFile(it.o, viewUrl(it.o), it.j.label, /\.(mp4|webm|mov)$/i.test(it.o.filename))) done();
   };
   const row = (k: string, v: ReactNode) => v === undefined || v === "" ? null : <div className="flex gap-2 py-0.5"><dt className="w-20 shrink-0 text-white/45">{k}</dt><dd className="min-w-0 flex-1 break-words font-mono text-[11.5px] text-white/90">{v}</dd></div>;
   return (
