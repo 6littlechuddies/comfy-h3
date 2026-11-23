@@ -417,10 +417,11 @@ function Characters({ connected }: { connected: boolean }) {
   const chosen = list.filter((c) => sel.has(c.id));
   const [loops, setLoops] = useState(false);
   const [naming, setNaming] = useState(false);
-  const writeAll = async () => {
+  const writeAll = async (all = false) => {
+    if (all && !window.confirm(`Rewrite every field of ${chosen.length} character${chosen.length > 1 ? "s" : ""}? What you wrote yourself in their profiles is replaced (their names, pictures and sets stay).`)) return;
     for (const c of chosen) {
-      mark(c.id, "Writing profile…");
-      try { await writeProfile(c, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
+      mark(c.id, all ? "Rewriting profile…" : "Writing profile…");
+      try { await writeProfile(c, all, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
     }
     toast(`Profiles written for ${chosen.length} — check them, then send`, "good");
@@ -502,7 +503,8 @@ function Characters({ connected }: { connected: boolean }) {
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <DeepToggle />
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
-        <Btn onClick={writeAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first"><Icon name="script" size={14} /> Write profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={() => writeAll(false)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Write only the empty fields; what's there stays"><Icon name="script" size={14} /> Fill profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={() => writeAll(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Rewrite every profile field with the current writer (greeting, persona, tagline, levels, texting…) — names, pictures and sets stay"><Icon name="script" size={14} /> Rewrite profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
