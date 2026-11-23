@@ -1,3 +1,4 @@
+import { minorWords } from "./adult";
 import { looseJson } from "./looseJson";
 // Your site, hands-off: (1) fill a character's whole profile from everything made of them — their look, the prompts of
 // their pictures, their set titles — keeping what you already wrote; (2) sort all their pictures into themed sets by
@@ -185,12 +186,16 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const pics = (await charPictures(c)).slice(-60);
   const prompts = (await pool(pics, 6, (p) => promptOf(p.file, false))).filter(Boolean);
   const seen = new Set<string>();
-  const uniq = prompts.map((p) => p.slice(0, 260)).filter((p) => { const k = p.slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
+  const uniq = prompts.map((p) => p.slice(0, 260)).filter((p) => { const k = p.slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; })
+    .filter((p) => !minorWords(p).length).slice(0, 40); // a picture prompt with a child word in it (a background detail) would stop the writer
   const site = c.site ?? {};
   const filled = o.all ? [] : FIELDS.filter((k) => (site[k] ?? "").trim());
   // the other characters' profiles: this one has to be clearly different (they kept coming out alike)
   const others = useCharacters.getState().list.filter((x) => x.id !== c.id && (x.site?.bio || x.site?.backstory))
-    .slice(0, 12).map((x) => `- ${x.name}: ${stripAges(`${x.site?.bio ?? ""} ${(x.site?.backstory ?? "").split(/(?<=\.)\s/)[0] ?? ""}`).slice(0, 220)}`);
+    .slice(0, 12).map((x) => `- ${x.name}: ${stripAges(`${x.site?.bio ?? ""} ${(x.site?.backstory ?? "").split(/(?<=\.)\s/)[0] ?? ""}`).slice(0, 220)}`)
+    // another character's text with a child word in it ("her cousin's kids") would stop THIS one's writer: left out of the list
+    // (the list is only there so she comes out different), and said, so it can be fixed in that profile
+    .filter((l) => { const hit = minorWords(l); if (hit.length) o.onStep?.(`Left ${l.slice(2).split(":")[0]} out of the comparison (“${hit.join("”, “")}” in her profile — worth rewording)`); return !hit.length; });
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
     stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
