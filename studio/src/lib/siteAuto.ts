@@ -198,7 +198,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     .filter((l) => { const hit = minorWords(l); if (hit.length) o.onStep?.(`Left ${l.slice(2).split(":")[0]} out of the comparison (“${hit.join("”, “")}” in her profile — worth rewording)`); return !hit.length; });
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
-    stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && !minorWords(c.frame.prompt).length && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     sparkNote(others.join(" ")),
