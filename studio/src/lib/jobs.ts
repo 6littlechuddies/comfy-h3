@@ -263,7 +263,8 @@ async function collect(id: string, mayLose = true) {
   for (const [nid, out] of Object.entries(h?.outputs ?? {})) {
     const title = job.titles[nid] ?? job.classes[nid] ?? nid;
     for (const f of [...(out.images ?? []), ...(out.gifs ?? []), ...(out.audio ?? [])]) {
-      if (f.type === "temp" && job.classes[nid] !== "SaveImage") continue; // skip temp previews
+      // skip temp previews — except a long video's part (H3 Relay keeps its review copy in temp), so each part shows as it's made
+      if (f.type === "temp" && job.classes[nid] !== "SaveImage" && !(job.classes[nid] === "H3RelayGenerateShot" && job.titles[nid] === `Part ${job.meta?.longPart}`)) continue;
       const kind = kindOf(f.filename);
       if (kind) outputs.push({ ...f, kind, title });
     }
