@@ -23,7 +23,13 @@ export type ImportResult = { added: number; updated: number; kept_newer?: number
 
 export const useImport = create<{ run: ImportRun | null; hidden: boolean; set: (p: Partial<ImportRun> | null) => void; hide: () => void }>((set) => ({
   run: null, hidden: false,
-  set: (p) => set((s) => ({ run: p === null ? null : ({ ...(s.run ?? {}), ...p } as ImportRun), hidden: p === null ? s.hidden : false })),
+  // an update to the same import (the restore watcher's 5-second check while results copy) keeps it closed if you closed it;
+  // a new import, or this one failing, opens it again
+  set: (p) => set((s) => {
+    if (p === null) return { run: null, hidden: s.hidden };
+    const same = !!s.run && (p.id === undefined || p.id === s.run.id) && (p.source === undefined || p.source === s.run.source);
+    return { run: { ...(s.run ?? {}), ...p } as ImportRun, hidden: same && p.state !== "error" ? s.hidden : false };
+  }),
   hide: () => set({ hidden: true }),
 }));
 
