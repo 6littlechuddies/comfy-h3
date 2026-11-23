@@ -55,7 +55,7 @@ export interface CreateS {
   faceStrength?: number;
 }
 export interface EditS {
-  mode: "pose" | "scene" | "look" | "free";
+  mode: "pose" | "scene" | "look" | "head" | "body" | "free";
   /** which model edits (Krea 2, or Anima / Illustrious for anime); each keeps its own settings and LoRAs. adv/loras/enhance: unused (were Qwen's) */
   engine: EditEngine;
   instruction: string; negative: string; enhance: boolean; resolution: number; count: number; adv: Adv;
@@ -73,6 +73,8 @@ export interface EditS {
   faceStrength?: number;
   /** Edit as a chat: one message at a time on the latest picture (components/EditChat) */
   chat?: boolean;
+  /** body swap: the new person follows picture 1's depth, so the pose and body position hold (needs "Depth poses") */
+  swapPose?: boolean;
 }
 /** Edit model ↔ Create model */
 export const EDIT_TO_CREATE: Record<EditEngine, CreateModel> = { krea: "krea2", anima: "anima", noob: "noob" };
@@ -202,9 +204,12 @@ export function TEMPLATES(engine: EditEngine = "krea") {
     scene: "Place the person from the second picture into this scene, standing naturally. Keep their face, hair and outfit exactly the same, and match the scene's lighting and colours.",
     // Copy appearance: this picture stays (pose, expression, framing, place, light); the person takes on picture 2's look
     look: "Make the person in this picture look exactly like the person in the second picture: the same face, hair, skin tone, body, outfit and accessories. Keep this picture's pose, expression, camera angle, framing, background and lighting exactly as they are.",
+    // BFS (Alissonerdx) for Krea 2: its own trigger sentences, word for word — the LoRA was trained on them
+    head: "head_swap: replace the head with the reference head.",
+    body: "body_swap: replace the person with the reference person.",
     free: "",
   };
-  return { pose: "", scene: "", look: "", free: "" };
+  return { pose: "", scene: "", look: "", head: "", body: "", free: "" };
 }
 const ENGINE_KEYS: Record<EditEngine, { adv: "advKrea" | "advAnima" | "advNoob"; loras: "lorasKrea" | "lorasAnima" | "lorasNoob"; family: "krea2" | "anima" | "sdxl" }> = {
   krea: { adv: "advKrea", loras: "lorasKrea", family: "krea2" },

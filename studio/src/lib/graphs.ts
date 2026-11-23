@@ -300,7 +300,10 @@ export interface EditOpts extends SamplerOpts {
   /** Krea 2: start from a blank white canvas of this size as picture 1 (the shape of the result), with `images` as the subject(s) —
    *  e.g. a landscape turnaround sheet from one portrait picture */
   blank?: { width: number; height: number };
-  /** blank canvas only: the new picture follows this pose's depth (Krea 2 depth control on the edit model — experimental) */
+  /** BFS swap (Alissonerdx, group "bfs"): picture 1 = the base, picture 2 = the head ("head") or the whole person ("body").
+   *  The BFS LoRA takes the place of the Identity/General Edit LoRA; the body swap also loads the head LoRA for the face */
+  swap?: "head" | "body";
+  /** blank canvas, or a body swap: the new picture follows this pose's depth (Krea 2 depth control on the edit model — experimental) */
   control?: { image: string; strength: number; estimate?: boolean };
   /** Krea 2: redraw only this rectangle of picture 1 (cropped, worked on at full size, pasted back with soft edges) — e.g. the face */
   region?: { x: number; y: number; width: number; height: number; feather?: number };
@@ -359,7 +362,10 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   const v2 = kreaEditV2();
   const identity = !!p.blank || p.images.length > 1;
   const editLora = !v2 ? M.kreaEditLora : identity ? M.kreaIdentityV2 : M.kreaGeneralV2;
-  let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: editLora, strength_model: 1 }));
+  // BFS swap: its own LoRA instead of the edit LoRA (as in its creator's workflow); body swap = body 0.5 + head 0.5, his starting point
+  const swapLoras: [string, number][] = p.swap === "head" ? [[M.bfsHead, 1]] : p.swap === "body" ? [[M.bfsBody, 0.5], [M.bfsHead, 0.5]] : [[editLora, 1]];
+  let model: Link = o(unet);
+  for (const [name, w] of swapLoras) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: name, strength_model: w }));
   for (const l of activeLoras(p.loras ?? [])) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
   model = fastAttn(g, model);
   const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
@@ -387,9 +393,11 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
   const two = rest.length > 0;
   const subject = two ? g.add("ImageScaleToTotalPixels", { image: o(rest[0]), upscale_method: "lanczos", megapixels: p.blank ? Math.min(mp, 1.2) : mp, resolution_steps: 16 }) : null;
   const subjectLat = subject ? g.add("VAEEncode", { pixels: o(subject), vae: o(vae) }) : null;
-  if (p.control && p.blank) {
+  if (p.control && (p.blank || p.swap === "body")) {
     // a character from her sheet in a PoseWear pose: the depth steers the body position, the sheet keeps the likeness
     let ci: Link = o(g.add("LoadImage", { image: p.control.image }));
+    // a swap on one person's square: the depth of that same square, so it lines up with what's redrawn
+    if (p.region && !p.blank) ci = o(g.add("ImageCrop", { image: ci, width: p.region.width, height: p.region.height, x: p.region.x, y: p.region.y }));
     if (p.control.estimate) { const da = g.add("DownloadAndLoadDepthAnythingV2Model", { model: M.depthAnything }); ci = o(g.add("DepthAnything_V2", { da_model: o(da), images: ci })); }
     model = o(g.add("Krea2ControlLoRALoader", { model, lora_name: M.kreaDepth, strength: p.control.strength }));
     const enc = g.add("Krea2ControlImageEncode", { control_image: ci, vae: o(vae), resize: "match_latent_size", upscale_method: "lanczos", crop: "center", channel_mode: "grayscale", normalize: "per_image_minmax", invert: false, batch_mode: "independent_images", latent: o(target) });
@@ -403,10 +411,12 @@ function buildKreaEdit(p: EditOpts): ApiGraph {
     // V2 nodes: putting a person into a scene works best with the scene pinned to the layout and the person placed beside it
     // (their look still flows, but their own pose and framing don't get copied over the scene's)
     // a blank canvas (training sets, sheets): the person beside it too, so new angles aren't pinned to their picture's own pose
-    ...(v2 && subject && !p.region ? { ref_position: "beside (right of target)", ref_position_a: "aligned (trained)" } : {}),
+    // BFS swap: its workflow's patch settings — no extra hold (1, 1, fit), the reference where the LoRA was trained to see it
+    ...(p.swap ? { ref_boost: 1, ref_boost_a: 1 } : {}),
+    ...(v2 && subject && !p.region && !p.swap ? { ref_position: "beside (right of target)", ref_position_a: "aligned (trained)" } : {}),
   });
   const imgs = { image: o(scene), ...(subject ? { image_b: o(subject) } : {}) };
-  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: withTriggers(p.instruction, p.loras ?? []), grounding_px: 768, system_prompt: "", ...imgs });
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: withTriggers(p.instruction, p.loras ?? []), grounding_px: p.swap ? 512 : 768, system_prompt: "", ...imgs });
   const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: p.cfg > 1 ? p.negative : "", grounding_px: 768, system_prompt: "", ...imgs });
   // a light redraw (repaint 0.32–0.42, face pass 0.45, light blend 0.2) needs far fewer steps than a full edit: ComfyUI runs every
   // step asked for even at low denoise, so 20 steps at 0.42 cost as much as a whole edit (~2 min each on a 16 GB card)
@@ -559,7 +569,9 @@ export function buildUpscale(p: { image: string; engine: "krea" | "anima" | "noo
 
 /** "select by words": SAM 3's outline of what the words name, grown a little, saved as a white-on-black mask the size of the
  *  picture (like a painted one) — plus the boxes it found, as text */
-export function buildFindMask(image: string, what: string, grow = 16, threshold = 0.35, person = false): ApiGraph {
+export function buildFindMask(image: string, what: string, grow = 16, threshold = 0.35, person = false,
+  /** only inside this box (one of several people SAM 3 found): W/H = the picture's size */
+  within?: { x: number; y: number; width: number; height: number; W: number; H: number }): ApiGraph {
   const g = new G();
   const ck = g.add("CheckpointLoaderSimple", { ckpt_name: M.sam3 });
   const img = g.add("LoadImage", { image });
@@ -575,6 +587,15 @@ export function buildFindMask(image: string, what: string, grow = 16, threshold 
     });
     const near = g.add("GrowMask", { mask: o(det, 0), expand: 40, tapered_corners: true });
     sel = o(g.add("MaskComposite", { destination: o(matte, 1), source: o(near), x: 0, y: 0, operation: "multiply" }));
+  }
+  if (within) {
+    // one person of several: everything outside their box (padded a little, for hair and hands) is cut away
+    const pad = Math.round(Math.max(within.width, within.height) * 0.06);
+    const x = Math.max(0, Math.round(within.x - pad)), y = Math.max(0, Math.round(within.y - pad));
+    const w = Math.min(within.W - x, Math.round(within.width + pad * 2)), h = Math.min(within.H - y, Math.round(within.height + pad * 2));
+    const canvas = g.add("SolidMask", { value: 0, width: within.W, height: within.H });
+    const rect = g.add("MaskComposite", { destination: o(canvas), source: o(g.add("SolidMask", { value: 1, width: w, height: h })), x, y, operation: "add" });
+    sel = o(g.add("MaskComposite", { destination: sel, source: o(rect), x: 0, y: 0, operation: "multiply" }));
   }
   const grown = g.add("GrowMask", { mask: sel, expand: Math.max(0, Math.round(grow)), tapered_corners: true });
   // helper files live in studio/_work: kept out of the tray and the catalog

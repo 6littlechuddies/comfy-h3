@@ -158,6 +158,15 @@ LLM/GGUF/Qwen/Qwen3-VL-8B-Instruct-GGUF  https://huggingface.co/Qwen/Qwen3-VL-8B
 # Trigger "r34l1sm" at the start of the prompt (the Studio adds it), strength 0.8. Animate → Realistic skin switches it off. ---
 loras/minimax     https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA/resolve/main/h3-realism-people-t2v-i2v-r2v.safetensors
 
+# @group bfs Head & body swap (BFS, Krea 2)
+# --- BFS "Best Face Swap" for Krea 2 by Alissonerdx (huggingface.co/Alissonerdx/BFS-Best-Face-Swap; MIT; 914 MB each). Runs on the
+# same Krea 2 edit nodes as the Edit tab, with the BFS LoRA in place of the Identity/General Edit LoRA. Picture 1 = the base
+# picture (pose, scene, light kept), Picture 2 = the head / the person to put in. Head swap: trigger "head_swap:", strength 1.
+# Body swap (experimental, its creator's word): "body_swap:", start at 0.5 with the head LoRA at 0.5 for the face. Edit → What
+# you're doing → Swap the head / Swap the whole person. ---
+loras/BFS         https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/resolve/main/bfs_head_swap_v1.1_krea2.safetensors
+loras/BFS         https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/resolve/main/bfs_body_swap_v1_krea2.safetensors
+
 # @group csheet Character sheet LoRA (Krea 2)
 # --- QuadView for Krea 2 (huggingface.co/Alissonerdx/CharacterSheet; licence: its CivitAI listing): one picture of a character
 # becomes one sheet — a face close-up and front, side and back full body — trained for it, so the face holds across the panels

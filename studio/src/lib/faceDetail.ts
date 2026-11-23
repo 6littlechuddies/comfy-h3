@@ -131,3 +131,29 @@ export function wholePerson(words: string): boolean {
   return /\b(person|people|woman|man|girl|guy|boy|lady|character|figure)\b/.test(w)
     && !/\b(hand|hands|arm|arms|leg|legs|foot|feet|face|head|hair|eye|eyes|mouth|lips|tongue|teeth|neck|chest|breast|breasts|waist|hip|hips|back|shoulder|finger|fingers|shirt|top|dress|skirt|pants|jeans|shorts|jacket|coat|sweater|shoes|boots|hat|clothes|clothing|outfit|bra|bikini|underwear|necklace|bag)\b/.test(w);
 }
+
+/** Edit → "Pick a person": every person SAM 3 finds in the picture, biggest (usually nearest) first */
+export async function findPeople(name: string): Promise<{ boxes: Box[]; W: number; H: number }> {
+  const [{ w, h }, job] = await Promise.all([
+    size(inputUrl(name)),
+    useJobs.getState().run("edit", "Finding the people (SAM 3)", buildFind(name, "person", 0.35), "face:find", { kind: "sam:people", quiet: true, front: true, noTray: true }),
+  ]);
+  const done = await waitForJob(job.id);
+  if (done.status !== "done") throw new Error(done.error ?? "Couldn't look for people");
+  const boxes = parseBoxes(done.texts.boxes ?? "").filter((b) => b.score >= 0.3).sort((a, b) => b.width * b.height - a.width * a.height);
+  return { boxes, W: w, H: h };
+}
+
+/** one of those people as a mask (their exact outline, nobody else's) with the box around them */
+export async function selectPerson(name: string, b: Box, W: number, H: number) {
+  const box = { x: b.x, y: b.y, width: b.width, height: b.height, W, H };
+  const job = await useJobs.getState().run("edit", "Outlining the person (SAM 3)", buildFindMask(name, "person", 16, 0.35, true, box), "face:find",
+    { kind: "sam:select", quiet: true, front: true, noTray: true });
+  const done = await waitForJob(job.id);
+  const out = done.outputs.find((x) => x.kind === "image");
+  if (done.status !== "done" || !out) throw new Error(done.error ?? "Couldn't outline that person");
+  const f = await toInput(out);
+  const pad = 16;
+  const x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad), x1 = Math.min(W, b.x + b.width + pad), y1 = Math.min(H, b.y + b.height + pad);
+  return { mask: { ...f, url: inputUrl(f.name) }, box: { x: Math.round(x0), y: Math.round(y0), width: Math.round(x1 - x0), height: Math.round(y1 - y0), W, H } };
+}

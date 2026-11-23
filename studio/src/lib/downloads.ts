@@ -2,7 +2,7 @@
 // before the Studio opens; the rest keep downloading in the background and each tab unlocks when its group arrives.
 import { create } from "zustand";
 import { forgetObjectInfo } from "./api";
-import { H3_MODEL_KEY, REALISM_KEY, setRealism, setQuadSheet, RTX_KEY, SMOOTH_KEY, setInterp, setRtx, setH3Eros, KREA_BOOST_KEY, KREA_BOOST_NODE, KREA_EDIT_KEY, KREA_TE_KEY, setKreaBoost, setKreaEditV2, setKreaTE } from "./models";
+import { H3_MODEL_KEY, REALISM_KEY, setRealism, setQuadSheet, setBfs, RTX_KEY, SMOOTH_KEY, setInterp, setRtx, setH3Eros, KREA_BOOST_KEY, KREA_BOOST_NODE, KREA_EDIT_KEY, KREA_TE_KEY, setKreaBoost, setKreaEditV2, setKreaTE } from "./models";
 
 /** Krea 2 uses the uncensored text encoder once its group is downloaded, unless you chose the stock one */
 export function syncKreaTE(groups: { id: string; state: string }[] = useDownloads.getState().groups) {
@@ -15,6 +15,7 @@ export function syncKreaTE(groups: { id: string; state: string }[] = useDownload
   let noReal = false; try { noReal = localStorage.getItem(REALISM_KEY) === "off"; } catch { /* private mode */ }
   setRealism(!noReal && groups.some((g) => g.id === "hreal" && g.state === "done"));
   setQuadSheet(groups.some((g) => g.id === "csheet" && g.state === "done"));
+  setBfs(groups.some((g) => g.id === "bfs" && g.state === "done"));
   let noSmooth = false; try { noSmooth = localStorage.getItem(SMOOTH_KEY) === "off"; } catch { /* private mode */ }
   const rife = groups.some((g) => g.id === "smooth" && g.state === "done");
   if (noSmooth || !rife) setInterp(false);

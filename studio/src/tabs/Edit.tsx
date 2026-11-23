@@ -19,6 +19,7 @@ import { FaceFix } from "../components/FaceFix";
 import { KreaEditModel } from "../components/KreaEditModel";
 import { LikenessCard } from "../components/Likeness";
 import { SelectWords } from "../components/SelectWords";
+import { PickPerson } from "../components/PickPerson";
 import { Advanced, LoraList, Btn, Check, EtaText, H1, Icon, Label, Panel, PresetBar, Seg, Slider, Slot, TextArea, TextIn, cx } from "../components/ui";
 import { Chip, GoButton, PromptBar, Workspace } from "../components/Workspace";
 import { Feed } from "../components/Feed";
@@ -55,7 +56,7 @@ function ClassicEdit() {
   const jobs = useJobs(useShallow((s) => s.jobs.filter((j) => j.tab === "edit")));
   const [busy, setBusy] = useState(false);
   const [compare, setCompare] = useState<{ before: string; after: string } | null>(null);
-  const [mask, setMask] = useState<(InputFile & { url: string; from?: "words"; box?: { x: number; y: number; width: number; height: number; W: number; H: number } }) | null>(null);
+  const [mask, setMask] = useState<(InputFile & { url: string; from?: "words" | "person"; box?: { x: number; y: number; width: number; height: number; W: number; H: number } }) | null>(null);
   const [painting, setPainting] = useState(false);
   // the place: a background picture (room, street, beach…) the result should be set in — like Create's third box
   const [place, setPlace] = useState<Media | null>(() => loadEditDesk(useCharacters.getState().sel ?? null)?.place ?? null);
@@ -154,9 +155,15 @@ function ClassicEdit() {
   const dl = useGroup(need);
   const filled = (pics.filter(Boolean) as Media[]).slice(0, info.maxImages);
   // a painted area is a fix: only picture 1, built on what's there (picture 2 only when your words ask for it)
-  const brushFix = !!mask && engine === "krea";
+  // BFS head / body swap (Krea 2): picture 1 = the base, picture 2 = who goes in; a picked person or painted area = only them
+  const swapMode = engine === "krea" && (e.mode === "head" || e.mode === "body") ? e.mode : null;
+  const bfs = useGroup("bfs");
+  const depthDl = useGroup("kdepth");
+  const brushFix = !!mask && engine === "krea" && !swapMode;
   const usesPic2 = /\b(picture|image|pic)\s*2\b|\bsecond (picture|image)\b|@/i.test(e.instruction);
-  const why = place && engine === "krea" && !filled.length ? "Add Picture 1 — the person or picture that goes into the place" : !dl.ready ? dl.why : (!filled.length ? "Add at least one picture (Picture 1)" : !e.instruction.trim() && !brushFix ? (anime ? "Describe how the result should look" : "Write what you want changed") : busy ? "Sending…" : undefined);
+  const why = place && engine === "krea" && !filled.length ? "Add Picture 1 — the person or picture that goes into the place" : !dl.ready ? dl.why
+    : swapMode && !bfs.ready ? bfs.why
+    : swapMode && filled.length < 2 ? `Add Picture 2 — the ${swapMode === "head" ? "head" : "person"} to put in` : (!filled.length ? "Add at least one picture (Picture 1)" : !e.instruction.trim() && !brushFix ? (anime ? "Describe how the result should look" : "Write what you want changed") : busy ? "Sending…" : undefined);
   const etaKey = `edit:${engine}:${filled.length}:raw`;
   // an instruction saved from the old Qwen editor ("image 1 / image 2" wording) becomes the Krea 2 version
   useEffect(() => {
@@ -187,7 +194,7 @@ function ClassicEdit() {
         const seed = i === 0 ? seedFor(a, (p) => set({ [keys.adv]: { ...a, ...p } } as Partial<typeof e>)) : newSeed();
         const ck = editCheckpoint(e, useSettings.getState().s.create, engine).own;
         // their LoRAs too (realistic characters, Krea 2), when picture 2 is them — balanced so the stack doesn't smear
-        const ident = selChar && selChar.identity?.auto !== false && selChar.style === "realistic" && engine === "krea" && e.mode !== "free" && filled[1]?.name === autoPic2.current;
+        const ident = !swapMode && selChar && selChar.identity?.auto !== false && selChar.style === "realistic" && engine === "krea" && e.mode !== "free" && filled[1]?.name === autoPic2.current;
         const loras = ident ? balanceLoras(mergeLoras(editArgs(e).loras, selChar!.loras ?? []), await loraLibrary().catch(() => []), BUDGET.kreaEdit).loras : editArgs(e).loras;
         const words = e.instruction.trim();
         // "remove the man", "erase the cup", "get rid of the logo": the painted area is blanked out first (see fillMask) and fully
@@ -200,6 +207,7 @@ function ClassicEdit() {
           : e.instruction;
         const images = brushFix && !usesPic2 ? filled.slice(0, 1) : filled;
         const graph = buildEdit({ ...editArgs(e), loras, ...(ck ? (engine === "noob" ? { ckpt: ck } : { unet: ck }) : {}), seed, images: images.map((m) => m.name), instruction, negative: e.negative, resolution: e.resolution, prefix: "studio/edit/edit",
+          ...(swapMode ? { swap: swapMode, ...(swapMode === "body" && e.swapPose && depthDl.ready ? { control: { image: filled[0].name, strength: 0.6, estimate: true } } : {}) } : {}),
           ...(mask && pics[0] ? { mask: mask.name, maskSoftness: soft, ...(engine === "krea" ? regionFor(mask.box) : {}), ...(removing ? { fillMask: true, refBoost: 1 } : brushFix ? { denoise: e.brushStrength ?? 0.7 } : {}) } : {}) });
         await run("edit", `Edit${e.count > 1 ? ` ${i + 1}/${e.count}` : ""}: ${e.instruction.slice(0, 40)}${e.instruction.length > 40 ? "…" : ""}`, graph, etaKey,
           { before: filled[0].url, ...(e.faceFix ? { faceFix: { character: null, strength: e.faceStrength ?? 0.45 } } : {}), snapshot: { section: "edit", settings: { ...e, [keys.adv]: { ...a, seed, lockSeed: true } }, media: { pics, mask } } });
@@ -211,7 +219,9 @@ function ClassicEdit() {
 
   const names = engine === "krea"
     ? e.mode === "pose" ? ["1 · the pose", "2 · your character"] : e.mode === "scene" ? ["1 · the scene", "2 · your character"]
-      : e.mode === "look" ? ["1 · the picture to change", "2 · the look to copy"] : ["1 · your picture", "2 · reference"]
+      : e.mode === "look" ? ["1 · the picture to change", "2 · the look to copy"]
+      : e.mode === "head" ? ["1 · the picture (pose, body, scene)", "2 · the head to put on"] : e.mode === "body" ? ["1 · the picture (pose, scene)", "2 · the person to put in"]
+      : ["1 · your picture", "2 · reference"]
     : anime ? ["1 · the picture to redraw"]
     : ["1 · your picture"];
   const slots = pics.slice(0, info.maxImages);
@@ -222,7 +232,8 @@ function ClassicEdit() {
       <button onClick={() => set({ chat: true })} title="Change the picture one message at a time — name pictures with @, fix one part, swap the background, put your character in"
         className="press inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent/60 bg-accent/10 px-3 text-[12.5px] font-medium text-ink hover:bg-accent/20"><Icon name="chat" size={13} />Edit chat</button>
       {!anime && <Chip title="What you're doing" value={e.mode} onChange={(v) => set({ mode: v, instruction: v === "free" ? e.instruction : TEMPLATES(engine)[v] })}
-        options={[{ value: "look", label: "Copy appearance" }, { value: "pose", label: "Copy the pose" }, { value: "scene", label: "Put in the scene" }, { value: "free", label: "Free edit" }]} />}
+        options={[{ value: "look", label: "Copy appearance" }, { value: "pose", label: "Copy the pose" }, { value: "scene", label: "Put in the scene" },
+          { value: "head", label: "Swap the head (BFS)" }, { value: "body", label: "Swap the whole person (BFS)" }, { value: "free", label: "Free edit" }]} />}
       <Chip title="How many" value={e.count} onChange={(v) => set({ count: v })} options={[1, 2, 3, 4].map((n) => ({ value: n, label: `×${n}` }))} />
       <Chip title="Size" value={e.resolution >= 1400 ? 1448 : 1024} onChange={(v) => set({ resolution: v })} options={[{ value: 1448, label: "Full · ~2 MP (like Create)" }, { value: 1024, label: "Draft · ~1 MP, faster" }]} />
       <FourKChip />
@@ -247,6 +258,7 @@ function ClassicEdit() {
         {mask && <button onClick={() => setMask(null)} aria-label="Remove the painted area" title="Remove the painted area — edit the whole picture again" className="press border-l border-bad/50 px-2 hover:bg-bad/20">×</button>}
       </span>}
       {pics[0] && <SelectWords pic={pics[0]} onMask={(m, note) => { setMask({ ...m, from: "words" }); if (!e.instruction.trim() || Object.values(TEMPLATES(engine)).includes(e.instruction)) set({ mode: "free", instruction: "" }); toast(`${note}. Now say what it should become, and press Make edit — only that part changes.`, "good"); }} />}
+      {pics[0] && engine === "krea" && <PickPerson pic={pics[0]} onMask={(m, note) => { setMask({ ...m, from: "person" }); toast(`${note}. ${swapMode ? "Press Make edit." : "Pick Swap the head or Swap the whole person, or say what should change about them."}`, "good"); }} />}
     </>
   );
   // @ in the box: the picture or character goes into Picture 1 if it's empty, else Picture 2, and the words say which
@@ -294,6 +306,15 @@ function ClassicEdit() {
         )}
         <LikenessCard pic1={pics[0] ?? null} pic2={pics[1] ?? null} anime={anime} onPrompt={(t, note) => { set({ instruction: t }); toast(note, "info"); }}
           onPic2={(m) => setPics((p) => { const n = [...p]; while (n.length < 2) n.push(null); n[1] = m; return n; })} />
+        {swapMode && <div className="card flex flex-col gap-2 rounded-xl border border-line p-2.5 text-[12px] leading-relaxed text-dim">
+          <p>{swapMode === "head"
+            ? "BFS head swap: Picture 2's head (face, hair, skin) goes onto the person in Picture 1. Their body, pose, outfit, the scene and the light stay."
+            : "BFS body swap (experimental): the person in Picture 1 is replaced by the person in Picture 2, in Picture 1's scene and light. The pose can drift; keeping the depth holds it."}
+            {" "}With more than one person in Picture 1, press <b className="text-ink">Pick a person</b> first, or the swap may land on the wrong one.</p>
+          {!bfs.ready && <p className="text-bad">{bfs.why}</p>}
+          {swapMode === "body" && <Check checked={!!e.swapPose && depthDl.ready} onChange={(v) => set({ swapPose: v })} title="Keep the exact pose (depth map)"
+            sub={depthDl.ready ? "Works out Picture 1's depth and makes the new person follow it" : depthDl.why} />}
+        </div>}
         {engine === "krea" && <p className="-mt-1 text-[12px] leading-relaxed text-dim">Krea 2 edits Picture 1 from your words. With a Picture 2 it puts that person in (keeping their face, hair and outfit). Two faces in one picture can blend a little — keep it to one person when you can.</p>}
         {anime && <>
           <Slider label="How much changes" min={0.15} max={0.95} step={0.05} value={e.strength ?? 0.55} show={`${Math.round((e.strength ?? 0.55) * 100)}%`} onChange={(v) => set({ strength: v })} />
@@ -303,7 +324,7 @@ function ClassicEdit() {
           <div className="card flex flex-col gap-2 rounded-xl border border-line p-2.5">
             {/* picture 1 with what SAM found (or what you painted) shaded orange — the part that will change */}
             {pics[0] ? <MaskPreview pic={pics[0].url} mask={mask.url} /> : <img src={mask.url} alt="Painted area" className="h-12 w-12 rounded border border-line object-contain" title="White = the part that will change" />}
-            <div className="flex-1 text-[13px]">Only the <span className="text-[#ff8a1f]">orange</span> {mask.from === "words" ? "selected" : "painted"} area changes<div className="flex gap-3 text-xs"><button className="text-accent hover:underline" onClick={() => setPainting(true)}>repaint</button><button className="text-muted hover:text-ink" onClick={() => setMask(null)}>clear</button></div></div>
+            <div className="flex-1 text-[13px]">Only the <span className="text-[#ff8a1f]">orange</span> {mask.from === "words" ? "selected" : mask.from === "person" ? "picked person's" : "painted"} area changes<div className="flex gap-3 text-xs"><button className="text-accent hover:underline" onClick={() => setPainting(true)}>repaint</button><button className="text-muted hover:text-ink" onClick={() => setMask(null)}>clear</button></div></div>
           </div>
         )}
         {mask && <Slider label="Painted edge softness" min={2} max={40} value={soft} show={`${soft}px`} onChange={setSoft} />}

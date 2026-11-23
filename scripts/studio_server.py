@@ -5408,7 +5408,7 @@ async def import_latest(req):
 LATER_FILE = os.path.join(STATE, "download_later.json")
 H3_RUN = os.environ.get("H3_RUN", "/opt/h3/run")
 # groups that only work with another one in (Krea 2 RAW uses the Krea 2 text encoder and VAE)
-NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"], "kdepth": ["image"], "hmotion": ["video"], "hreal": ["video"], "csheet": ["image", "kedit"]}
+NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"], "kdepth": ["image"], "hmotion": ["video"], "hreal": ["video"], "csheet": ["image", "kedit"], "bfs": ["image"]}
 
 
 async def downloads_later(req):

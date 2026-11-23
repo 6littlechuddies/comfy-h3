@@ -43,12 +43,19 @@ export const REALISM_TRIGGER = "r34l1sm";
 const quad = { on: false };
 export const setQuadSheet = (on: boolean) => { quad.on = on; };
 export const quadSheetOn = () => quad.on;
+/** head and body swap with BFS (Alissonerdx) on Krea 2, when its group "bfs" is downloaded */
+const bfs = { on: false };
+export const setBfs = (on: boolean) => { bfs.on = on; };
+export const bfsOn = () => bfs.on;
 export const KREA_EDIT_KEY = "h3.kreaEdit"; // "v1" = always the v1.2 LoRA
 export const M = {
   /** fal's MiniMax H3 Realism People LoRA (models.txt group "hreal") */
   h3Realism: "minimax/h3-realism-people-t2v-i2v-r2v.safetensors",
   /** Alissonerdx's QuadView character-sheet LoRA for Krea 2 (group "csheet") */
   quadView: "QuadView_krea2_v1.safetensors",
+  /** BFS head swap v1.1 and body swap v1 for Krea 2 (group "bfs") */
+  bfsHead: "BFS/bfs_head_swap_v1.1_krea2.safetensors",
+  bfsBody: "BFS/bfs_body_swap_v1_krea2.safetensors",
   noob: "NoobAI-XL-v1.1.safetensors",
   /** IP-Adapter Plus (SDXL) + its image encoder: Illustrious character sheets that copy the front picture */
   ipadapterSdxl: "ip-adapter-plus_sdxl_vit-h.safetensors",
