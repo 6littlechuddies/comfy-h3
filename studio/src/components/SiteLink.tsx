@@ -80,12 +80,62 @@ export async function resendIfSent(id: string): Promise<string | null> {
 }
 
 /** send one character as a draft; returns the job's end state */
+/** urgf.ai Chat v4.1: her typing settings, sample chats, voice examples and hot lines — written with her profile, or here */
+function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) => void; busy: boolean }) {
+  const ch = c.site?.chat ?? {};
+  const set = (p: Partial<NonNullable<SiteInfo["chat"]>>) => up({ chat: { ...ch, ...p } });
+  const hot = ch.hot ?? { tease: [], explicit: [], after: [] };
+  const lines = (v: string) => v.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 15);
+  const write = async () => {
+    mark(c.id, "Writing her chat lines…");
+    try {
+      const { writeChatLines } = await import("../lib/chatLines");
+      const notes = await writeChatLines(c, { onStep: (t) => mark(c.id, t) });
+      useJobs.getState().toast(notes.length ? `Chat lines written — ${notes.length} note${notes.length === 1 ? "" : "s"} below` : "Chat lines written — every check passed", notes.length ? "info" : "good");
+    } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } finally { mark(c.id, null); }
+  };
+  const n = (k: "tease" | "explicit" | "after") => hot[k].length;
+  return (
+    <details className="card rounded-lg border border-line p-2.5 text-[12.5px]">
+      <summary className="cursor-pointer text-ink">Chat v4.1 · casing, emoji rate, heat holds, sample chats, voice examples, hot lines {ch.at ? `· tease ${n("tease")} · explicit ${n("explicit")} · after ${n("after")}` : "· not written yet"}</summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-[12px] text-muted">Casing
+            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.casing ?? ""} onChange={(e) => set({ casing: (e.target.value || undefined) as never })}>
+              <option value="">—</option><option value="lower">lower</option><option value="proper">proper</option><option value="custom">custom</option></DropSelect></label>
+          {ch.casing === "custom" && <TextIn className="min-w-[220px] flex-1" label="Her quirk" value={ch.casingCustom ?? ""} onChange={(v) => set({ casingCustom: v })} placeholder="lowercase, CAPS for emphasis, stretches words" />}
+          <label className="flex flex-col gap-1 text-[12px] text-muted">Emoji rate
+            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.emojiRate ?? ""} onChange={(e) => set({ emojiRate: (e.target.value || undefined) as never })}>
+              <option value="">—</option>{["none", "rare", "some", "often"].map((x) => <option key={x} value={x}>{x}</option>)}</DropSelect></label>
+          <label className="flex flex-col gap-1 text-[12px] text-muted" title="Blank = the site's default. 1–2 only for a guarded or slow-burn girl">Heat holds
+            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.heatHolds ?? ""} onChange={(e) => set({ heatHolds: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">site default</option><option value="1">1</option><option value="2">2</option></DropSelect></label>
+          <TextIn className="min-w-[160px] flex-1" label="Level emojis · 7, lowest first" value={(ch.levelEmojis ?? []).join(" ")} onChange={(v) => set({ levelEmojis: v.split(/\s+/).filter(Boolean).slice(0, 7) })} />
+          <Btn small disabled={busy || !c.site?.persona} onClick={write} title="Sample chats for the 11 core situations, the paid and free voice examples and her hot lines — from her profile; checked against the site's rules and other characters' lines (about a minute)">
+            <Icon name="script" size={13} /> {ch.at ? "Write them again" : "Write chat lines"}</Btn>
+        </div>
+        <p className="text-dim">Facts sent with them: {["job", "city", "home", "wearing"].map((k) => `${k} ${(c.site?.facts as Record<string, string> | undefined)?.[k] || "—"}`).join(" · ")} · signature words and emoji are above.</p>
+        <TextArea label="Examples · <START> / him: / her name: — blank line between her bubbles" rows={10} value={ch.examples ?? ""} onChange={(v) => set({ examples: v })} />
+        <div className="grid grid-cols-2 gap-2">
+          <TextArea label="Voice example (paid) · sends [voice note: …], 30 words max" rows={4} value={ch.voicePaid ?? ""} onChange={(v) => set({ voicePaid: v })} />
+          <TextArea label="Voice example (free) · teases in text, no voice note" rows={4} value={ch.voiceFree ?? ""} onChange={(v) => set({ voiceFree: v })} />
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {(["tease", "explicit", "after"] as const).map((k) => (
+            <TextArea key={k} label={`Hot lines · ${k} (${n(k)}, 8–15) · one per line, 14 words max`} rows={8} value={hot[k].join("\n")} onChange={(v) => set({ hot: { ...hot, [k]: lines(v) } })} />))}
+        </div>
+        {!!ch.notes?.length && <ul className="list-disc pl-4 text-dim">{ch.notes.slice(0, 12).map((x, i) => <li key={i}>{x}</li>)}</ul>}
+      </div>
+    </details>
+  );
+}
+
 async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
   // example messages in the persona ("You: …") are refused by the site: described instead, before sending
   { const { describeNotDemonstrate } = await import("../lib/siteAuto"); if (await describeNotDemonstrate(c, onStep).catch(() => false)) c = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; }
   const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id, short_persona: short }) })).json();
   const { watchServerJob } = await import("../lib/serverJob");
-  type Push = { status: string; id: string; step?: string; total?: number; done?: number; uploaded?: number; error?: string };
+  type Push = { status: string; id: string; step?: string; total?: number; done?: number; uploaded?: number; error?: string; chat_note?: string };
   let j: Push;
   try {
     j = await watchServerJob<Push & { [k: string]: unknown }>(`/studio-api/site/push/${start.id}`, { what: "the send", every: 1500,
@@ -98,7 +148,7 @@ async function sendOne(c: Character, onStep?: (t: string) => void, short = false
     return r.ok ? { ok: true, note: `${r.note} · short persona (the site refused the deep one: ${String(j.error).slice(0, 120)})` } : r;
   }
   const ok = j.status === "done";
-  const note = ok ? `${j.uploaded ?? 0} new file${j.uploaded === 1 ? "" : "s"}` : String(j.error);
+  const note = ok ? `${j.uploaded ?? 0} new file${j.uploaded === 1 ? "" : "s"}${j.chat_note ? ` · ${j.chat_note}` : ""}` : String(j.error);
   const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
   // which files the site has now (ON SITE in the folder picker, so a picture isn't put in a second set by accident)
   const sentKeys = ok ? [...new Set([...(cur.site?.sentKeys ?? []), ...(cur.site?.sets ?? []).flatMap((x) => x.items.map((it) => `${it.subfolder}/${it.filename}`))])] : cur.site?.sentKeys;
@@ -657,7 +707,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         }} title="Checks the character is an adult in the source, reads what the source says about her personality, gives her a name of her own, then rewrites her whole profile">Make her this cosplay · name + rewrite</Btn>}
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
-        <TextIn label="Tagline · under her name: who she is to him, her situation, a challenge (120 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 120) })} />
+        <TextIn label="Tagline · under her name: one complete sentence — who she is to him, her situation, a challenge (140 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 140) })} />
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
@@ -688,6 +738,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
             <p className="text-dim">Texting style: {site.texting && Object.keys(site.texting).length ? Object.entries(site.texting).map(([k, v]) => `${k} ${v.replace(/_/g, " ")}`).join(" · ") : "the site's house style"} · Voice notes: {site.speechVoice ?? "the site's default"}. Level names and the voice are sent only once there are seven names / a voice; the site keeps an admin's own change when they're left out.</p>
           </div>
         </details>
+        <ChatPanel c={c} up={up} busy={writing || !!step} />
         <TextIn label="Tags" value={(site.tags ?? []).join(", ")} onChange={(v) => up({ tags: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="fitness, playful, gym" />
         <TextArea label="Backstory" rows={3} value={site.backstory ?? ""} onChange={(v) => up({ backstory: v })} />
         <TextArea label={`Chat persona · private, the site's chat model reads it${site.deepAt ? ` · deep, ${site.persona?.split(/\s+/).length ?? 0} words` : ""}`} rows={site.deepAt ? 14 : 6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />

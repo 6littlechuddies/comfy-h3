@@ -26,6 +26,14 @@ export type View = (typeof VIEWS)[number]["id"];
 
 export interface SiteItem extends FileRef { rating?: "sfw" | "suggestive" | "explicit"; caption?: string; duration?: number }
 export interface SiteSet { set_key: string; title: string; description: string; tier: "free" | "premium"; price?: number; rating: "sfw" | "suggestive" | "explicit"; items: SiteItem[] }
+/** Chat v4.1's own boxes. examples / voicePaid / voiceFree are in the site's "<START> / him: / Name:" format */
+export interface SiteChat {
+  casing?: "lower" | "proper" | "custom"; casingCustom?: string; emojiRate?: "none" | "rare" | "some" | "often";
+  /** blank = the site's default; 1–2 for a guarded or slow-burn girl */ heatHolds?: number | null;
+  levelEmojis?: string[]; voicePaid?: string; voiceFree?: string; examples?: string;
+  hot?: { tease: string[]; explicit: string[]; after: string[] };
+  /** when it was written, and what the checks dropped or couldn't fix */ at?: number; notes?: string[];
+}
 export interface SiteInfo {
   /** the name on your site, when it isn't their name here (a cosplay: a name fans connect to the character, never her exact name) */
   name?: string;
@@ -60,6 +68,8 @@ export interface SiteInfo {
   texting?: Record<string, string>;
   /** her voice notes' preset (matilda, jessica, lily, sarah, laura, bella, alice) */
   speechVoice?: string;
+  /** urgf.ai Chat v4.1: how she types, sample exchanges, voice examples and her hot lines bank (the chat-lines writer) */
+  chat?: SiteChat;
   /** when it was last sent, and what the site said */
   sent?: { at: number; ok: boolean; note: string; hash?: string };
 }

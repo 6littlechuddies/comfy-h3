@@ -5,7 +5,8 @@ import { looseJson } from "./looseJson";
 // what each picture shows, rated sfw (free) / suggestive / explicit (behind the paywall). Both go through the prompt
 // writer you picked (27B, 9B or your Grok tab).
 import { toInput, type FileRef } from "./api";
-import { describe, useCharacters, type Character, type SiteItem, type SiteSet } from "./characters";
+import { describe, useCharacters, type Character, type SiteInfo, type SiteItem, type SiteSet } from "./characters";
+import { PRODUCT, STOCK } from "./chatCheck";
 import { useJobs } from "./jobs";
 import { runWriter } from "./writer";
 
@@ -98,7 +99,7 @@ const json = (raw: string) => looseJson<any>(raw);
 const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary",
   "tagline", "occupation", "statusLine", "voiceLine", "hobbies", "ethnicity", "language", "likes", "setting", "relationship", "scenario", "inBed"] as const;
 /** the site's limits on its short cells (longer is refused or cut) */
-const CAP: Partial<Record<(typeof FIELDS)[number], number>> = { tagline: 120, occupation: 40, statusLine: 40, hobbies: 80, ethnicity: 40, language: 40 };
+const CAP: Partial<Record<(typeof FIELDS)[number], number>> = { tagline: 140, occupation: 40, statusLine: 40, hobbies: 80, ethnicity: 40, language: 40 };
 const TEXTING: Record<string, string[]> = { texts: ["one", "one_or_two", "two", "two_or_three"], length: ["short", "medium", "long"], emoji: ["none", "rare", "some", "often"],
   casing: ["lowercase", "lowercase_names", "sentence"], slang: ["none", "some", "lots"], swearing: ["none", "light", "heavy"], exclaim: ["rare", "bubbly"],
   questions: ["rarely", "sometimes", "most"], tone: ["sweet", "playful", "bratty"], forward: ["waits", "steers"], goodbye: ["lets_go", "resists_once"], useName: ["never", "sometimes"] };
@@ -287,7 +288,9 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   // the deep profile runs when this pass wrote her persona — or her persona is there but was never made deep (older ones)
   const wrotePersona = (!!next.persona && next.persona !== s0.persona) || (!!next.persona && s0.deepAt === undefined);
   if (next.persona !== s0.persona) { next.personaCore = next.persona; next.deepAt = undefined; }
-  for (const k of FIELDS) { const cap = CAP[k]; if (cap && next[k] && next[k]!.length > cap) next[k] = next[k]!.slice(0, cap).replace(/\s+\S*$/, ""); }
+  // the site's banned stock lines ("earn it", "not tonight"…) and product talk ("unlock", "credits"…): the sentence goes
+  for (const k of FIELDS) { const v = next[k]; if (v && v !== s0[k] && (STOCK.test(v) || PRODUCT.test(v))) { next[k] = cutSentences(v, new RegExp(`${STOCK.source}|${PRODUCT.source}`, "i")).trim(); o.onStep?.(`Took a banned line out of her ${k}`); } }
+  for (const k of FIELDS) { const cap = CAP[k]; if (cap && next[k] && next[k]!.length > cap) { const v = next[k]!.slice(0, cap); next[k] = k === "tagline" && /[.!?]/.test(v.slice(40)) ? v.slice(0, v.search(/[.!?][^.!?]*$/) + 1) : v.replace(/\s+\S*$/, ""); } }
   const strs = (v: unknown, max: number, len = 60) => Array.isArray(v) ? v.map(String).map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)).slice(0, max) : [];
   const keep = <T,>(cur: T | undefined, got: T | undefined, has: (x: T) => boolean) => (o.all || !cur || !has(cur)) && got && has(got) ? got : cur;
   // her facts (written first, everything else built from them): kept, and her people come from them
@@ -318,6 +321,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const clockIn = (["greeting", "statusLine", "scenario"] as const).filter((k) => next[k] && CLOCK.test(next[k]!) && next[k] !== s0[k]);
   if (clockIn.length && !o.again) o.onStep?.(`Note: ${clockIn.join(", ")} mention${clockIn.length > 1 ? "" : "s"} a clock time — the site reads it as his real time; edit it if it matters`);
   if (o.all || !s0.tags?.length) next.tags = Array.isArray(d.tags) ? (d.tags as unknown[]).map(String).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10) : s0.tags;
+  if (next.persona) next.persona = weaveFacts(next.persona, next);
   useCharacters.getState().save({ ...cur, site: next });
   // the site won't take her without a bio and a persona: an answer that missed them (cut off, or not JSON) is written once more
   const missing = (["bio", "persona", "greeting"] as const).filter((k) => !(next[k] ?? "").trim());
@@ -327,12 +331,16 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     // (the deep profile waits until the retry has filled the rest)
     const r = await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { ...o, all: false, again: true, deep: false });
     if (wrotePersona && (o.deep ?? deepOn())) await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }).catch((e) => o.onStep?.(`Deep profile skipped: ${(e as Error).message}`));
+    if (wrotePersona && (o.deep ?? deepOn())) await import("./chatLines").then((m) => m.writeChatLines(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep })).catch((e) => o.onStep?.(`Chat lines skipped: ${(e as Error).message}`));
     return r;
   }
   // the deep profile (on by default): when this pass wrote her persona
   if (wrotePersona && (o.deep ?? deepOn())) {
     try { await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
     catch (e) { o.onStep?.(`Deep profile skipped: ${(e as Error).message}`); }
+    // Chat v4.1: sample chats, voice examples and her hot lines, from the finished profile
+    try { const { writeChatLines } = await import("./chatLines"); await writeChatLines(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
+    catch (e) { o.onStep?.(`Chat lines skipped: ${(e as Error).message}`); }
   }
   return { pictures: uniq.length, filled: FIELDS.filter((k) => next[k] !== s0[k]).length };
 }
@@ -426,6 +434,22 @@ export const tidyHeadings = (t: string) => {
  *  her to deny being an AI. Any such line becomes the right one. */
 export const fixAiLine = (t: string) => t.split("\n").map((l) => /claim\w*\s+(she'?s|she is|to be|being)\s+(an?\s+)?AI\b|(say|says|admit\w*)\s+(plainly\s+)?(she|you)\s*(is|are|'?re|'?s)\s*n[o']t\s+(an?\s+)?AI\b|deny\w*\s+being\s+(an?\s+)?AI/i.test(l)
   ? `${l.match(/^\s*[-•]\s*/)?.[0] ?? "- "}Claiming to be human when he sincerely asks if she's real - she says plainly she's an AI and stays herself.` : l).join("\n");
+/** her people, city and job named in the persona itself (not only the People fields) — or she forgets them in live chat.
+ *  What's missing goes in as one sentence at the end of who she is. */
+export function weaveFacts(persona: string, s: SiteInfo): string {
+  if (!persona.trim()) return persona;
+  const lc = persona.toLowerCase(), fx = s.facts ?? {};
+  const people = (s.people ?? []).filter((p) => p.name && !lc.includes(p.name.toLowerCase()));
+  const city = fx.city && !lc.includes(fx.city.toLowerCase().split(",")[0].trim()) ? fx.city : "";
+  const jobW = (fx.job ?? "").toLowerCase().match(/[a-z]{5,}/g) ?? [];
+  const job = fx.job && jobW.length && !jobW.some((w) => lc.includes(w)) ? fx.job : "";
+  if (!people.length && !city && !job) return persona;
+  const line = [city && `You live in ${city}.${fx.home ? ` Home: ${fx.home.replace(/\.$/, "")}.` : ""}`, job && `Your job: ${job.replace(/\.$/, "")}.`,
+    people.length && `The people in your life: ${people.map((p) => `${p.name} (your ${p.relation || "friend"}${p.note ? `, ${p.note.replace(/\.$/, "")}` : ""})`).join("; ")}.`].filter(Boolean).join(" ");
+  // before the second section (deep persona) or before "How you sound:" (short persona), else at the end
+  const at = ["\n\nHER LIFE RIGHT NOW", "\n\nHOW YOU REACT", "How you sound:", "\n\nNEVER SAY"].map((h) => persona.indexOf(h)).filter((i) => i > 0).sort((a, b) => a - b)[0];
+  return at === undefined ? `${persona.trim()} ${line}` : `${persona.slice(0, at).trimEnd()} ${line}${persona[at] === "\n" ? "" : " "}${persona.slice(at).replace(/^(?=How)/, "")}`;
+}
 const cutSentences = (t: string, re: RegExp) => t.split("\n").map((line) => line.split(/(?<=[.!?])\s+/).filter((x) => !re.test(x)).join(" ")).join("\n");
 const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
 /** a phrase of three or more words used twice in the sample texts = a catchphrase she'd repeat forever */
@@ -496,7 +520,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const body = at >= 0 ? persona.slice(0, at) : persona, tail = at >= 0 ? persona.slice(at) : "";
   persona = stripLength(stripAges(cutSentences(body, ASSIST))).trim() + (tail ? `\n\n${tail.trim()}` : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? cur0;
-  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona: tidyHeadings(fixAiLine(persona)), deepAt: Date.now() } });
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona: weaveFacts(tidyHeadings(fixAiLine(persona)), cur.site ?? {}), deepAt: Date.now() } });
 }
 
 /** written-out example messages ("You: …", "Him: …") — the site refuses them (they get copied word for word) */
