@@ -45,7 +45,7 @@ const randomAge = () => 21 + Math.floor(Math.random() ** 1.6 * 10);
 
 /** everything for one character, in order: (named already by the batch) an age, her profile, her hover loop, sent as a
  *  draft. Her pictures aren't sorted into sets here — for now sets are made by hand in her folders. */
-async function doItAll(c: Character, connected: boolean, step: (t: string) => void, loopMade?: Promise<unknown>): Promise<string> {
+export async function doItAll(c: Character, connected: boolean, step: (t: string) => void, loopMade?: Promise<unknown>): Promise<string> {
   const { fillProfile } = await import("../lib/siteAuto");
   const now0 = useCharacters.getState().list.find((x) => x.id === c.id)!;
   if (!(Number(now0.age) >= 21) || Number(now0.age) === DEFAULT_AGE) useCharacters.getState().save({ ...now0, age: randomAge() });
@@ -131,7 +131,7 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
   );
 }
 
-async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
+export async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
   // example messages in the persona ("You: …") are refused by the site: described instead, before sending
   { const { describeNotDemonstrate } = await import("../lib/siteAuto"); if (await describeNotDemonstrate(c, onStep).catch(() => false)) c = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; }
   const start = await (await fetch("/studio-api/site/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char_id: c.id, short_persona: short }) })).json();
@@ -565,6 +565,7 @@ function Characters({ connected }: { connected: boolean }) {
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then click each one's main picture and send"><Icon name="sparkle" size={13} /> Cosplays</Btn>
         <Btn onClick={() => setLoops(true)} disabled={Object.keys(busy).length > 0} title="Animated covers: the video her card plays when someone hovers it on your site. See who has one, who's pinned for one, make the pinned ones (best on a multi-GPU rental) and pick each one's video — for the ticked ones, or everyone"><Icon name="play" size={14} /> Animated covers{(() => { const n = (chosen.length ? chosen : list).filter((c) => c.site?.coverVideoPin).length; return n ? ` · ${n} pinned` : ""; })()}</Btn>
         <DeepToggle />
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>

@@ -70,6 +70,8 @@ export interface SiteInfo {
   speechVoice?: string;
   /** urgf.ai Chat v4.1: how she types, sample exchanges, voice examples and her hot lines bank (the chat-lines writer) */
   chat?: SiteChat;
+  /** the result picked as her main picture in Cosplays (her card is a kept copy of it) */
+  mainFrom?: FileRef;
   /** when it was last sent, and what the site said */
   sent?: { at: number; ok: boolean; note: string; hash?: string };
 }

@@ -163,6 +163,8 @@ function CatalogPanel() {
           className="inset ml-auto h-9 w-72 border border-line px-2.5 text-[13px] focus:border-accent focus:outline-none" />
         <div className="flex gap-1">{([["", "All"], ["image", "Pictures"], ["video", "Videos"]] as const).map(([k, l]) => <button key={l} onClick={() => setKind(k)} className={cx("press tag-btn !h-8 !px-2.5 !text-[12px]", kind === k && "on")}>{l}</button>)}
           <button onClick={() => setOnlyFav((v) => !v)} aria-pressed={onlyFav} className={cx("press tag-btn !inline-flex !h-8 !flex-row items-center gap-1.5 !px-2.5 !text-[12px]", onlyFav && "on")}><StarIcon on={onlyFav} /> Favourites</button></div>
+        <button onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then pick each one's main picture"
+          className="press chip-raised flex h-9 items-center gap-1.5 rounded-sm px-3 text-[12.5px]"><Icon name="sparkle" size={13} /> Cosplays</button>
         <CatalogMore chars={chars} onDone={() => load(0)} />
         <button aria-label="Close" onClick={close} className="press btn-raised flex h-9 w-9 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={15} /></button>
       </div>
