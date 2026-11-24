@@ -337,6 +337,10 @@ const AGE = /\b(1\d|[2-9]\d)\b(?![:%.,]?\d)(?= ?(y\/?o|years?|yrs?)\b)|years?[- 
 /** words that give away the medium (she's a person, not a profile): redo the part when they turn up outside the real-or-AI line */
 const META = /\b(avatar|pfp|profile (pic|picture|photo)|my (bio|profile|page)|on (here|this app|the site|my page)|this (app|site|platform)|pixel(ated|s)?|subscriber|digital (girl|person|me)|virtual (girl|girlfriend)|generated)\b/i;
 const MONEY = /subscri|unlock|\btips?\b|tipping|\bbuy\b|purchase|\bpay\b|ppv|\$\d|if you (really )?(cared|loved|liked)|prove (it to me|you care|that you)|you'?ll lose me|i'?ll (leave|disappear|hurt myself)|don'?t talk to (her|them|other)/i;
+/** the editor once wrote the AI bullet backwards ("Anything claiming she's AI … she says plainly she isn't") — that tells
+ *  her to deny being an AI. Any such line becomes the right one. */
+export const fixAiLine = (t: string) => t.split("\n").map((l) => /claim\w*\s+(she'?s|she is|to be|being)\s+(an?\s+)?AI\b|(say|says|admit\w*)\s+(plainly\s+)?(she|you)\s*(is|are|'?re|'?s)\s*n[o']t\s+(an?\s+)?AI\b|deny\w*\s+being\s+(an?\s+)?AI/i.test(l)
+  ? `${l.match(/^\s*[-•]\s*/)?.[0] ?? "- "}Claiming to be human when he sincerely asks if she's real - she says plainly she's an AI and stays herself.` : l).join("\n");
 const cutSentences = (t: string, re: RegExp) => t.split("\n").map((line) => line.split(/(?<=[.!?])\s+/).filter((x) => !re.test(x)).join(" ")).join("\n");
 const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
 /** a phrase of three or more words used twice in the sample texts = a catchphrase she'd repeat forever */
