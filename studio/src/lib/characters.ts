@@ -50,6 +50,8 @@ export interface SiteInfo {
   tagline?: string; occupation?: string; statusLine?: string; voiceLine?: string; hobbies?: string; ethnicity?: string; language?: string;
   likes?: string; setting?: string; relationship?: string; scenario?: string; inBed?: string;
   people?: { name: string; relation: string; note: string }[];
+  /** her fixed facts, written first: every other field and her deep persona are built from them (Chat v4.1's Facts box) */
+  facts?: { job?: string; city?: string; home?: string; wearing?: string; room?: string };
   /** her seven relationship level names, lowest first */
   levels?: string[];
   /** words and emoji only she uses (the words go into how she sounds; the emoji are site.texting.signatureEmoji) */

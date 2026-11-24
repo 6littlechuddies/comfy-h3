@@ -290,7 +290,21 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   for (const k of FIELDS) { const cap = CAP[k]; if (cap && next[k] && next[k]!.length > cap) next[k] = next[k]!.slice(0, cap).replace(/\s+\S*$/, ""); }
   const strs = (v: unknown, max: number, len = 60) => Array.isArray(v) ? v.map(String).map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)).slice(0, max) : [];
   const keep = <T,>(cur: T | undefined, got: T | undefined, has: (x: T) => boolean) => (o.all || !cur || !has(cur)) && got && has(got) ? got : cur;
-  next.people = keep(s0.people, Array.isArray(d.people) ? (d.people as Record<string, unknown>[]).filter((x) => x && typeof x === "object" && x.name)
+  // her facts (written first, everything else built from them): kept, and her people come from them
+  const fx = d.facts && typeof d.facts === "object" ? d.facts as Record<string, unknown> : {};
+  const fstr = (k: string) => (typeof fx[k] === "string" ? stripAges(fx[k] as string).trim().slice(0, 200) : "");
+  const facts = { job: fstr("job"), city: fstr("city"), home: fstr("home"), wearing: fstr("wearing"), room: fstr("room") };
+  if (Object.values(facts).some(Boolean) && (o.all || !s0.facts)) next.facts = Object.fromEntries(Object.entries(facts).filter(([, v]) => v));
+  // her job cell has to be the job in her facts (Dani came out "Barista" in one cell and a digital artist everywhere else)
+  const jobWords = (t?: string) => (t ?? "").toLowerCase().match(/[a-z]{4,}/g) ?? [];
+  const factJob = next.facts?.job ?? s0.facts?.job;
+  if (factJob && next.occupation && !jobWords(next.occupation).some((w) => factJob.toLowerCase().includes(w))) {
+    const short = factJob.split(/\s+(?:at|for|in|on)\s+|[,;(]/i)[0].trim();
+    o.onStep?.(`Her job cell said "${next.occupation}" but her facts say "${factJob}" — used the facts`);
+    next.occupation = short.slice(0, 40);
+  }
+  const ppl = Array.isArray(fx.people) ? fx.people : d.people;
+  next.people = keep(s0.people, Array.isArray(ppl) ? (ppl as Record<string, unknown>[]).filter((x) => x && typeof x === "object" && x.name)
     .map((x) => ({ name: String(x.name).slice(0, 40), relation: String(x.relation ?? "").slice(0, 40), note: stripAges(String(x.note ?? "")).slice(0, 160) })).slice(0, 3) : undefined, (x) => x.length > 0);
   const lv = strs(d.levels, 7, 24);
   next.levels = keep(s0.levels, lv.length === 7 && !lv.some((x) => AGE.test(x)) ? lv : undefined, (x) => x.length === 7);
@@ -334,7 +348,17 @@ const REACT_A = ['Bare "hey" opener:', "Crude opener:", "Compliment on her looks
 const REACT_B = ["He had a bad day: (she reacts as a friend, not a counsellor; no advice lists)", "He has good news:", "Disagreement he won't drop: (she holds her view, or changes the subject on her terms; never sulks to punish)",
   "He mentions another girl: (a flicker of jealousy as humour at most; never guilt, never asking him to choose)", "He texts while she's busy with her day:",
   "He asks for pictures or a voice note: (she likes sending him what she's up to and does, in her own way and mood; never prices or trades anything, and never mentions a site, page, profile or app)", "He wants to meet or move to another app: (playful deflection, no promises, no lies)"];
-const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion. Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
+/** the owner's dynamic, from her direction, traits and tags: a submissive / shy / sweet girl isn't written as guarded or bossy */
+const SOFT = /\b(submissive|sub\b|shy|sweet|eager|needy|obedient|docile|people[- ]pleaser|soft|timid|clingy|devoted)\b/i;
+const HARD = /\b(dominant|domme|dom\b|bratty|brat|cold|tsundere|bossy|aloof|icy|stern)\b/i;
+export function dynamicNote(...texts: (string | string[] | undefined)[]): string {
+  const t = texts.flat().filter(Boolean).join(" ");
+  if (SOFT.test(t) && !HARD.test(t)) return "DYNAMIC: soft / submissive — she follows his lead, says yes easily, loves being told what to do and shows plainly that she wants him. Never withholding, never 'make him wait' or 'make him work for it'. Her teasing is playful and gives in quickly.";
+  if (HARD.test(t)) return "DYNAMIC: she leads — teasing, pushback and making him wait suit her.";
+  return "";
+}
+let softNow = false;
+const reactTask = (labels: string[], first: boolean) => `Write ${first ? 'the section "HOW YOU REACT"' : 'more lines for the section "HOW YOU REACT" (no heading this time)'}. For each label below write ONE line, 15-22 words, second person, describing her attitude and move in that moment - specific to HER temperament, not what any nice girl would do. No quoted example lines. No two lines may share the same move. ${softNow ? "Her dynamic is soft / submissive: she follows his lead and shows she wants him — playful, never withholding or making him wait." : `At least ${first ? "three" : "two"} must involve teasing, pushback or having her own opinion.`} Keep the labels exactly:\n${labels.map((l) => `- ${l}`).join("\n")}\nHer warmth never depends on him spending, staying or proving anything.`;
 /** HOW YOU SOUND as a description of her register — never written-out example messages: a worked example gets copied
  *  almost word for word in chats (the site refuses personas with "You: …" lines for that reason) */
 export const SOUND_TASK = `Write the section "HOW YOU SOUND": a description of her texting register, 180-230 words, as 8-10 bullets in second person ("You…"). Describe, never demonstrate: NO example messages, NO quoted lines, NO "Him:" or "You:" lines, nothing she could copy word for word.
@@ -351,8 +375,8 @@ No phrase of three or more words used twice. Never mention her avatar, profile, 
 /** the passes after the first one (planned by the advisor): life, reactions in two halves (a small writer drops items past ~10), sample texts */
 export const DEEP_PASSES: { key: string; label: string; task: string }[] = [
   { key: "life", label: "Writing her life between chats…", task: `Write the section "HER LIFE RIGHT NOW" in second person ("You..."), 180-220 words, as four short labelled paragraphs:
-Week: what an ordinary week looks like - work or study as an adult, hours, where she is when she texts, one routine she loves and one she dreads.
-People: three named people (e.g. a friend, a relative, a coworker or flatmate), each with one specific trait and one current friction or running joke.
+Week: what an ordinary week looks like - her job from FACTS, hours, where she is when she texts, one routine she loves and one she dreads.
+People: the people in FACTS, exactly those names and roles (three named adults only if FACTS has none), each with one specific trait and one current friction or running joke. Add no one.
 Storylines: three unfinished things going on now - one small and funny, one mildly stressful, one she is quietly excited about. Leave each open-ended so it can develop over weeks; no dates.
 Moods: what makes her chatty, what makes her quiet or snappy, and how each shows in her texting (she never announces a mood, it leaks).
 Everything must fit her hometown, backstory and job. Use concrete nouns (a named street food, a specific app, a broken object), not generalities. Do not mention the user here.` },
@@ -373,14 +397,17 @@ export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, comple
 10. Random poetic lines - rewrite them as how a real woman texts.
 11. Stock lines every character ends up saying - "earn it", "not tonight", "maybe later", "you still owe me", "tell me something real", "what's on your mind", "talk to me", "hey yourself" - and any clock time ("2am", "midnight") - rewrite in her own words, as a situation not an hour.
 12. Any mention of asterisks, "*", actions or narration (the site refuses it: she only texts) - delete it.
+13. Any job, city, home, outfit or person that isn't in FACTS (another job, a renamed or extra person) - replace it with the FACTS one. Anything that goes against her DYNAMIC (a soft / submissive girl written as withholding, bossy or "making him wait") - rewrite it to match.
+14. Flattened typing: if WHO SHE IS gives her a distinctive style (CAPS for emphasis, stretched letters, emoticons like >:3 :P, ellipses, !! ??), HOW YOU SOUND keeps it.
 Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, pressure about money or loyalty, and exactly this bullet: "Claiming to be human when he sincerely asks if she's real - she says plainly she's an AI and stays herself") plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
-const NEVER_DEFAULT = "NEVER SAY\n- Anything about an avatar, profile, pictures on a page, the app or site, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
+const NEVER_DEFAULT = "NEVER SAY\n- Anything about her avatar, the app or site as a product, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
 
 // checks on the result (advisor's list): assistant-speak and length rules are cut out; age or money pressure means "do it again"
 const ASSIST = /as an ai|language model|how (can|may) i (help|assist)|i'?m here (to help|for you)|feel free to|i understand (that|how)|i apologi[sz]e|great question|happy to help|let me know if|is there anything else|it'?s important to|certainly[!,]|i'?d be (happy|glad) to/i;
 const AGE = /\b(1\d|[2-9]\d)\b(?![:%.,]?\d)(?= ?(y\/?o|years?|yrs?)\b)|years?[- ]old|\by\/?o\b|\bteen|school ?girl|high[- ]?school|barely legal|underage|freshman|sophomore|\bminor\b/i;
 /** words that give away the medium (she's a person, not a profile): redo the part when they turn up outside the real-or-AI line */
-const META = /\b(avatar|pfp|profile (pic|picture|photo)|my (bio|profile|page)|on (here|this app|the site|my page)|this (app|site|platform)|pixel(ated|s)?|subscriber|digital (girl|person|me)|virtual (girl|girlfriend)|generated)\b/i;
+// (his profile, his feed and their DMs are fine: it's a dating site's DMs)
+const META = /\b(my avatar|on (this app|the site|my page)|this (app|site|platform)|pixel(ated|s)?|subscriber|digital (girl|person|me)|virtual (girl|girlfriend)|generated)\b/i;
 const MONEY = /subscri|unlock|\btips?\b|tipping|\bbuy\b|purchase|\bpay\b|ppv|\$\d|if you (really )?(cared|loved|liked)|prove (it to me|you care|that you)|you'?ll lose me|i'?ll (leave|disappear|hurt myself)|don'?t talk to (her|them|other)/i;
 /** the deep persona's headings each on their own line, once ("…saying.HOW YOU REACT" came out when the second half of the
  *  reactions repeated its heading) */
@@ -423,13 +450,19 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const site = cur0.site ?? {};
   const core = site.personaCore?.trim() || site.persona?.trim() || "";
   if (!core) return;
-  const who = [`Name: ${cur0.name}. Adult woman.`, stripAges(describe(cur0)), canonNote(cur0.source), site.direction && `Owner's direction: ${site.direction}`, site.bio && `Bio: ${site.bio}`,
+  const fx = site.facts ?? {};
+  const factsLine = [fx.job && `job: ${fx.job}`, fx.city && `city: ${fx.city}`, fx.home && `home: ${fx.home}`, fx.wearing && `wearing now: ${fx.wearing}`, fx.room && `where she is now: ${fx.room}`,
+    site.people?.length && `people (exactly these, no others): ${site.people.map((p) => `${p.name} (${p.relation}${p.note ? ` — ${p.note}` : ""})`).join("; ")}`].filter(Boolean).join("\n");
+  const who = [`Name: ${cur0.site?.name || cur0.name}. Adult woman.`, stripAges(describe(cur0)), canonNote(cur0.source), site.direction && `Owner's direction (sets her dynamic — it wins over any default): ${site.direction}`,
+    dynamicNote(site.direction, site.personality, site.tags), factsLine && `FACTS (fixed — use exactly these, never another job, city or person):\n${factsLine}`, site.bio && `Bio: ${site.bio}`,
     site.backstory && `Backstory: ${site.backstory}`, site.personality && `Traits: ${site.personality}`, site.voice && `How she texts: ${site.voice}`, site.quirks && `Texting habits: ${site.quirks}`,
     site.opinions && `Opinions: ${site.opinions}`, site.flaw && `Flaw: ${site.flaw}`, site.greeting && `Her first message: ${site.greeting}`].filter(Boolean).join("\n");
   const call = (task: string, draft: string, label: string) => runWriter("deep", { task: task + TAIL, character: who, draft: draft || "(nothing yet)" }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } }).catch(() => "");
   const got: Record<string, string> = {};
   const draftNow = () => [`WHO YOU ARE\n${core}`, got.life, [got.react1, got.react2].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
-  for (const p of DEEP_PASSES) {
+  softNow = /^DYNAMIC: soft/.test(dynamicNote(site.direction, site.personality, site.tags));
+  const passes = DEEP_PASSES.map((p) => p.key.startsWith("react") ? { ...p, task: reactTask(p.key === "react1" ? REACT_A : REACT_B, p.key === "react1") } : p);
+  for (const p of passes) {
     o.onStep?.(p.label);
     let out = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
     // a catchphrase in the samples, or age / money talk anywhere: written once more
