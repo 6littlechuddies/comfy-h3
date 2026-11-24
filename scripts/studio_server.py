@@ -5781,6 +5781,17 @@ _TEXTING = {"texts": {"one", "one_or_two", "two", "two_or_three"}, "length": {"s
 _VOICES = {"matilda", "jessica", "lily", "sarah", "laura", "bella", "alice"}
 
 
+def _site_emoji(e: str) -> bool:
+    """one emoji the site's texting.signatureEmoji accepts: a face, a heart or a sexting one (conservative: when in doubt, no)"""
+    cps = [ord(ch) for ch in e if ord(ch) not in (0xFE0F, 0x200D) and not 0x1F3FB <= ord(ch) <= 0x1F3FF]
+    if len(cps) != 1 and not (len(cps) == 2 and cps[0] == 0x2764): return False  # ❤️‍🔥 / ❤️‍🩹 are two code points
+    c = cps[0]
+    faces = 0x1F600 <= c <= 0x1F64F or 0x1F910 <= c <= 0x1F92F or 0x1F970 <= c <= 0x1F97A or 0x1FAE0 <= c <= 0x1FAE8 or c in (0x263A, 0x2639, 0x1F9D0, 0x1F975, 0x1F976, 0x1F608, 0x1F47F)
+    hearts = c in (0x2764, 0x2763, 0x1F5A4, 0x1F90D, 0x1F90E, 0x1F9E1, 0x1F48B) or 0x1F493 <= c <= 0x1F49F or 0x1FA75 <= c <= 0x1FA77
+    sexting = c in (0x1F351, 0x1F346, 0x1F445, 0x1F440, 0x1F525, 0x1F4A6, 0x1F352)
+    return faces or hearts or sexting
+
+
 def _site_block(site: dict, cosplay: bool) -> dict:
     """Studio's profile fields → the factory API's "site" object (cells capped at the site's limits; only what's filled).
     levels and speech_voice are settings an admin can also change on the site: the site keeps its own when they're left
@@ -5794,7 +5805,8 @@ def _site_block(site: dict, cosplay: bool) -> dict:
         if cell(src): out[key] = cell(src, n)
     if cosplay: out["category"] = "cosplay"
     tx = {k: str(v) for k, v in (site.get("texting") or {}).items() if str(v) in _TEXTING.get(k, set())}
-    emo = [str(e).strip() for e in (site.get("signatureEmojis") or []) if str(e).strip()][:5]
+    # the site takes only faces, hearts and the sexting ones (a 🧋 or 🎮 is refused, and the whole send with it)
+    emo = [e for e in (str(x).strip() for x in (site.get("signatureEmojis") or [])) if e and _site_emoji(e)][:5]
     if emo: tx["signatureEmoji"] = emo
     if tx: out["texting"] = tx
     sheet = {k: cell(src) for k, src in (("likes", "likes"), ("setting", "setting"), ("relationship", "relationship"), ("inBed", "inBed"), ("scenario", "scenario")) if cell(src)}

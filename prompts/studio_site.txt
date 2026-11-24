@@ -54,7 +54,7 @@ Answer with ONE JSON object and nothing else:
   "people": [{"name": "an adult in her life", "relation": "friend / coworker / roommate / sister…", "note": "one line"}],
   "levels": ["seven relationship level names in her world, lowest first, each under 24 characters, naming where he stands with her (e.g. Walk-in, Regular, Flash sheet, Custom piece, Matching ink, Her apprentice, Yours). No word for a minor"],
   "signatureWords": ["4–6 words or short phrases only she uses"],
-  "signatureEmojis": ["2 or 3 emoji she reaches for"],
+  "signatureEmojis": ["2 or 3 emoji she reaches for — only faces (😭 🙄 😏 🥺…), hearts (🖤 💕…) or flirty ones (🔥 👀 😈 💦 🍑); no objects, food, animals or symbols"],
   "texting": {"texts": "one | one_or_two | two | two_or_three", "length": "short | medium | long", "emoji": "none | rare | some | often", "casing": "lowercase | lowercase_names | sentence", "slang": "none | some | lots", "swearing": "none | light | heavy", "exclaim": "rare | bubbly", "questions": "rarely | sometimes | most", "tone": "sweet | playful | bratty", "forward": "waits | steers", "goodbye": "lets_go | resists_once", "useName": "never | sometimes"},
   "speechVoice": "the voice her voice notes are read in, the closest fit: matilda (warm, default), jessica (playful), lily (velvety, British), sarah (soft), laura (quirky), bella (bright), alice (British)",
   "tags": ["4–8 short lowercase tags for search"]
