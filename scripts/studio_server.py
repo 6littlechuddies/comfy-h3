@@ -6220,6 +6220,38 @@ def _catalog_scan() -> list:
     return items
 
 
+_COS_LABEL = re.compile(r"^Batch \d+ · (.+?)(?: \(([^)]*)\))?(?: · \d+/\d+)?$")
+_COS_PROMPT = re.compile(r"cosplay(?:ing|s|ed)?\s+(?:as\s+)?([A-Z][\w'’.\- ]{1,40}?)\s+from\s+([A-Z0-9][\w'’:!.\- ]{1,50}?)(?=[,.;)]|\s+(?:in|with|wearing|at|on|she|her|and)\b)")
+
+
+def _cosplay_index() -> list:
+    """the cosplay characters: (id, [the character's name as words to look for]) — from 'Cosplay of Makima (Chainsaw Man)'"""
+    try: chars = json.load(open(CHAR_FILE))
+    except (OSError, ValueError): return []
+    out = []
+    for c in chars if isinstance(chars, list) else []:
+        m = re.match(r"^Cosplay of (.+?)(?: \((.*)\))?$", str((c or {}).get("source") or ""))
+        if m and c.get("id"): out.append((c["id"], m.group(1).strip().lower(), (m.group(2) or "").strip().lower()))
+    return out
+
+
+def _cosplay_of(m: dict, index: list) -> str | None:
+    """which cosplay character a result shows, from how it was made: its Batch label, 'cosplaying X from Y' in its prompt,
+    or a cosplay character's full name in its prompt (names of 4+ letters). → her id"""
+    if not isinstance(m, dict) or not index: return None
+    label, text = str(m.get("label") or ""), " ".join(str(m.get(k) or "") for k in ("label", "prompt", "idea", "character"))
+    names = []
+    if (x := _COS_LABEL.match(label)): names.append(x.group(1).strip().lower())
+    names += [x.group(1).strip().lower() for x in _COS_PROMPT.finditer(text)]
+    for n in names:
+        for cid, cn, _ in index:
+            if n == cn or n.split()[0] == cn.split()[0] and len(cn.split()[0]) >= 4: return cid
+    low = text.lower()
+    for cid, cn, _ in index:
+        if len(cn) >= 4 and re.search(r"(?<![a-z])" + re.escape(cn) + r"(?![a-z])", low): return cid
+    return None
+
+
 async def catalog(req):
     """GET ?folder=&kind=&q=&offset=&limit= → {items, total, folders: [{name, count}]}. A result moved to (or made in) a project
     is grouped under "@<project id>" — so renaming a character, or moving results to them, keeps them together; the
@@ -6228,10 +6260,18 @@ async def catalog(req):
     meta = _state_json("catalog_meta", {}) or {}
     want = {x for x in req.query.get("folder", "").split("\n") if x}
     kind, q = req.query.get("kind", ""), req.query.get("q", "").strip().lower()
+    cos_index = _cosplay_index()
+    cos_cache: dict = {}
     def key(it):
-        m = meta.get(f"{it['subfolder']}/{it['filename']}")
+        k = f"{it['subfolder']}/{it['filename']}"
+        m = meta.get(k)
         p = m.get("project") if isinstance(m, dict) else None
-        return f"@{p}" if p and p != "testing" else it["folder"]
+        if p and p != "testing": return f"@{p}"
+        # never moved to a project (Batch made it in Free work, or the move was lost): a cosplay goes under her character
+        if it["folder"] in ("Free work", "") and isinstance(m, dict):
+            if k not in cos_cache: cos_cache[k] = _cosplay_of(m, cos_index)
+            if cos_cache[k]: return f"@{cos_cache[k]}"
+        return it["folder"]
     counts: dict = {}; thumbs: dict = {}
     for it in items:
         k = key(it); counts[k] = counts.get(k, 0) + 1

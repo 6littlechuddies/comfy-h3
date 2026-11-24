@@ -25,7 +25,7 @@ function CosplaysPanel() {
   useEffect(() => {
     if (useCosplays.getState().running || useCosplays.getState().groups.length) return;
     useCosplays.setState((s) => ({ status: { ...s.status, _: "Looking through your results…" } }));
-    scanCosplays().then((g) => useCosplays.setState((s) => ({ groups: g, status: { ...s.status, _: g.length ? "" : "No cosplay pictures found — they're found by their Batch label (\"Batch 30 · Makima (Chainsaw Man) · 1/4\")" } })))
+    scanCosplays().then((g) => useCosplays.setState((s) => ({ groups: g, status: { ...s.status, _: g.length ? "" : "No cosplay pictures found — they're found by their Batch label or by how they were made (\"cosplaying Makima from Chainsaw Man\", or a name on your Cosplay list)" } })))
       .catch((e) => useCosplays.setState((s) => ({ status: { ...s.status, _: `Couldn't look: ${(e as Error).message}` } })));
   }, []);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("[aria-label='Picture viewer']")) close(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);

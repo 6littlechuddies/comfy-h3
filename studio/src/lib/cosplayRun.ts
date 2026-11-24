@@ -28,14 +28,27 @@ export function charFor(g: { name: string; series: string }, list = useCharacter
 export async function scanCosplays(): Promise<CosGroup[]> {
   const groups = new Map<string, CosGroup>();
   const seen = new Map<string, { name: string; series: string } | null>();
+  // names to look for in prompts: your Cosplay list and the cosplay characters you already have
+  const { useCosplay } = await import("./cosplay");
+  const known = [...useCosplay.getState().items.map((x) => ({ name: x.name, series: x.series })),
+    ...useCharacters.getState().list.map((c) => /^Cosplay of (.+?)(?: \((.*)\))?$/.exec(c.source ?? "")).filter(Boolean).map((m) => ({ name: m![1], series: m![2] ?? "" }))]
+    .filter((k) => k.name.trim().length >= 4);
+  const COS = /cosplay(?:ing|s|ed)?\s+(?:as\s+)?([A-Z][\w'’.\- ]{1,40}?)\s+from\s+([A-Z0-9][\w'’:!.\- ]{1,50}?)(?=[,.;)]|\s+(?:in|with|wearing|at|on|she|her|and)\b)/;
+  /** whose cosplay a result is: its Batch label, "cosplaying X from Y" in how it was made, or a known name in it */
+  const fromText = (t: string) => {
+    const m = COS.exec(t);
+    if (m) { const k = known.find((x) => x.name.toLowerCase() === m[1].trim().toLowerCase()); return k ?? { name: m[1].trim(), series: m[2].trim().replace(/[.,;:]+$/, "") }; }
+    const low = t.toLowerCase();
+    return known.find((k) => new RegExp(`(?<![a-z])${k.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`).test(low)) ?? null;
+  };
   for (let off = 0; ; off += 500) {
     const r = await fetch(`/studio-api/catalog?${new URLSearchParams({ offset: String(off), limit: "500", kind: "image" })}`);
     if (!r.ok) throw new Error(`The rental answered ${r.status}`);
     const d = await r.json();
-    for (const it of d.items as { filename: string; subfolder: string; mtime: number; meta?: { label?: string } }[]) {
+    for (const it of d.items as { filename: string; subfolder: string; mtime: number; meta?: { label?: string; prompt?: string; idea?: string } }[]) {
       const label = it.meta?.label ?? "";
       if (!seen.has(label)) seen.set(label, label ? await cosplayOfLabel(label) : null);
-      const cos = seen.get(label);
+      const cos = seen.get(label) ?? fromText(`${label} ${it.meta?.idea ?? ""} ${it.meta?.prompt ?? ""}`);
       if (!cos) continue;
       const k = keyOf(cos.name, cos.series);
       const g = groups.get(k) ?? { key: k, name: cos.name, series: cos.series, pics: [] };
@@ -44,6 +57,12 @@ export async function scanCosplays(): Promise<CosGroup[]> {
     }
     useCosplays.setState({ scanned: off + d.items.length });
     if (d.items.length < 500 || off + 500 >= d.total) break;
+  }
+  // "Makima" and "Makima (Chainsaw Man)" are the same one: merged under the one with the series
+  for (const g of [...groups.values()]) {
+    if (g.series) continue;
+    const twin = [...groups.values()].find((x) => x !== g && x.series && x.name.toLowerCase() === g.name.toLowerCase());
+    if (twin) { twin.pics.push(...g.pics); groups.delete(g.key); }
   }
   const out = [...groups.values()];
   for (const g of out) g.pics.sort((a, b) => b.mtime - a.mtime);
