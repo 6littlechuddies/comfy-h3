@@ -181,6 +181,29 @@ export async function ensureName(c: Character, onStep?: (t: string) => void): Pr
   return useCharacters.getState().list.find((y) => y.id === c.id) ?? c;
 }
 
+/** whose cosplay she is, read from her own pictures: their Batch labels ("Batch 30 · Makima (Chainsaw Man) · 1/4") and their
+ *  prompts (every Batch → Cosplay prompt says "cosplaying Makima from Chainsaw Man"), plus her look's recipe. The name most of
+ *  them agree on, as "Cosplay of Name (Series)" — or null when nothing points to one. */
+export async function guessCosplay(c: Character): Promise<string | null> {
+  const { cosplayOfLabel } = await import("./newChar");
+  const votes = new Map<string, number>();
+  const vote = (name: string, series: string, w: number) => {
+    const n = name.trim().replace(/^the\s+/i, ""), sr = series.trim().replace(/[.,;:]+$/, "");
+    if (!n || n.length > 60 || sr.length > 60) return;
+    const k = `${n}${sr ? ` (${sr})` : ""}`;
+    votes.set(k, (votes.get(k) ?? 0) + w);
+  };
+  const COS = /cosplay(?:ing|s|ed)?\s+(?:as\s+)?([A-Z][\w'’.\- ]{1,40}?)\s+from\s+([A-Z0-9][\w'’:!.\- ]{1,50}?)(?=[,.;)]|\s+(?:in|with|wearing|at|on|she|her|and)\b)/g;
+  const read = (t: string, w: number) => { for (const m of t.matchAll(COS)) vote(m[1], m[2], w); };
+  if (c.frame?.prompt) read(c.frame.prompt, 1);
+  const pics = (await charPictures(c).catch(() => [])).slice(-30);
+  for (const p of pics) { const x = await cosplayOfLabel(p.label); if (x) vote(x.name, x.series, 2); }
+  const prompts = await pool(pics.slice(-12), 6, (p) => promptOf(p.file, false));
+  for (const t of prompts) if (t) read(t, 1);
+  const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] >= 2 ? `Cosplay of ${best[0]}` : null;
+}
+
 export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t: string) => void; again?: boolean; deep?: boolean } = {}): Promise<{ pictures: number; filled: number }> {
   o.onStep?.("Reading their pictures…");
   const pics = (await charPictures(c)).slice(-60);
@@ -196,6 +219,25 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     // another character's text with a child word in it ("her cousin's kids") would stop THIS one's writer: left out of the list
     // (the list is only there so she comes out different), and said, so it can be fixed in that profile
     .filter((l) => { const hit = minorWords(l); if (hit.length) o.onStep?.(`Left ${l.slice(2).split(":")[0]} out of the comparison (“${hit.join("”, “")}” in her profile — worth rewording)`); return !hit.length; });
+  // not marked as a cosplay, but her pictures say she is one: marked now (clear "Cosplays as" if that's wrong)
+  if (!c.source) {
+    const g = await guessCosplay(c).catch(() => null);
+    if (g) {
+      const cur0 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+      c = { ...cur0, source: g }; useCharacters.getState().save(c);
+      o.onStep?.(`Her pictures say she's a ${g.toLowerCase().replace(/^cosplay of /, "cosplay of ")} — writing her as one (clear "Cosplays as" if not)`);
+    }
+  }
+  // a cosplay whose name is (nearly) the character's ("Maki" for Makima): a name of her own for the site
+  if (/^Cosplay of /.test(c.source ?? "")) {
+    const charName = c.source!.replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "");
+    const shown = c.site?.name || c.name;
+    const { close, siteAlias } = await import("./newChar");
+    if (close(charName, shown)) {
+      const [nm] = await siteAlias([charName]).catch(() => [] as string[]);
+      if (nm) { const cur1 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; c = { ...cur1, site: { ...cur1.site, name: nm } }; useCharacters.getState().save(c); o.onStep?.(`"${shown}" is too close to ${charName} — her site name is ${nm} now`); }
+    }
+  }
   // a cosplay: what the source says about the character (AniList, as Batch → Cosplay reads it) — and its adult check
   const canon = /^Cosplay of /.test(c.source ?? "") ? await (await import("./cosplay")).canonFacts(c.source!).catch((e: Error) => { if (/^Stopped:/.test(e.message)) throw e; return ""; }) : "";
   const notes = [

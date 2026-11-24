@@ -571,6 +571,17 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
     up(Object.fromEntries(bad.map((k) => [k, stripAges(site[k]!)])) as Partial<SiteInfo>);
     toast(`Took the stated age out of the ${bad.join(" and ")} — the site sets the age itself`, "info");
   }, [c.id, site.bio, site.persona, site.greeting, site.backstory, site.personality]); // eslint-disable-line react-hooks/exhaustive-deps
+  // not marked as a cosplay: her pictures are read once when she's opened — when they say whose cosplay she is, it's filled in
+  useEffect(() => {
+    if (c.source) return;
+    let on = true;
+    import("../lib/siteAuto").then((m) => m.guessCosplay(c)).then((g) => {
+      if (!on || !g) return;
+      const cur = useCharacters.getState().list.find((x) => x.id === c.id);
+      if (cur && !cur.source) { save({ ...cur, source: g }); toast(`${c.name}: her pictures say ${g.toLowerCase()} — filled in "Cosplays as" (clear it if that's wrong)`, "info"); }
+    }).catch(() => {});
+    return () => { on = false; };
+  }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [picking, setPicking] = useState<"avatar" | "cover" | null>(null);

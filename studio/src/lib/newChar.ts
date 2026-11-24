@@ -40,7 +40,7 @@ export async function siteAlias(names: string[]): Promise<string[]> {
   } catch { return names.map((n) => { const r = spare(n, used); used.add(r.toLowerCase()); return r; }); }
 }
 /** reads like the character's name: the same first three letters, or one inside the other */
-function close(n: string, a: string): boolean {
+export function close(n: string, a: string): boolean {
   const x = n.toLowerCase().split(/[\s(]/)[0], y = a.toLowerCase().split(/\s/)[0];
   return x.slice(0, 3) === y.slice(0, 3) || x.includes(y) || y.includes(x);
 }
