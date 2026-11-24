@@ -97,7 +97,7 @@ async def get_state(req):
 # when a machine happened to upload. A machine that restored an old copy uploads it with the old time, so it never wins.
 STAMP_FILE = os.path.join(STATE, "last_change.txt")
 WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models",
-              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed", "plans"}
+              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed", "plans", "chat_tests"}
 
 
 def last_change() -> float:
@@ -3025,8 +3025,8 @@ def _api_key(name: str) -> str:
     return (os.environ.get(name) or "").strip()
 
 
-async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "", extra: dict | None = None) -> tuple[str, str]:
-    body = {"model": DEEPSEEK_MODEL, "messages": messages, "max_tokens": max(64, min(32000, int(max_tokens))), "temperature": temperature, "top_p": top_p,
+async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "", extra: dict | None = None, model: str = "") -> tuple[str, str]:
+    body = {"model": model or DEEPSEEK_MODEL, "messages": messages, "max_tokens": max(64, min(32000, int(max_tokens))), "temperature": temperature, "top_p": top_p,
             "thinking": {"type": "enabled" if thinking else "disabled"}, "stream": False, **(extra or {})}
     if thinking: body["reasoning_effort"] = "low"  # a lot of thinking makes the writing worse, not better
     last = ""
@@ -3062,6 +3062,67 @@ async def chatsim(req):
     except RuntimeError as e:
         return web.json_response({"error": str(e)}, status=502)
     return web.json_response({"text": text})
+
+
+async def _openrouter(messages: list, model: str, max_tokens: int = 3000, temperature: float = 0.3, key: str = "") -> str:
+    """one answer from any model on OpenRouter (OPENROUTER_API_KEY in the template, or pasted in the Studio)"""
+    k = key or _api_key("OPENROUTER_API_KEY")
+    if not k: raise RuntimeError("No OpenRouter key — paste one in Chat test → Test setup")
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    last = ""
+    async with aiohttp.ClientSession() as s:
+        for attempt in range(3):
+            try:
+                async with s.post("https://openrouter.ai/api/v1/chat/completions", json=body, headers={"Authorization": f"Bearer {k}", "X-Title": "H3 Studio chat test"},
+                                  timeout=aiohttp.ClientTimeout(total=300)) as r:
+                    txt = await r.text()
+                    if r.status == 200:
+                        d = json.loads(txt)
+                        if d.get("error"): last = f"OpenRouter: {str(d['error'])[:300]}"
+                        else: return str(((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+                    else: last = f"OpenRouter answered {r.status}: " + _redact(txt)[:300]
+                    if r.status in (400, 401, 402, 403, 404): break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last = f"Couldn't reach OpenRouter: {type(e).__name__}"
+            await asyncio.sleep(2 + attempt * 3)
+    raise RuntimeError(last.replace(k, "‹hidden›"))
+
+
+async def judge_ai(req):
+    """/studio-api/judge — the chat test's reviewer on a stronger cloud model. POST {messages, provider: "deepseek-pro" |
+    "deepseek" | "openrouter", model}. GET: what's set up. POST {key} to /studio-api/judge/key keeps an OpenRouter key."""
+    if req.method == "GET":
+        return web.json_response({"deepseek": bool(_api_key("DEEPSEEK_API_KEY")), "openrouter": bool(_api_key("OPENROUTER_API_KEY"))})
+    b = await req.json()
+    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or []) if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
+    prov = str(b.get("provider") or "deepseek-pro")
+    try:
+        if prov == "openrouter": text = await _openrouter(msgs, str(b.get("model") or "").strip() or "deepseek/deepseek-chat", max_tokens=int(b.get("max_tokens") or 3000))
+        else: text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 3000), temperature=0.3, top_p=0.9, model="deepseek-v4-pro" if prov == "deepseek-pro" else "")
+    except RuntimeError as e:
+        return web.json_response({"error": str(e)}, status=502)
+    return web.json_response({"text": text})
+
+
+async def judge_key(req):
+    key = str((await req.json()).get("key") or "").strip()
+    data = {}
+    try:
+        with open(API_KEYS) as f: data = json.load(f) or {}
+    except (OSError, ValueError): pass
+    if key:
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {key}"}, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                    if r.status != 200: return web.json_response({"error": f"OpenRouter didn't take that key ({r.status})"}, status=400)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            return web.json_response({"error": f"Couldn't reach OpenRouter: {type(e).__name__}"}, status=400)
+        data["OPENROUTER_API_KEY"] = key
+    else: data.pop("OPENROUTER_API_KEY", None)
+    os.makedirs(WORK, exist_ok=True)
+    with open(API_KEYS, "w") as f: json.dump(data, f)
+    os.chmod(API_KEYS, 0o600)
+    return web.json_response({"openrouter": bool(_api_key("OPENROUTER_API_KEY"))})
 
 
 def _img_url(path: str, max_side: int = 1536) -> str:
@@ -3805,7 +3866,7 @@ TEMPLATES = {
     "alias": "NAMES:\n{names}\n\nTAKEN (don't use):\n{taken}",
     "lines": "TASK: {task}\n\nWHO SHE IS:\n{character}\n\nAVOID (share no run of four words with these):\n{avoid}",
     "chatsim": "(filled by the Studio)",
-    "chatjudge": "HER CARD:\n{card}\n\nTRANSCRIPT:\n{transcript}\n\nCHECKS:\n{checks}",
+    "chatjudge": "HER CARD:\n{card}\n\nREFERENCE:\n{reference}\n\nCHATS:\n{transcript}\n\nCHECKS:\n{checks}",
     "live": "WHO SHE IS:\n{character}\n\nFRAMING: {framing}\nHOW MANY ACTIONS: {count}\nALLOWED RATINGS: {ratings}\nKEEP THESE KEYS (already made — plan them again with the same key):\n{keep}\n\nEXAMPLES (what other creators offer):\n{examples}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }
@@ -6821,7 +6882,7 @@ def main():
         web.get("/grok-relay/next", relay_next), web.post("/grok-relay/answer", relay_answer), web.get("/grok-relay/h3-grok.user.js", relay_script), web.get("/grok-relay/img/{id}/{n}", relay_img),
         web.get("/studio-api/health", health), web.get("/studio-api/debug-report", debug_report), web.get("/studio-api/ws", relay_ws),
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
-        web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status), web.post("/studio-api/chatsim", chatsim),
+        web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status), web.post("/studio-api/chatsim", chatsim), web.route("*", "/studio-api/judge", judge_ai), web.post("/studio-api/judge/key", judge_key),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
         web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear-test", posewear_test), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
