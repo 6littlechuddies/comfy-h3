@@ -123,6 +123,23 @@ async function lookUp(it: CosItem): Promise<Partial<CosItem>> {
   return { age, notes, picture };
 }
 
+/** the same look-up for a character marked "Cosplay of …" on its own (her site profile): your Cosplay list's research when
+ *  it has it, else AniList now. Throws when the source makes her under 18 — the same adult check as Batch → Cosplay. */
+const canonCache = new Map<string, string>();
+export async function canonFacts(source: string): Promise<string> {
+  const m = /^Cosplay of (.+?)(?: \(([^)]*)\))?$/.exec(source.trim());
+  if (!m) return "";
+  const name = m[1].trim(), series = (m[2] ?? "").trim(), k = keyOf(name, series);
+  if (canonCache.has(k)) return canonCache.get(k)!;
+  const known = useCosplay.getState().items.find((x) => x.key === k || x.name.toLowerCase() === name.toLowerCase());
+  if (known?.status === "skipped") throw new Error(`Stopped: ${name} ${known.why ? `— ${known.why.toLowerCase()}` : "is under 18 in the source"}. Only characters who are adults can be cosplayed here.`);
+  const got = known?.notes ? { notes: known.notes, age: known.age } : await lookUp({ key: k, name, series, status: "new" });
+  if (got.status === "skipped") throw new Error(`Stopped: ${name} — ${String(got.why ?? "under 18 in the source").toLowerCase()}. Only characters who are adults can be cosplayed here.`);
+  const notes = (got.notes ?? "").trim();
+  canonCache.set(k, notes);
+  return notes;
+}
+
 /** step 3: CivitAI LoRAs for Krea 2 whose title or tags name the character, most collected first */
 export async function findLoras(it: CosItem): Promise<Candidate[]> {
   const first = it.name.split(/\s+/)[0].toLowerCase();

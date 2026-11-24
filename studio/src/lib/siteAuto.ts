@@ -196,9 +196,12 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     // another character's text with a child word in it ("her cousin's kids") would stop THIS one's writer: left out of the list
     // (the list is only there so she comes out different), and said, so it can be fixed in that profile
     .filter((l) => { const hit = minorWords(l); if (hit.length) o.onStep?.(`Left ${l.slice(2).split(":")[0]} out of the comparison (“${hit.join("”, “")}” in her profile — worth rewording)`); return !hit.length; });
+  // a cosplay: what the source says about the character (AniList, as Batch → Cosplay reads it) — and its adult check
+  const canon = /^Cosplay of /.test(c.source ?? "") ? await (await import("./cosplay")).canonFacts(c.source!).catch((e: Error) => { if (/^Stopped:/.test(e.message)) throw e; return ""; }) : "";
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
-    stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`), c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && !minorWords(c.frame.prompt).length && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
+    stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`),
+    canon && `WHAT THE SOURCE SAYS ABOUT THE CHARACTER SHE COSPLAYS (read it for her personality only — none of its places, people or events go into her life):\n${stripAges(canon).split(/(?<=[.!?])\s+/).filter((x) => !minorWords(x).length).join(" ").slice(0, 1500)}`, c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && !minorWords(c.frame.prompt).length && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
     site.sets?.length && `SITE SETS: ${site.sets.map((s) => `${s.title} (${s.tier})`).join(", ")}`,
     sparkNote(others.join(" ")),

@@ -615,6 +615,21 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <TextIn label="Cosplays as · character (series) — her personality follows them, her life and name stay her own; she goes in your site's Cosplay section. Blank = an original"
           value={/^Cosplay of /.test(c.source ?? "") ? c.source!.replace(/^Cosplay of /, "") : ""} placeholder="e.g. Makima (Chainsaw Man)"
           onChange={(v) => save({ ...c, source: v.trim() ? `Cosplay of ${v.trim()}` : /^Cosplay of /.test(c.source ?? "") ? undefined : c.source })} />
+        {/^Cosplay of /.test(c.source ?? "") && <Btn small className="self-start" disabled={writing || !!step} onClick={async () => {
+          // one press: the adult check and what the source says (as Batch → Cosplay does), a name of her own, her profile rewritten
+          const src = c.source!;
+          try {
+            mark(c.id, "Looking the character up (adult check)…");
+            await (await import("../lib/cosplay")).canonFacts(src);
+            const { siteAlias } = await import("../lib/newChar");
+            const name = (await siteAlias([src.replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "")]))[0];
+            const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+            if (name) save({ ...cur, site: { ...(cur.site ?? {}), name } });
+            mark(c.id, null);
+            await write(true);
+            toast(`${name ? `Her site name is ${name}. ` : ""}Profile rewritten as a cosplay of ${src.replace(/^Cosplay of /, "")} — check it, then send`, "good");
+          } catch (e) { mark(c.id, null); toast((e as Error).message, "bad"); }
+        }} title="Checks the character is an adult in the source, reads what the source says about her personality, gives her a name of her own, then rewrites her whole profile">Make her this cosplay · name + rewrite</Btn>}
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
         <TextIn label="Tagline · under her name: who she is to him, her situation, a challenge (120 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 120) })} />
