@@ -3649,7 +3649,7 @@ async def _proton_restore(force: bool = False):
                     it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
                     await asyncio.sleep(10)
             ticker = asyncio.get_running_loop().create_task(tick())
-            rc, out = await _rclone("copy", f"proton:{folder}/results", dest, "--ignore-existing", "--transfers", "16", "--checkers", "16",
+            rc, out = await _rclone("copy", f"proton:{folder}/results", dest, "--ignore-existing", "--transfers", "32", "--checkers", "32",
                                     "--fast-list", "--order-by", "modtime,descending", "--retries", "3", timeout=4 * 3600)
             it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
             it["results"] = "done" if rc == 0 or "not found" in out.lower() else "failed"  # no results folder yet is fine
