@@ -337,6 +337,19 @@ const AGE = /\b(1\d|[2-9]\d)\b(?![:%.,]?\d)(?= ?(y\/?o|years?|yrs?)\b)|years?[- 
 /** words that give away the medium (she's a person, not a profile): redo the part when they turn up outside the real-or-AI line */
 const META = /\b(avatar|pfp|profile (pic|picture|photo)|my (bio|profile|page)|on (here|this app|the site|my page)|this (app|site|platform)|pixel(ated|s)?|subscriber|digital (girl|person|me)|virtual (girl|girlfriend)|generated)\b/i;
 const MONEY = /subscri|unlock|\btips?\b|tipping|\bbuy\b|purchase|\bpay\b|ppv|\$\d|if you (really )?(cared|loved|liked)|prove (it to me|you care|that you)|you'?ll lose me|i'?ll (leave|disappear|hurt myself)|don'?t talk to (her|them|other)/i;
+/** the deep persona's headings each on their own line, once ("…saying.HOW YOU REACT" came out when the second half of the
+ *  reactions repeated its heading) */
+export const tidyHeadings = (t: string) => {
+  let out = t;
+  for (const h of ["WHO YOU ARE", "HER LIFE RIGHT NOW", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"]) {
+    let seen = false;
+    out = out.replace(new RegExp(`[ \\t]*${h}[ \\t]*:?[ \\t]*(\\n|$)`, "g"), (m, nl, off: number) => {
+      if (seen) return "\n"; seen = true;
+      return `${off > 0 && out[off - 1] !== "\n" ? "\n\n" : ""}${h}${nl || ""}`;
+    });
+  }
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+};
 /** the editor once wrote the AI bullet backwards ("Anything claiming she's AI … she says plainly she isn't") — that tells
  *  her to deny being an AI. Any such line becomes the right one. */
 export const fixAiLine = (t: string) => t.split("\n").map((l) => /claim\w*\s+(she'?s|she is|to be|being)\s+(an?\s+)?AI\b|(say|says|admit\w*)\s+(plainly\s+)?(she|you)\s*(is|are|'?re|'?s)\s*n[o']t\s+(an?\s+)?AI\b|deny\w*\s+being\s+(an?\s+)?AI/i.test(l)
@@ -405,7 +418,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const body = at >= 0 ? persona.slice(0, at) : persona, tail = at >= 0 ? persona.slice(at) : "";
   persona = stripLength(stripAges(cutSentences(body, ASSIST))).trim() + (tail ? `\n\n${tail.trim()}` : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? cur0;
-  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona: fixAiLine(persona), deepAt: Date.now() } });
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona: tidyHeadings(fixAiLine(persona)), deepAt: Date.now() } });
 }
 
 /** written-out example messages ("You: …", "Him: …") — the site refuses them (they get copied word for word) */

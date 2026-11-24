@@ -13,6 +13,17 @@ export function cosplayOf(idea?: unknown): { name: string; series: string } | nu
   const m = typeof idea === "string" ? /^Cosplay · (.+?)(?: \(([^)]*)\))?(?: · \d+\/\d+)?$/.exec(idea) : null;
   return m ? { name: m[1].trim(), series: (m[2] ?? "").trim() } : null;
 }
+/** the same from a picture's label, for results whose job record is gone (restored from a drive): "Batch 30 · Makima
+ *  (Chainsaw Man) · 1/4" — a Batch row named like a cosplay (a series in brackets), or one on your Cosplay list */
+export async function cosplayOfLabel(label?: string): Promise<{ name: string; series: string } | null> {
+  const m = /^Batch \d+ · (.+?)(?: \(([^)]*)\))?(?: · \d+\/\d+)?$/.exec(label ?? "");
+  if (!m) return null;
+  const name = m[1].trim(), series = (m[2] ?? "").trim();
+  if (series) return { name, series };
+  const { useCosplay } = await import("./cosplay");
+  const hit = useCosplay.getState().items.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  return hit ? { name: hit.name, series: hit.series } : null;
+}
 
 /** her own name for the site: a cosplayer's name that suits the character's feel but isn't a variant of it (the writer;
  *  a name from a plain list if it can't, or if what it gave still reads like the character's name) */
@@ -73,13 +84,16 @@ export async function createFromPicture(o: { pic: Media; gen: CivitGen | null; r
 export async function charactersFromResults(its: { o: FileRef & { type: string }; label: string; idea?: unknown; jobId?: string }[], opts: { gallery: boolean; onStep?: (m: string) => void }): Promise<{ made: Character[]; failed: string[] }> {
   const [{ useTray }, { fileGen }] = await Promise.all([import("./tray"), import("./api")]);
   const groups = new Map<string, typeof its>();
+  // whose cosplay each one is: from its job record, else from its label (results restored from a drive have no job record)
+  const cosOf = new Map<(typeof its)[number], { name: string; series: string } | null>();
+  for (const it of its) cosOf.set(it, cosplayOf(it.idea) ?? await cosplayOfLabel(it.label));
   for (const it of its) {
-    const cos = cosplayOf(it.idea);
+    const cos = cosOf.get(it);
     const k = cos ? `cos:${cos.name.toLowerCase()}|${cos.series.toLowerCase()}` : `one:${it.o.subfolder}/${it.o.filename}`;
     groups.set(k, [...(groups.get(k) ?? []), it]);
   }
   const keys = [...groups.keys()];
-  const cosNames = keys.filter((k) => k.startsWith("cos:")).map((k) => cosplayOf(groups.get(k)![0].idea)!.name);
+  const cosNames = keys.filter((k) => k.startsWith("cos:")).map((k) => cosOf.get(groups.get(k)![0])!.name);
   opts.onStep?.(cosNames.length ? "Thinking of site names…" : "Reading the pictures…");
   const aliases = cosNames.length ? await siteAlias(cosNames) : [];
   const made: Character[] = [], failed: string[] = [];
@@ -87,7 +101,7 @@ export async function charactersFromResults(its: { o: FileRef & { type: string }
   for (const k of keys) {
     const list = groups.get(k)!;
     const first = list[0];
-    const cos = cosplayOf(first.idea);
+    const cos = cosOf.get(first) ?? null;
     const alias = cos ? aliases[ai++] : undefined;
     try {
       opts.onStep?.(`Reading picture ${++n} of ${keys.length}${cos ? ` (${cos.name})` : ""}…`);

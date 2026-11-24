@@ -5843,7 +5843,17 @@ def _persona_clean(text: str) -> str:
             line = " ".join(x for x in (fix(y) for y in re.split(r"(?<=[.!?])[ \t]+", line)) if x).strip()
             if not line or re.fullmatch(r"[-•\s]*", line): continue
         out.append(line)
-    return "\n".join(out).strip()
+    text = "\n".join(out).strip()
+    # the deep persona's headings on their own lines, once each ("…saying.HOW YOU REACT" when a section repeated its heading)
+    for h in ("WHO YOU ARE", "HER LIFE RIGHT NOW", "HOW YOU REACT", "HOW YOU SOUND", "NEVER SAY"):
+        n = 0
+        def one(m, h=h):
+            nonlocal n
+            n += 1
+            if n > 1: return "\n"
+            return ("\n\n" if m.start() > 0 and text[m.start() - 1] != "\n" else "") + h + "\n"
+        text = re.sub(rf"[ \t]*{h}[ \t]*:?[ \t]*(?:\n|$)", one, text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _no_length(text: str) -> str:

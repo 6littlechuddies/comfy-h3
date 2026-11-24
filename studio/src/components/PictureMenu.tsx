@@ -182,10 +182,11 @@ export function PictureMenuHost() {
       key: "newc", icon: "user", label: "New character from this picture", hide: isVideo, run: async () => {
         // its own project: the picture becomes their look, so it doesn't mix into the character you're on
         const m = await toMedia(t);
-        const [{ useNewFromPicture }, gen, { madeBy }, { cosplayOf, siteAlias }] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null), import("../lib/made"), import("../lib/newChar")]);
+        const [{ useNewFromPicture }, gen, { madeBy }, { cosplayOf, cosplayOfLabel, siteAlias }] = await Promise.all([import("../tabs/Characters"), genOf(t).catch(() => null), import("../lib/made"), import("../lib/newChar")]);
         useCharacters.getState().select(null);
         // a cosplay result: named after the character here, with a name of her own for your site
-        const cos = cosplayOf(t.output ? madeBy(t.output)?.j.meta?.idea : undefined);
+        // (its label says so too when the job record is gone — a result restored from a drive)
+        const cos = cosplayOf(t.output ? madeBy(t.output)?.j.meta?.idea : undefined) ?? await cosplayOfLabel(t.label);
         useNewFromPicture.setState({ pic: m, gen, name: cos?.name, siteName: cos ? (await siteAlias([cos.name]).catch(() => []))[0] : undefined, source: cos ? `Cosplay of ${cos.name}${cos.series ? ` (${cos.series})` : ""}` : undefined });
         useSettings.getState().setTab("characters");
         await closeWindows();

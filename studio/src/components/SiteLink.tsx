@@ -612,6 +612,9 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           <Btn small onClick={async () => { try { const { siteAlias } = await import("../lib/newChar"); const a = await siteAlias([c.name]); if (a[0]) { up({ name: a[0] }); toast(`Site name: ${a[0]}`, "good"); } } catch (e) { toast((e as Error).message, "bad"); } }}
             title="A name of her own that suits her — never a variant of a character's name">New name</Btn>
         </div>
+        <TextIn label="Cosplays as · character (series) — her personality follows them, her life and name stay her own; she goes in your site's Cosplay section. Blank = an original"
+          value={/^Cosplay of /.test(c.source ?? "") ? c.source!.replace(/^Cosplay of /, "") : ""} placeholder="e.g. Makima (Chainsaw Man)"
+          onChange={(v) => save({ ...c, source: v.trim() ? `Cosplay of ${v.trim()}` : /^Cosplay of /.test(c.source ?? "") ? undefined : c.source })} />
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
         <TextIn label="Tagline · under her name: who she is to him, her situation, a challenge (120 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 120) })} />
