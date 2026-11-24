@@ -127,6 +127,8 @@ function CatalogPanel() {
   const goneKeys = folders.filter((f) => f.name.startsWith("@") && !used.has(f.name));
   const gone = goneKeys.reduce((a, f) => a + f.count, 0);
   const groups = ["Realistic", "Realistic cosplays", "Anime", "Other folders"].map((g) => ({ g, rows: [...rows, ...rest].filter((r) => r.group === g && (r.n > 0 || (r.id && g !== "Other folders"))).sort((a, b) => b.n - a.n) })).filter((x) => x.rows.length);
+  // the character the site buttons are for: the project whose folder is open, else the one picked on the left
+  const siteChar = chars.find((c) => folder.split("\n")[0] === `@${c.id}`) ?? sel;
   const [dropOn, setDropOn] = useState<string | null>(null);
   const dragList = (it: CatItem) => (picked[fileKey(it)] ? Object.values(picked) : [it]);
   const projectRow = (r: { key: string; id: string | null; name: string; n: number; face?: FileRef }) => (
@@ -198,6 +200,7 @@ function CatalogPanel() {
       {selecting && (
         <div className="fade-up flex flex-wrap items-center gap-2 border-t border-line bg-panel px-5 py-2.5 text-[13px]">
           <b>{nPicked} picked</b>
+          {siteChar && <SiteRoles c={siteChar} picked={Object.values(picked).map(asRef)} onDone={() => setPicked({})} />}
           <button onClick={() => setPicked(Object.fromEntries(items.map((x) => [fileKey(x), x])))} className="text-muted underline-offset-2 hover:text-ink hover:underline">All {items.length} loaded</button>
           <span className="ml-auto flex flex-wrap items-center gap-2">
             <button onClick={() => fav(Object.values(picked))} className="press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3"><StarIcon on /> Favourite</button>
@@ -273,4 +276,26 @@ export function sortPlan(all: CatItem[], chars: { id: string; name: string; sour
     out.get(hit.id)!.items.push(it);
   }
   return [...out.values()].sort((a, b) => b.items.length - a.items.length);
+}
+
+/** the selection bar's "for her site" part: her card (+ its hover loop), banner and profile carousel, from the ticked pictures */
+function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; site?: { galleryFiles?: FileRef[] } }; picked: FileRef[]; onDone: () => void }) {
+  const [loop, setLoop] = useState(() => { try { return localStorage.getItem("h3.cat.cardLoop") !== "0"; } catch { return true; } });
+  const pics = picked.filter((f) => !/\.(mp4|webm|mov|gif)$/i.test(f.filename));
+  const one = pics.length === 1;
+  const btn = "press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3 disabled:opacity-40";
+  const run = async (f: () => Promise<unknown>) => { try { await f(); onDone(); } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } };
+  return (
+    <span className="flex flex-wrap items-center gap-2 border-l border-line pl-3">
+      <span className="text-muted">For {c.name} on your site:</span>
+      <button className={btn} disabled={!one} title={one ? "Her card: the picture on the grid and in chat (her cover photo)" : "Tick exactly one picture"}
+        onClick={() => run(async () => (await import("../lib/siteMedia")).setCard(c.id, pics[0], { loop }))}>★ Card</button>
+      <label className="flex items-center gap-1 text-[12px] text-muted" title="Animate the card into her hover loop (a 5 s seamless loop, made in the queue)">
+        <input type="checkbox" checked={loop} onChange={(e) => { setLoop(e.target.checked); try { localStorage.setItem("h3.cat.cardLoop", e.target.checked ? "1" : "0"); } catch { /* */ } }} /> + hover loop</label>
+      <button className={btn} disabled={!pics.length} title="Her profile carousel, after her card — up to 12, seen by everyone (no nudity)"
+        onClick={() => run(async () => (await import("../lib/siteMedia")).addToCarousel(c.id, pics))}>Carousel +{pics.length} <span className="text-dim">({c.site?.galleryFiles?.length ?? 0}/12)</span></button>
+      <button className={btn} disabled={!one} title={one ? "The wide banner at the top of the explore page" : "Tick exactly one picture"}
+        onClick={() => run(async () => (await import("../lib/siteMedia")).setBanner(c.id, pics[0]))}>Banner</button>
+    </span>
+  );
 }

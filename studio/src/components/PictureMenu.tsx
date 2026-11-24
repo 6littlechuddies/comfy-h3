@@ -194,10 +194,29 @@ export function PictureMenuHost() {
       },
     },
     {
-      key: "cover", icon: "user", label: `Make this ${coverChar?.name ?? "their"}'s cover photo`, hide: isVideo || !coverChar, run: async () => {
+      key: "cover", icon: "user", label: `Make this ${coverChar?.name ?? "their"}'s cover photo (her card)`, hide: isVideo || !coverChar, run: async () => {
         const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
         const { changeCover } = await import("../lib/cover");
         await changeCover(coverChar!.id, ref);
+      },
+    },
+    {
+      key: "cardl", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s card + animate her hover loop`, hide: isVideo || !coverChar, run: async () => {
+        const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
+        await (await import("../lib/siteMedia")).setCard(coverChar!.id, ref, { loop: true });
+        return `${coverChar!.name}'s card is set — her hover loop is being made from it`;
+      },
+    },
+    {
+      key: "carousel", icon: "plus", label: `Add to ${coverChar?.name ?? "their"}'s profile carousel (your site)`, hide: isVideo || !coverChar, run: async () => {
+        const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
+        await (await import("../lib/siteMedia")).addToCarousel(coverChar!.id, [ref]);
+      },
+    },
+    {
+      key: "banner", icon: "image", label: `Make this ${coverChar?.name ?? "their"}'s banner (your site)`, hide: isVideo || !coverChar, run: async () => {
+        const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
+        await (await import("../lib/siteMedia")).setBanner(coverChar!.id, ref);
       },
     },
     {

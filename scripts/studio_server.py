@@ -5986,16 +5986,25 @@ async def _site_push(job: dict, d: dict):
             return _file_of(ref) if isinstance(ref, dict) and ref.get("filename") else None
         sets = [x for x in (site.get("sets") or []) if isinstance(x, dict) and x.get("items") and (not d.get("sets") or x.get("set_key") in d["sets"])]
         files = []  # (role, path)
-        for role, v in (("avatar", site.get("avatar") or "face"), ("cover", site.get("cover") or "front")):
-            own = site.get(f"{role}File")  # any picture you picked (tray or their results) wins over a sheet view
-            # the cover follows their cover photo (Characters → Cover photo) unless a sheet view was picked for the site
-            if role == "cover" and not own and not site.get("cover") and isinstance(c.get("cover"), dict): own = c["cover"]
-            p = None
-            if isinstance(own, dict) and own.get("filename"):
-                try: p = _file_of(own)
-                except web.HTTPException: p = None
-            p = p if p and os.path.isfile(p) else (vpath(v) or vpath("front"))
+        def own_path(ref):
+            if not (isinstance(ref, dict) and ref.get("filename")): return None
+            try: p = _file_of(ref)
+            except web.HTTPException: return None
+            return p if os.path.isfile(p) else None
+        # CARD: the picture on the grid and in chat = her cover photo (Characters → Cover photo, or one picked for the site);
+        # AVATAR: her face (or a picked one) — the site shows the card when there is one. Factory roles "card" / "avatar".
+        for role, v in (("avatar", site.get("avatar") or "face"), ("card", site.get("cover") or "front")):
+            own = site.get("avatarFile" if role == "avatar" else "coverFile")
+            if role == "card" and not own and not site.get("cover") and isinstance(c.get("cover"), dict): own = c["cover"]
+            p = own_path(own) or vpath(v) or vpath("front")
             if p and os.path.isfile(p): files.append((role, p))
+        # BANNER: the explore page's wide hero (factory role "cover"), only when one was picked — else the site keeps its own
+        bp = own_path(site.get("bannerFile"))
+        if bp: files.append(("banner", bp))
+        # PROFILE CAROUSEL (factory role "gallery"): her picked pictures, in order, up to 12 — pictures only
+        for g in (site.get("galleryFiles") or [])[:12]:
+            gp = own_path(g)
+            if gp and not re.search(r"\.(mp4|webm|mov|gif)$", gp, re.I): files.append(("gallery", gp))
         # her hover loop (Your site → Hover loop): made to the card's shape before it's uploaded
         loop_src = None
         lf = site.get("loopFile")
@@ -6004,7 +6013,7 @@ async def _site_push(job: dict, d: dict):
             except web.HTTPException: loop_src = None
             if loop_src and not os.path.isfile(loop_src): loop_src = None
             if not loop_src: job["note"] = "her hover loop file is gone from this rental — pick it again (Your site → Hover loop)"
-        card = next((p for r, p in files if r == "cover"), None)
+        card = next((p for r, p in files if r == "card"), None)
         if loop_src and card:
             job["step"] = "making the hover loop"
             cw, ch = _card_size(card)
@@ -6054,7 +6063,9 @@ async def _site_push(job: dict, d: dict):
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
             job["character"] = res
-            media = {"avatar": next((mids[p] for r, p in files if r == "avatar"), None), "cover": next((mids[p] for r, p in files if r == "cover"), None),
+            media = {"avatar": next((mids[p] for r, p in files if r == "avatar"), None), "card": next((mids[p] for r, p in files if r == "card"), None),
+                     **({"cover": mids[p]} if (p := next((p for r, p in files if r == "banner"), None)) else {}),
+                     **({"gallery": list(dict.fromkeys(mids[p] for r, p in files if r == "gallery"))} if any(r == "gallery" for r, _ in files) else {}),
                      "reference": [mids[p] for r, p in files if r == "reference"]}
             loop_p = next((p for r, p in files if r == "loop"), None)
             if loop_p: media["loop"] = mids[loop_p]

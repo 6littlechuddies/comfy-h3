@@ -44,7 +44,7 @@ const randomAge = () => 21 + Math.floor(Math.random() ** 1.6 * 10);
 
 /** everything for one character, in order: (named already by the batch) an age, her profile, her hover loop, sent as a
  *  draft. Her pictures aren't sorted into sets here — for now sets are made by hand in her folders. */
-async function doItAll(c: Character, connected: boolean, step: (t: string) => void): Promise<string> {
+async function doItAll(c: Character, connected: boolean, step: (t: string) => void, loopMade?: Promise<unknown>): Promise<string> {
   const { fillProfile } = await import("../lib/siteAuto");
   const now0 = useCharacters.getState().list.find((x) => x.id === c.id)!;
   if (!(Number(now0.age) >= 21) || Number(now0.age) === DEFAULT_AGE) useCharacters.getState().save({ ...now0, age: randomAge() });
@@ -52,7 +52,9 @@ async function doItAll(c: Character, connected: boolean, step: (t: string) => vo
   await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: step });
   // no hover loop picked yet: her newest loop (Video board / Animate), so the card moves on the site
   const now = useCharacters.getState().list.find((x) => x.id === c.id)!;
-  if (!now.site?.loopFile) {
+  // her hover loop, being made from her card in the queue since the start: waited for before she's sent
+  if (loopMade && !now.site?.loopFile) { step("Waiting for her hover loop (made from her card)…"); await loopMade; }
+  if (!useCharacters.getState().list.find((x) => x.id === c.id)?.site?.loopFile) {
     step("Looking for her hover loop…");
     const best = (await loopCandidates(now).catch(() => [])).find((x) => x.loop);
     if (best) useCharacters.getState().save({ ...now, site: { ...now.site, loopFile: best.file } });
@@ -442,11 +444,15 @@ function Characters({ connected }: { connected: boolean }) {
       } catch (e) { toast(`Names: ${(e as Error).message} — kept the old ones`, "bad"); }
       unnamed.forEach((c) => mark(c.id, "Waiting…"));
     }
+    // 2. hover loops for every one without one, made from her card — all queued now, so the GPU works while profiles are written
+    const { makeHoverLoop } = await import("../lib/hoverLoop");
+    const loops = new Map(ids.filter((id) => !useCharacters.getState().list.find((x) => x.id === id)?.site?.loopFile)
+      .map((id) => [id, makeHoverLoop(id).catch((e) => { toast(`${useCharacters.getState().list.find((x) => x.id === id)?.name}: hover loop skipped (${(e as Error).message})`, "info"); return null; })] as const));
     for (const id of ids) {
       const c = useCharacters.getState().list.find((x) => x.id === id);
       if (!c) { mark(id, null); continue; }
       mark(c.id, "Starting…");
-      try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t)); ok++; toast(`${c.name}: ${note}`, "good"); }
+      try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t), loops.get(c.id)); ok++; toast(`${c.name}: ${note}`, "good"); }
       catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
     }
@@ -500,6 +506,13 @@ function Characters({ connected }: { connected: boolean }) {
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={async () => {
+          const { makeHoverLoop } = await import("../lib/hoverLoop");
+          const need = (chosen.length ? chosen : list).filter((c) => !c.site?.loopFile && (c.cover || c.views.front));
+          if (!need.length) { toast("Every one has a hover loop already", "info"); return; }
+          toast(`Making ${need.length} hover loop${need.length > 1 ? "s" : ""} from their cards — they're queued; each is set when it's done`, "good");
+          for (const c of need) makeHoverLoop(c.id).catch((e) => toast(`${c.name}: ${(e as Error).message}`, "bad"));
+        }} disabled={Object.keys(busy).length > 0} title="For every ticked one (or everyone) without a hover loop: animate her card into one"><Icon name="film" size={14} /> Make missing loops · {(chosen.length ? chosen : list).filter((c) => !c.site?.loopFile).length}</Btn>
         <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <DeepToggle />
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
@@ -695,11 +708,24 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="flex items-center text-[12px] text-muted">Hover loop <span className="ml-1.5 text-dim">· plays on her card when someone hovers it</span>
-            <button className="ml-auto text-[11.5px] text-accent hover:underline" onClick={() => setPickLoop(true)}>Pick from their videos</button></span>
+            <button className="ml-auto text-[11.5px] text-accent hover:underline" title="Animate her card picture into a 5 s seamless loop (in the queue, a few minutes)"
+              onClick={async () => { try { await (await import("../lib/hoverLoop")).makeHoverLoop(c.id); } catch (e) { toast((e as Error).message, "bad"); } }}>Make it from her card</button>
+            <button className="ml-3 text-[11.5px] text-accent hover:underline" onClick={() => setPickLoop(true)}>Pick from their videos</button></span>
           <Slot className="h-44" accept={["video"]} value={site.loopFile ? { name: site.loopFile.filename, kind: "video", url: viewUrl(site.loopFile), label: "hover loop" } : null}
             hint="a short video of her — sent 540 px wide, the card's shape, no sound, ~1 MB"
             onChange={(m) => up({ loopFile: m ? { filename: m.name, subfolder: "", type: "input" } : undefined } as Partial<SiteInfo>)} />
           <span className="text-[11.5px] leading-relaxed text-dim">Made from this when sent: cropped to her cover's shape (not stretched), 24 fps, sound off. Animate → Loop of her cover picture fits best.</span>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[12px] text-muted">Profile carousel <span className="text-dim">· after her card on her profile, up to 12, seen by everyone (no nudity) · {site.galleryFiles?.length ?? 0}/12 · add from the Catalog (tick → Carousel) or right-click a picture</span></span>
+          {site.galleryFiles?.length ? <div className="flex flex-wrap gap-1.5">{site.galleryFiles.map((f, i) => (
+            <span key={`${f.subfolder}/${f.filename}`} className="relative h-20 w-14 overflow-hidden border border-line">
+              <img src={viewUrl(f)} alt={`Carousel ${i + 1}`} className="h-full w-full object-cover" loading="lazy" />
+              <button aria-label="Take out of the carousel" className="absolute right-0 top-0 bg-black/60 px-1 text-[11px] text-white hover:bg-bad" onClick={async () => { await (await import("../lib/siteMedia")).removeFromCarousel(c.id, f); }}>✕</button>
+            </span>))}</div> : <span className="text-[12px] text-dim">None yet.</span>}
+          <span className="text-[12px] text-muted">Banner <span className="text-dim">· the wide picture at the top of the explore page · {site.bannerFile ? "set" : "none — your site keeps what it has"}</span>
+            {site.bannerFile && <button className="ml-2 text-[11.5px] text-accent hover:underline" onClick={async () => (await import("../lib/siteMedia")).setBanner(c.id, null)}>Clear</button>}</span>
+          {site.bannerFile && <img src={viewUrl(site.bannerFile)} alt="Banner" className="h-20 w-auto self-start border border-line object-cover" />}
         </div>
         {pickLoop && <PicPick c={c} videos title="Pick her hover loop" onClose={() => setPickLoop(false)} onPick={(f) => { up({ loopFile: { filename: f.filename, subfolder: f.subfolder, type: f.type } } as Partial<SiteInfo>); setPickLoop(false); }} />}
         {picking && <PicPick c={c} title={picking === "avatar" ? "Pick the avatar" : "Pick the cover"} onClose={() => setPicking(null)}

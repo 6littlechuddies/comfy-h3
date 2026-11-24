@@ -37,6 +37,11 @@ export interface SiteInfo {
   avatarFile?: FileRef; coverFile?: FileRef;
   /** her hover loop: the short video her card plays when someone hovers it (made 540 px wide, the card's shape, when sent) */
   loopFile?: FileRef;
+  /** the wide banner at the top of the explore page (factory API "cover"); none = the site keeps what it has */
+  bannerFile?: FileRef;
+  /** her profile carousel, after her card (factory API "gallery"): pictures only, up to 12, in order — seen by everyone, so
+   *  nothing with nudity and nothing from a premium or explicit set */
+  galleryFiles?: FileRef[];
   /** your few words on who they are ("shy art student who games all night") — the profile writer builds on them */
   direction?: string;
   /** the rest of the site's own fields (factory API: site.* and site.sheet.*), written by the profile writer */
