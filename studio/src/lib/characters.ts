@@ -31,7 +31,22 @@ export interface SiteChat {
   casing?: "lower" | "proper" | "custom"; casingCustom?: string; emojiRate?: "none" | "rare" | "some" | "often";
   /** blank = the site's default; 1–2 for a guarded or slow-burn girl */ heatHolds?: number | null;
   levelEmojis?: string[]; voicePaid?: string; voiceFree?: string; examples?: string;
-  hot?: { tease: string[]; explicit: string[]; after: string[] };
+  /** tease / explicit / after, and 3 teases for a cold first-message push (fix pack v4.2) */
+  hot?: { tease: string[]; explicit: string[]; after: string[]; cold?: string[] };
+  /** fix pack v4.2: how her personality paces heat — warm holds 1–2 times, tease 2–4 (dangling more), dom until he plays by her rule */
+  holdProfile?: "warm" | "tease" | "dom";
+  /** what she does with "Hm" / "ok": sweet keeps her hook, sassy teases lightly with a hook */
+  effortPushback?: "sweet" | "sassy";
+  /** what she speaks ("english; some japanese"); she always texts in English */
+  languages?: string;
+  /** 2–4 words from her first message: the server uses them to stop her looping on it */
+  openerKeywords?: string[];
+  /** 6–10 terms: go / tease / soft_no, with how she'd react */
+  kinks?: { term: string; stance: "go" | "tease" | "soft_no"; line: string }[];
+  /** 5 lines teasing what she could show him, how she'd sound, how far she'd go */
+  dangle?: string[];
+  /** 3 short lines for an unprompted photo / voice note / video */
+  captions?: string[];
   /** when it was written, and what the checks dropped or couldn't fix */ at?: number; notes?: string[];
 }
 export interface SiteInfo {

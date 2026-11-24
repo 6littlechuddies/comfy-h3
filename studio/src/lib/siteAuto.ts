@@ -6,7 +6,7 @@ import { looseJson } from "./looseJson";
 // writer you picked (27B, 9B or your Grok tab).
 import { toInput, type FileRef } from "./api";
 import { describe, useCharacters, type Character, type SiteInfo, type SiteItem, type SiteSet } from "./characters";
-import { PRODUCT, STOCK } from "./chatCheck";
+import { DISTRESS, NAME_ASK, PRODUCT, STOCK } from "./chatCheck";
 import { useJobs } from "./jobs";
 import { runWriter } from "./writer";
 
@@ -289,7 +289,9 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const wrotePersona = (!!next.persona && next.persona !== s0.persona) || (!!next.persona && s0.deepAt === undefined);
   if (next.persona !== s0.persona) { next.personaCore = next.persona; next.deepAt = undefined; }
   // the site's banned stock lines ("earn it", "not tonight"…) and product talk ("unlock", "credits"…): the sentence goes
-  for (const k of FIELDS) { const v = next[k]; if (v && v !== s0[k] && (STOCK.test(v) || PRODUCT.test(v))) { next[k] = cutSentences(v, new RegExp(`${STOCK.source}|${PRODUCT.source}`, "i")).trim(); o.onStep?.(`Took a banned line out of her ${k}`); } }
+  const BANNED = new RegExp(`${STOCK.source}|${PRODUCT.source}|${NAME_ASK.source}|${DISTRESS.source}`, "i");
+  for (const k of FIELDS) { const v = next[k]; if (v && v !== s0[k] && BANNED.test(v)) { next[k] = cutSentences(v, BANNED).trim(); o.onStep?.(`Took a banned line out of her ${k}`); } }
+  if (next.greeting && next.greeting !== s0.greeting && !/\?\s*\S{0,3}\s*$/.test(next.greeting.trim())) o.onStep?.("Her first message doesn't end on a question — the fix pack wants a forced-choice question (edit it, or Rewrite)");
   for (const k of FIELDS) { const cap = CAP[k]; if (cap && next[k] && next[k]!.length > cap) { const v = next[k]!.slice(0, cap); next[k] = k === "tagline" && /[.!?]/.test(v.slice(40)) ? v.slice(0, v.search(/[.!?][^.!?]*$/) + 1) : v.replace(/\s+\S*$/, ""); } }
   const strs = (v: unknown, max: number, len = 60) => Array.isArray(v) ? v.map(String).map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)).slice(0, max) : [];
   const keep = <T,>(cur: T | undefined, got: T | undefined, has: (x: T) => boolean) => (o.all || !cur || !has(cur)) && got && has(got) ? got : cur;

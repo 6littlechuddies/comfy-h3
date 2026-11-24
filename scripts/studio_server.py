@@ -5864,8 +5864,21 @@ def _chat_block(site: dict) -> dict:
     for k, src in (("voice_example_paid", "voicePaid"), ("voice_example_free", "voiceFree"), ("examples", "examples")):
         if str(ch.get(src) or "").strip(): out[k] = str(ch[src]).strip()
     hot = ch.get("hot") or {}
-    hl = {k: [str(x).strip() for x in (hot.get(k) or []) if str(x).strip()][:15] for k in ("tease", "explicit", "after")}
+    hl = {k: [str(x).strip() for x in (hot.get(k) or []) if str(x).strip()][:15] for k in ("tease", "explicit", "after", "cold")}
+    if not hl["cold"]: hl.pop("cold")
     if any(hl.values()): out["hot_lines"] = hl
+    # fix pack v4.2 (the dev adds these to the schema; until then a refused one is dropped on its own)
+    if ch.get("holdProfile") in ("warm", "tease", "dom"): out["hold_profile"] = ch["holdProfile"]
+    if ch.get("effortPushback") in ("sweet", "sassy"): out["effort_pushback"] = ch["effortPushback"]
+    if str(ch.get("languages") or "").strip(): out["languages"] = str(ch["languages"]).strip()[:120]
+    ok = [str(x).strip() for x in (ch.get("openerKeywords") or []) if str(x).strip()][:4]
+    if ok: out["opener_topic_keywords"] = ok
+    ks = [{"term": str(k.get("term") or "").strip(), "stance": k.get("stance"), "line": str(k.get("line") or "").strip()}
+          for k in (ch.get("kinks") or []) if isinstance(k, dict) and k.get("stance") in ("go", "tease", "soft_no") and str(k.get("term") or "").strip()][:10]
+    if ks: out["kink_stance"] = ks
+    for k, src, n in (("dangle_lines", "dangle", 5), ("caption_lines", "captions", 3)):
+        v = [str(x).strip() for x in (ch.get(src) or []) if str(x).strip()][:n]
+        if v: out[k] = v
     return out
 
 
@@ -6134,11 +6147,22 @@ async def _site_push(job: dict, d: dict):
             if sig: manifest["voice_notes"] = (manifest["voice_notes"] + f" Words she reaches for: {', '.join(sig)}.").strip()
             job["step"] = "character"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
-            if code == 422 and "chat" in (manifest.get("site") or {}) and re.search(r"\bchat\b", _site_err(res), re.I):
-                # the site doesn't take the Chat v4.1 boxes at these paths yet: sent without them, the note says so
-                job["chat_note"] = "chat lines not sent (the site doesn't take them yet: " + _site_err(res)[:160] + ")"
-                manifest["site"].pop("chat")
+            # a chat box the site doesn't take (yet) is dropped on its own and the rest sent again; if it can't tell which,
+            # the whole chat block goes. The note says what was left out
+            left: list = []
+            for _ in range(6):
+                chat = (manifest.get("site") or {}).get("chat")
+                if code != 422 or not chat or not re.search(r"\bchat\b", _site_err(res), re.I): break
+                err = _site_err(res)
+                m = re.search(r"chat\.(\w+)", err)
+                key = m.group(1) if m and m.group(1) in chat else None
+                if key: chat.pop(key); left.append(key)
+                else: manifest["site"].pop("chat"); left.append("all chat lines"); break
+                if not chat: manifest["site"].pop("chat")
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
+            if left:
+                if "all chat lines" in left: code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
+                job["chat_note"] = "the site didn't take: " + ", ".join(left)
             elif "chat" in (manifest.get("site") or {}): job["chat_note"] = "chat lines sent"
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
             job["character"] = res

@@ -98,7 +98,7 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
   const n = (k: "tease" | "explicit" | "after") => hot[k].length;
   return (
     <details className="card rounded-lg border border-line p-2.5 text-[12.5px]">
-      <summary className="cursor-pointer text-ink">Chat v4.1 · casing, emoji rate, heat holds, sample chats, voice examples, hot lines {ch.at ? `· tease ${n("tease")} · explicit ${n("explicit")} · after ${n("after")}` : "· not written yet"}</summary>
+      <summary className="cursor-pointer text-ink">Chat v4.1 · pacing, pushback, kink stance, sample chats, voice examples, hot lines {ch.at ? `· ${ch.holdProfile ?? "?"} / ${ch.effortPushback ?? "?"} · tease ${n("tease")} · explicit ${n("explicit")} · after ${n("after")}` : "· not written yet"}</summary>
       <div className="mt-2 flex flex-col gap-2">
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-[12px] text-muted">Casing
@@ -108,9 +108,14 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
           <label className="flex flex-col gap-1 text-[12px] text-muted">Emoji rate
             <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.emojiRate ?? ""} onChange={(e) => set({ emojiRate: (e.target.value || undefined) as never })}>
               <option value="">—</option>{["none", "rare", "some", "often"].map((x) => <option key={x} value={x}>{x}</option>)}</DropSelect></label>
-          <label className="flex flex-col gap-1 text-[12px] text-muted" title="Blank = the site's default. 1–2 only for a guarded or slow-burn girl">Heat holds
-            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.heatHolds ?? ""} onChange={(e) => set({ heatHolds: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">site default</option><option value="1">1</option><option value="2">2</option></DropSelect></label>
+          <label className="flex flex-col gap-1 text-[12px] text-muted" title="How her personality paces heat: warm holds 1–2 times then goes with it; tease holds 2–4 times, dangling more each time; dom holds until he plays by her rule">Hold profile
+            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.holdProfile ?? ""} onChange={(e) => { const v = (e.target.value || undefined) as NonNullable<SiteInfo["chat"]>["holdProfile"]; set({ holdProfile: v, heatHolds: v === "warm" ? 1 : v === "tease" ? 3 : null }); }}>
+              <option value="">—</option><option value="warm">warm</option><option value="tease">tease</option><option value="dom">dom</option></DropSelect></label>
+          <label className="flex flex-col gap-1 text-[12px] text-muted" title='What she does with "Hm" / "ok": sweet keeps her hook, no lecture; sassy teases lightly, always with a hook'>Effort pushback
+            <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.effortPushback ?? ""} onChange={(e) => set({ effortPushback: (e.target.value || undefined) as never })}>
+              <option value="">—</option><option value="sweet">sweet</option><option value="sassy">sassy</option></DropSelect></label>
+          <TextIn className="min-w-[160px] flex-1" label="Languages · she texts in English" value={ch.languages ?? ""} onChange={(v) => set({ languages: v })} placeholder="english; some spanish" />
+          <TextIn className="min-w-[160px] flex-1" label="Opener topic keywords" value={(ch.openerKeywords ?? []).join(", ")} onChange={(v) => set({ openerKeywords: v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="headband, apron" />
           <TextIn className="min-w-[160px] flex-1" label="Level emojis · 7, lowest first" value={(ch.levelEmojis ?? []).join(" ")} onChange={(v) => set({ levelEmojis: v.split(/\s+/).filter(Boolean).slice(0, 7) })} />
           <Btn small disabled={busy || !c.site?.persona} onClick={write} title="Sample chats for the 11 core situations, the paid and free voice examples and her hot lines — from her profile; checked against the site's rules and other characters' lines (about a minute)">
             <Icon name="script" size={13} /> {ch.at ? "Write them again" : "Write chat lines"}</Btn>
@@ -125,10 +130,25 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
           {(["tease", "explicit", "after"] as const).map((k) => (
             <TextArea key={k} label={`Hot lines · ${k} (${n(k)}, 8–15) · one per line, 14 words max`} rows={8} value={hot[k].join("\n")} onChange={(v) => set({ hot: { ...hot, [k]: lines(v) } })} />))}
         </div>
+        <div className="grid grid-cols-3 gap-2">
+          <TextArea label={`Cold-push teases (${hot.cold?.length ?? 0} of 3) · his first message is a sex ask`} rows={4} value={(hot.cold ?? []).join("\n")} onChange={(v) => set({ hot: { ...hot, cold: lines(v).slice(0, 3) } })} />
+          <TextArea label={`Dangle lines (${ch.dangle?.length ?? 0} of 5) · what she could show him`} rows={4} value={(ch.dangle ?? []).join("\n")} onChange={(v) => set({ dangle: lines(v).slice(0, 5) })} />
+          <TextArea label={`Caption lines (${ch.captions?.length ?? 0} of 3) · sending something unprompted`} rows={4} value={(ch.captions ?? []).join("\n")} onChange={(v) => set({ captions: lines(v).slice(0, 3) })} />
+        </div>
+        <KinkBox value={ch.kinks ?? []} onChange={(kinks) => set({ kinks })} />
         {!!ch.notes?.length && <ul className="list-disc pl-4 text-dim">{ch.notes.slice(0, 12).map((x, i) => <li key={i}>{x}</li>)}</ul>}
       </div>
     </details>
   );
+}
+
+/** kink stance as text ("spanking: go — line"), parsed back when you leave the box so typing isn't fought */
+function KinkBox({ value, onChange }: { value: NonNullable<NonNullable<SiteInfo["chat"]>["kinks"]>; onChange: (v: NonNullable<NonNullable<SiteInfo["chat"]>["kinks"]>) => void }) {
+  const [text, setText] = useState<string | null>(null);
+  return <div onBlur={() => { if (text === null) return; void import("../lib/chatCheck").then((m) => { onChange(m.parseKinks(text)); setText(null); }); }}>
+    <TextArea label={`Kink stance (${value.length}, 6–10) · term: go | tease | soft_no — how she'd react`} rows={6}
+      value={text ?? value.map((x) => `${x.term}: ${x.stance} — ${x.line}`).join("\n")} onChange={setText} />
+  </div>;
 }
 
 export async function sendOne(c: Character, onStep?: (t: string) => void, short = false): Promise<{ ok: boolean; note: string }> {
