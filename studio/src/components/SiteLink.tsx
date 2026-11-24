@@ -635,7 +635,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         <div className="flex items-end gap-2">
           <TextIn className="flex-1" label={`Name on the site · blank = “${c.name}”`} value={site.name ?? ""} onChange={(v) => up({ name: v })} placeholder={c.name} />
           <Btn small onClick={async () => { try { const { siteAlias } = await import("../lib/newChar"); const a = await siteAlias([c.name]); if (a[0]) { up({ name: a[0] }); toast(`Site name: ${a[0]}`, "good"); } } catch (e) { toast((e as Error).message, "bad"); } }}
-            title="A name of her own that suits her — never a variant of a character's name">New name</Btn>
+            title="A site name fans connect to the character: a near-twin, the meaning translated (Sakura → Blossom) or a shortening (Makima → Maki)">New name</Btn>
         </div>
         <TextIn label="Cosplays as · character (series) — her personality follows them, her life and name stay her own; she goes in your site's Cosplay section. Blank = an original"
           value={/^Cosplay of /.test(c.source ?? "") ? c.source!.replace(/^Cosplay of /, "") : ""} placeholder="e.g. Makima (Chainsaw Man)"

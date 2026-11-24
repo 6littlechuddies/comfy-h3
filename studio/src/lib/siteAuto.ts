@@ -228,14 +228,14 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
       o.onStep?.(`Her pictures say she's a ${g.toLowerCase().replace(/^cosplay of /, "cosplay of ")} — writing her as one (clear "Cosplays as" if not)`);
     }
   }
-  // a cosplay whose name is (nearly) the character's ("Maki" for Makima): a name of her own for the site
+  // a cosplay still under the character's own name ("Makima", or "Tifa" for Tifa Lockhart): a site name fans connect to it
   if (/^Cosplay of /.test(c.source ?? "")) {
     const charName = c.source!.replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "");
     const shown = c.site?.name || c.name;
-    const { close, siteAlias } = await import("./newChar");
-    if (close(charName, shown)) {
+    const { exact, siteAlias } = await import("./newChar");
+    if (exact(charName, shown)) {
       const [nm] = await siteAlias([charName]).catch(() => [] as string[]);
-      if (nm) { const cur1 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; c = { ...cur1, site: { ...cur1.site, name: nm } }; useCharacters.getState().save(c); o.onStep?.(`"${shown}" is too close to ${charName} — her site name is ${nm} now`); }
+      if (nm) { const cur1 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c; c = { ...cur1, site: { ...cur1.site, name: nm } }; useCharacters.getState().save(c); o.onStep?.(`"${shown}" is the character's own name — her site name is ${nm} now`); }
     }
   }
   // a cosplay: what the source says about the character (AniList, as Batch → Cosplay reads it) — and its adult check
@@ -412,7 +412,7 @@ export function canonNote(source?: string): string {
   const m = /^Cosplay of (.+)$/.exec(source ?? "");
   if (!m) return "";
   return `HER PERSONALITY IS ${m[1].toUpperCase()}'S — think it through from the source material first (the anime, manga, game or comics: how she acts across the story, what she says and how, what she wants, fears and loves, how she treats people she likes and people she doesn't). Give her that character's temperament, way of talking (sentence length, formality, teasing or bluntness, verbal habits — paraphrased into her own texting, never quoting lines from the show), quirks, tastes, values, pet peeves and contradictions, and the same way she flirts or holds people at arm's length.
-HER LIFE IS HER OWN: she is a real adult woman who loves cosplaying that character — she is NOT the character and never claims to be. Her job, home, city, hobbies, friends and backstory are ordinary real-world ones that suit her temperament. Nothing from the source in them: no place, city, school, organisation, team, rank, event, item, power, creature or other character from that story, not even renamed. Never write the character's or the series' name, or a near-copy of either, in her bio, tagline, greeting, persona, level names or anything else.`;
+HER LIFE IS HER OWN: she is a real adult woman who loves cosplaying that character — she is NOT the character and never claims to be. Her job, home, city, hobbies, friends and backstory are ordinary real-world ones that suit her temperament. Nothing from the source in them: no place, city, school, organisation, team, rank, event, item, power, creature or other character from that story, not even renamed. Never write the character's exact name or the series' name in her bio, tagline, greeting, persona, level names or anything else; her own name (the one given) is what she goes by.`;
 }
 
 /** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.

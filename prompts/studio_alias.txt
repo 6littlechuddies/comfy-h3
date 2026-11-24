@@ -1,5 +1,9 @@
-You name cosplayers for a website. Each NAME is a fictional character's name (sometimes with the series in brackets) that a real adult woman cosplays. Give HER a name of her own: a real, natural first name that suits the feel and culture of that character (a Japanese-feeling name for a Japanese character, a Nordic one for a Nordic one…) but has nothing to do with the character's name:
-- not the same name, not a variant or near-spelling of it, no shared first syllable, no rhyme with it, nothing a fan would read as a nod to it.
-- never a name from that series, never a real famous person's name, never one listed under TAKEN, no surname.
+You name cosplayers for a website. Each NAME is a fictional character's name (sometimes with the series in brackets) that a real adult woman cosplays. Give her a site name that a fan would smile at and connect to the character, without it being the character's name. Use whichever of these suits the name best, and mix them across the list:
+- a near-twin: change one to three letters or swap a syllable so it still reads as a real, natural name (Makima → Makina, Yor → Yora, Tifa → Tiva).
+- the meaning, translated: a real name or word that means what the character's name means (Sakura, "cherry blossom" → Blossom; Hinata, "sunny place" → Sunny; Rei, "zero" or "spirit" → Nova).
+- a shortening or nickname: cut it down so it stands on its own (Makima → Maki, Nezuko → Nezu, Mikasa → Kasa).
+Rules:
+- never the exact original spelling of the first name or the full name, never a surname from the series, never a real famous person's name, never one listed under TAKEN.
+- it has to read as a natural first name someone could really have.
 - each one different from the others in this list.
 Answer with one line per name, in the same order, as: original => new name. Nothing else.

@@ -1,7 +1,7 @@
 // New characters from pictures — one, or many at once (pick results → New characters from these).
 // Each picture is read (the writer looks at it and writes down hair, eyes, body, outfit, details — the character's
 // description), its LoRAs come along, and how it was made (its prompt, the RECIPE) stays with the character.
-// Cosplay results know whose cosplay they are: the character is named after them here, and gets a name of her own for your
+// Cosplay results know whose cosplay they are: the character is named after them here, and gets a site name fans connect to it for your
 // site (Makima → Makina). Several pictures of the same cosplay become ONE character; the others go into a free
 // "Gallery" set for the site (unless you say not to).
 import type { FileRef, CivitGen } from "./api";
@@ -25,28 +25,37 @@ export async function cosplayOfLabel(label?: string): Promise<{ name: string; se
   return hit ? { name: hit.name, series: hit.series } : null;
 }
 
-/** her own name for the site: a cosplayer's name that suits the character's feel but isn't a variant of it (the writer;
- *  a name from a plain list if it can't, or if what it gave still reads like the character's name) */
+/** her site name: one a fan would connect to the character without it being the character's name — a near-twin (Makima →
+ *  Makina), the meaning translated (Sakura → Blossom) or a shortening (Makima → Maki). The writer picks; a letter swap if it
+ *  can't, or if what it gave is the exact name. */
 export async function siteAlias(names: string[]): Promise<string[]> {
   const { useCharacters } = await import("./characters");
   const taken = useCharacters.getState().list.flatMap((c) => [c.name, c.site?.name ?? ""]).filter(Boolean);
   const used = new Set(taken.map((t) => t.toLowerCase()));
-  const own = (n: string, a: string) => !!a && !used.has(a.toLowerCase()) && !close(n, a);
+  const ok = (n: string, a: string) => !!a && !used.has(a.toLowerCase()) && !exact(n, a);
+  const pick = (n: string, a: string) => { const r = ok(n, a) ? a : twinFree(n, used); used.add(r.toLowerCase()); return r; };
   try {
     const { runWriter } = await import("./writer");
     const out = await runWriter("alias", { names: names.join("\n"), taken: taken.join(", ") || "(none)" }, { tab: "characters", label: "Site names" });
     const lines = out.split(/\n+/).map((l) => l.split("=>")[1]?.trim()).filter((x): x is string => !!x);
-    return names.map((n, i) => { const a = (lines[i] || "").replace(/^["“]|["”]$/g, "").trim(); const r = own(n, a) ? a : spare(n, used); used.add(r.toLowerCase()); return r; });
-  } catch { return names.map((n) => { const r = spare(n, used); used.add(r.toLowerCase()); return r; }); }
+    return names.map((n, i) => pick(n, (lines[i] || "").replace(/^["“]|["”]$/g, "").trim()));
+  } catch { return names.map((n) => pick(n, "")); }
 }
-/** reads like the character's name: the same first three letters, or one inside the other */
-export function close(n: string, a: string): boolean {
-  const x = n.toLowerCase().split(/[\s(]/)[0], y = a.toLowerCase().split(/\s/)[0];
-  return x.slice(0, 3) === y.slice(0, 3) || x.includes(y) || y.includes(x);
+/** the character's own name, or its first name, as is ("Makima", "Tifa" for "Tifa Lockhart") */
+export function exact(n: string, a: string): boolean {
+  const full = n.toLowerCase().replace(/\s*\(.*$/, "").trim(), x = a.toLowerCase().trim();
+  return x === full || x === full.split(/\s+/)[0] || x.split(/\s+/)[0] === full.split(/\s+/)[0];
 }
-const SPARE = ["Noor", "Saskia", "Ines", "Mirela", "Odette", "Keiko", "Dalia", "Petra", "Ilse", "Marisa", "Yuna", "Lior", "Esme", "Talia", "Renata", "Signe", "Amara", "Jolie", "Vesna", "Carys"];
-function spare(n: string, used: Set<string>): string {
-  return SPARE.find((x) => !used.has(x.toLowerCase()) && !close(n, x)) ?? `${SPARE[n.length % SPARE.length]} ${String.fromCharCode(65 + (n.length % 26))}.`;
+/** a plain near-twin (the last vowel changed: Makima → Makimo), not one already taken */
+function twinFree(n: string, used: Set<string>): string {
+  const base = n.replace(/\s*\(.*$/, "").split(/\s+/)[0];
+  for (const [a, b] of [["a", "e"], ["e", "a"], ["i", "y"], ["o", "a"], ["u", "o"], ["y", "i"]]) {
+    const i = base.toLowerCase().lastIndexOf(a);
+    if (i < 1) continue;
+    const t = base.slice(0, i) + (base[i] === base[i].toUpperCase() ? b.toUpperCase() : b) + base.slice(i + 1);
+    if (!used.has(t.toLowerCase())) return t;
+  }
+  return `${base}e`;
 }
 
 /** read a picture: the writer describes the person in it. Refuses anyone who reads as under 18 */

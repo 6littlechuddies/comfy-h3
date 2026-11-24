@@ -437,7 +437,7 @@ function FromPicture() {
       <Slot className="h-52" value={pic} onChange={setPic} label="Drop their picture" hint="full body works best" />
       <button className="-mt-1.5 flex items-center gap-1 self-start text-[12px] text-accent hover:underline" onClick={() => pickFromCivitai({ kind: "new" })}><Icon name="link" size={12} />Or pick one from CivitAI (your collections or a link)</button>
       <TextIn label="Name" value={name} onChange={setName} placeholder="e.g. Rin" />
-      {(siteName || source) && <TextIn label="Name on your site (her own name — change it if you like)" value={siteName} onChange={setSiteName} placeholder={name} />}
+      {(siteName || source) && <TextIn label="Name on your site (one fans connect to the character — change it if you like)" value={siteName} onChange={setSiteName} placeholder={name} />}
       {needAge ? (
         <div className="flex flex-col gap-2 border border-accent/50 p-3 text-[13px]">
           <span className="text-muted">Their age can't be told from the picture. How old is this character? (18 or older)</span>
