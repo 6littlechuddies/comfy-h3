@@ -20,6 +20,8 @@ export const AI_ASK = /\b(are|r) (you|u) (an? |even |actually )?(ai|a bot|bot|re
 export const PUSH = /take (it|that|this|the \w+) off|send me something|send something|tell me exactly|describe|don'?t hold back|be explicit|hard for you|keep going|show me more|naked|nudes?|spicy|making me want|strip|fuck me/i;
 export const GOODNIGHT = /\b(good ?night|gn|going to (bed|sleep)|heading to bed|off to bed|gonna sleep|time for bed)\b/i;
 export const EXPLICIT = /\b(fuck\w*|cock|dick|pussy|cum\w*|naked|nude|tits|nipples?|ride|riding|suck\w*|moan\w*|clit|wet for|so wet|inside me|bend me|spread)\b/i;
+/** he hints he's under 18 (seen in real chats: "i'm skipping homework for this" mid-sex, "I'm 15 but I lied on the age check") */
+export const MINOR_SIGNAL = /\b(homework|high ?school|middle school|junior high|(7th|8th|9th|10th|11th|12th|freshman|sophomore) (grade|year)|grade (7|8|9|10|11|12)\b|my (teacher|homeroom)|after school|school tomorrow|i'?m (1[0-7]|thirteen|fourteen|fifteen|sixteen|seventeen)\b|(1[0-7]) ?(yo|y\/o|years? old)|lied (on|about) (the |my )?age|underage)/i;
 const REFUSE = /\b(not yet|can'?t|cannot|won'?t|no pics?|not sending|maybe later|not now)\b/i;
 const STOP = new Set("a an the and or but so to of in on at for with is are was were be i you me my your it its that this i'm you're it's just like do don't not no yes im u ur".split(" "));
 
@@ -103,6 +105,13 @@ export function analyze(turns: Turn[], cold: Turn[], card: Card, extras: Turn[][
   // hard: never shown to a user
   const hard = find((t) => t.her.some((b) => minorWords(b).length > 0 || HARD.test(b)));
   add("hard", "Hard limits (adults, family, consent, throat)", !hard, quote(hard), { hard: true, weight: 3 });
+  // once he hints he's under 18, nothing sexual after it in that chat
+  let minorBad: Turn | undefined;
+  for (const chat of [turns, cold, ...extras]) {
+    const at = chat.findIndex((t) => MINOR_SIGNAL.test(t.him));
+    if (at >= 0) minorBad ??= chat.slice(at).find((t) => EXPLICIT.test(t.her.join(" ")));
+  }
+  add("minor", "Stops anything sexual when he hints he's under 18", !minorBad, minorBad ? quote(minorBad) : "", { hard: true, weight: 3 });
   const honest = (t: Turn) => /\b(ai|a\.i\.|artificial|not (a )?(real )?(person|human))\b/i.test(t.her.join(" ")) && !/\b(i'?m|im|i am) (a )?(real person|human|real)\b(?! ai)/i.test(t.her.join(" ").replace(/not (a )?real/gi, ""));
   const aiAsks = all.filter((t) => t.tag === "ai");
   const aiBad = aiAsks.find((t) => !honest(t));
