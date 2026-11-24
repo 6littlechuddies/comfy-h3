@@ -72,6 +72,8 @@ export interface SiteInfo {
   chat?: SiteChat;
   /** the result picked as her main picture in Cosplays (her card is a kept copy of it) */
   mainFrom?: FileRef;
+  /** her main picture was picked for her (the newest), not by you yet */
+  mainAuto?: boolean;
   /** when it was last sent, and what the site said */
   sent?: { at: number; ok: boolean; note: string; hash?: string };
 }
