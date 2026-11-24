@@ -600,7 +600,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
           <img src={viewUrl(coverOf(c)!)} alt="" className="h-14 w-14 border border-line object-cover" />
-          <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
+          <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {/^Cosplay of /.test(c.source ?? "") ? <span className="text-accent" title={`Goes in your site's Cosplay section · ${c.source}`}>cosplay</span> : c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
           <Btn className="ml-auto" onClick={() => write(false)} disabled={writing || !!step} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing || step ? "Writing…" : "Fill the blanks"}</Btn>
           {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing || !!step} title="Rewrite every field">Rewrite all</Btn>}
           <Btn onClick={() => import("./LivePack").then((m) => m.openLivePack(c.id))} title="Her Live Stream and Live Action clips: a still, idle loops and actions (tips / call buttons), made with H3 and checked join by join"><Icon name="play" size={14} /> Live pack</Btn>
