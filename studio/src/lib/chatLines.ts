@@ -53,12 +53,12 @@ const asEx = (v: unknown): Exchange | null => {
 };
 
 /** writes her Chat v4.1 material and saves it as site.chat. Returns notes on what was dropped or is still missing. */
-export async function writeChatLines(c: Character, o: { onStep?: (t: string) => void } = {}): Promise<string[]> {
+export async function writeChatLines(c: Character, o: { onStep?: (t: string) => void; feedback?: string } = {}): Promise<string[]> {
   const cur0 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
   const s = cur0.site ?? {};
   if (!s.persona?.trim()) throw new Error("Write her profile first — the chat lines are built from it");
   const name = (s.name || cur0.name).trim();
-  const who = whoShe(cur0);
+  const who = whoShe(cur0) + (o.feedback ? `\nHER LAST CHAT TEST FOUND (write so this doesn't happen again):\n${o.feedback}` : "");
   const taken = takenGrams(cur0.id);
   const soft = /^DYNAMIC: soft/.test(dynamicNote(s.direction, s.personality, s.tags));
   const notes: string[] = [];

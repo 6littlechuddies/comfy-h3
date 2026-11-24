@@ -1,6 +1,7 @@
 // Your site: Characters › one character (profile + content folders) › one folder. Everything is sent as a draft through
 // the site's factory API; a person publishes it in the site's admin panel. Built for doing many at once: pick several
 // characters, let the writer fill their profiles, send them all.
+import { ChatTestPanel } from "./ChatTestPanel";
 import { Thumb } from "./Thumb";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
@@ -60,7 +61,11 @@ export async function doItAll(c: Character, connected: boolean, step: (t: string
     const best = (await loopCandidates(now).catch(() => [])).find((x) => x.loop);
     if (best) useCharacters.getState().save({ ...now, site: { ...now.site, loopFile: best.file } });
   }
-  if (!connected) return "named and written — connect your site to send";
+  // the chat test: a scripted chat the way the site runs her, fixed and retested up to twice; only a pass goes to the site
+  step("Chat test…");
+  const t = await (await import("../lib/chatTest")).testAndFix(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: step }).catch((e) => { step(`Chat test didn't run: ${(e as Error).message}`); return null; });
+  if (t && !t.pass) return `written — failed the chat test (${t.score}/100${t.hardFails.length ? `: ${t.hardFails.join(", ")}` : ""}), not sent`;
+  if (!connected) return `named, written${t ? ` and chat-tested (${t.score}/100)` : ""} — connect your site to send`;
   step("Sending…");
   const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, step);
   if (!r.ok) throw new Error(r.note);
@@ -566,16 +571,21 @@ function Characters({ connected }: { connected: boolean }) {
     } catch (e) { toast(`Couldn't read your site: ${(e as Error).message}`, "bad"); }
   };
   const sendAll = async () => {
-    let ok = 0;
+    let ok = 0, held = 0;
     for (const c of chosen) {
       const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
       if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); continue; } }
+      // not chat-tested (or failed): tested and fixed first; still failing → not sent
+      if (!useCharacters.getState().list.find((x) => x.id === c.id)?.site?.chatTest?.pass) {
+        const t = await (await import("../lib/chatTest")).testAndFix(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: (m) => mark(c.id, m) }).catch((e) => { toast(`${c.name}: chat test didn't run (${(e as Error).message})`, "bad"); return null; });
+        if (!t || !t.pass) { if (t) toast(`${c.name}: failed the chat test (${t.score}/100) — not sent. Open her Chat test to see why`, "bad"); held++; mark(c.id, null); continue; }
+      }
       mark(c.id, "Sending…");
       const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, (t) => mark(c.id, t));
       if (r.ok) ok++; else toast(`${c.name}: ${r.note}`, "bad");
       mark(c.id, null);
     }
-    toast(`${ok} of ${chosen.length} sent as drafts`, ok === chosen.length ? "good" : "info");
+    toast(`${ok} of ${chosen.length} sent as drafts${held ? ` · ${held} held back by the chat test` : ""}`, ok === chosen.length ? "good" : "info");
   };
   if (!list.length) return <p className="text-[13px] text-muted">No characters with an adult age and a front picture yet — make one in Characters first.</p>;
   return (
@@ -681,6 +691,8 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
     } catch (e) { toast((e as Error).message, "bad"); } finally { setSorting(null); }
   };
   const send = async () => {
+    const t = c.site?.chatTest;
+    if (!t?.pass && !window.confirm(t ? `${c.name} failed her chat test (${t.score}/100). Send her anyway?` : `${c.name} hasn't had a chat test yet. Send her anyway? (Chat test → Test & fix checks her first.)`)) return;
     setSending("Starting…");
     const r = await sendOne(c, setSending);
     setSending(null);
@@ -761,6 +773,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           </div>
         </details>
         <ChatPanel c={c} up={up} busy={writing || !!step} />
+        <ChatTestPanel c={c} busy={step} setBusy={(t) => mark(c.id, t)} />
         <TextIn label="Tags" value={(site.tags ?? []).join(", ")} onChange={(v) => up({ tags: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="fitness, playful, gym" />
         <TextArea label="Backstory" rows={3} value={site.backstory ?? ""} onChange={(v) => up({ backstory: v })} />
         <TextArea label={`Chat persona · private, the site's chat model reads it${site.deepAt ? ` · deep, ${site.persona?.split(/\s+/).length ?? 0} words` : ""}`} rows={site.deepAt ? 14 : 6} value={site.persona ?? ""} onChange={(v) => up({ persona: v })} />

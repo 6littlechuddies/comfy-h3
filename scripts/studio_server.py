@@ -3025,9 +3025,9 @@ def _api_key(name: str) -> str:
     return (os.environ.get(name) or "").strip()
 
 
-async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "") -> tuple[str, str]:
+async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "", extra: dict | None = None) -> tuple[str, str]:
     body = {"model": DEEPSEEK_MODEL, "messages": messages, "max_tokens": max(64, min(32000, int(max_tokens))), "temperature": temperature, "top_p": top_p,
-            "thinking": {"type": "enabled" if thinking else "disabled"}, "stream": False}
+            "thinking": {"type": "enabled" if thinking else "disabled"}, "stream": False, **(extra or {})}
     if thinking: body["reasoning_effort"] = "low"  # a lot of thinking makes the writing worse, not better
     last = ""
     async with aiohttp.ClientSession() as s:
@@ -3047,6 +3047,21 @@ async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float =
     if " 401" in last: last = "DeepSeek refused the key (401) — check DEEPSEEK_API_KEY. " + last
     if " 402" in last: last = "DeepSeek: no balance left on the account (402) — top up at platform.deepseek.com. " + last
     raise RuntimeError(last)
+
+
+async def chatsim(req):
+    """/studio-api/chatsim — one reply in a test chat, the way the site makes it (DEV-PROMPT §1: deepseek-flash, temperature 1.0,
+    top_p 0.95, frequency 0.3, presence 0.2, 400 tokens, no thinking). Body: {messages: [{role, content}…]}."""
+    b = await req.json()
+    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or [])
+            if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
+    if not msgs: raise web.HTTPBadRequest(text="no messages")
+    try:
+        text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 400), temperature=float(b.get("temperature", 1.0)),
+                                  top_p=float(b.get("top_p", 0.95)), extra={"frequency_penalty": float(b.get("frequency_penalty", 0.3)), "presence_penalty": float(b.get("presence_penalty", 0.2))})
+    except RuntimeError as e:
+        return web.json_response({"error": str(e)}, status=502)
+    return web.json_response({"text": text})
 
 
 def _img_url(path: str, max_side: int = 1536) -> str:
@@ -3761,10 +3776,10 @@ STAGES = {"look": "Look block writer", "krea": "Krea 2 frame builder", "context"
           "describe": "Character description (Krea 2)", "tags": "Plain words → anime tags", "chat": "Studio assistant",
           "plan": "Plan a video writer (Animate + Plan a video)", "site": "Site profile writer (Your site)",
           "changes": "Picture changes (Create with pictures)", "remix": "Remix merger (Create)", "read": "Picture → prompt (Create)", "match": "Face match check (training set)", "likeness": "Carry a likeness into a prompt (Edit)",
-          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)", "taste": "Learn what you keep: liked vs deleted prompts → notes", "alias": "Site name: a near-twin of a character's name (Your site)", "live": "Live pack: her stream tips / call actions and idle loops, in her manner (Your site, Batch)", "lines": "Chat lines: examples, voice examples and her hot lines bank (Your site, Chat v4.1)"}
+          "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)", "taste": "Learn what you keep: liked vs deleted prompts → notes", "alias": "Site name: a near-twin of a character's name (Your site)", "live": "Live pack: her stream tips / call actions and idle loops, in her manner (Your site, Batch)", "lines": "Chat lines: examples, voice examples and her hot lines bank (Your site, Chat v4.1)", "chatsim": "Chat test: how she chats in the test (stand-in for the site's system-prompt-v4.1.md — drop that file in here)", "chatjudge": "Chat test: the reviewer that scores her test chat and says what to fix"}
 BUILTIN_FILE = {"krea": "studio_krea.txt", "context": "studio_context.txt", "compiler": "studio_compiler.txt", "look": "studio_look.txt", "tweak": "studio_tweak.txt",
                 "describe": "studio_describe.txt", "tags": "studio_tags.txt", "chat": "studio_chat.txt", "plan": "studio_plan.txt", "site": "studio_site.txt",
-                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt", "alias": "studio_alias.txt", "live": "studio_live.txt", "lines": "studio_lines.txt"}
+                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt", "alias": "studio_alias.txt", "live": "studio_live.txt", "lines": "studio_lines.txt", "chatsim": "studio_chatsim.txt", "chatjudge": "studio_chatjudge.txt"}
 TEMPLATES = {
     "context": "{seconds} second {mode}. {description}\nCharacters: {characters}",
     "compiler": "We are doing {MODE}. {seconds} seconds, {aspect}.\nReferences: {references}\n\n{blueprint}",
@@ -3789,6 +3804,8 @@ TEMPLATES = {
     "taste": "LIKED:\n{liked}\n\nDISLIKED:\n{disliked}",
     "alias": "NAMES:\n{names}\n\nTAKEN (don't use):\n{taken}",
     "lines": "TASK: {task}\n\nWHO SHE IS:\n{character}\n\nAVOID (share no run of four words with these):\n{avoid}",
+    "chatsim": "(filled by the Studio)",
+    "chatjudge": "HER CARD:\n{card}\n\nTRANSCRIPT:\n{transcript}\n\nCHECKS:\n{checks}",
     "live": "WHO SHE IS:\n{character}\n\nFRAMING: {framing}\nHOW MANY ACTIONS: {count}\nALLOWED RATINGS: {ratings}\nKEEP THESE KEYS (already made — plan them again with the same key):\n{keep}\n\nEXAMPLES (what other creators offer):\n{examples}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
 }
@@ -3817,9 +3834,9 @@ def _save_packs(d: dict):
 
 def _builtin(stage: str) -> dict:
     return {"id": f"builtin-{stage}", "name": "Built-in", "file": BUILTIN_FILE[stage], "stage": stage, "format": "builtin", "builtin": True,
-            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 4200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {}), **({"temperature": 0.85, "max_tokens": 6000} if stage == "live" else {}), **({"temperature": 0.9, "max_tokens": 5000} if stage == "lines" else {})), "template": TEMPLATES[stage],
+            "params": dict(PARAMS, **({"temperature": 0.3} if stage in ("compiler", "look", "tweak", "tags") else {}), **({"max_tokens": 600} if stage in ("tweak", "tags") else {}), **({"max_tokens": 1200} if stage == "describe" else {}), **({"max_tokens": 1500} if stage == "chat" else {}), **({"temperature": 0.7, "top_p": 0.8, "top_k": 20, "max_tokens": 4500} if stage == "plan" else {}), **({"temperature": 0.9, "max_tokens": 4200} if stage == "site" else {}), **({"temperature": 0.2, "max_tokens": 300} if stage == "changes" else {}), **({"temperature": 0.3, "max_tokens": 900} if stage == "remix" else {}), **({"temperature": 0.3, "max_tokens": 1400} if stage in ("read", "likeness") else {}), **({"temperature": 0.3, "max_tokens": 700} if stage == "editplan" else {}), **({"temperature": 0.1, "max_tokens": 120} if stage == "match" else {}), **({"temperature": 0.2, "max_tokens": 6000} if stage == "sort" else {}), **({"temperature": 0.8, "max_tokens": 5000} if stage == "setplan" else {}), **({"temperature": 0.9, "max_tokens": 3000} if stage == "name" else {}), **({"temperature": 0.85, "max_tokens": 5000} if stage == "deep" else {}), **({"temperature": 0.9, "max_tokens": 600} if stage == "alias" else {}), **({"temperature": 0.85, "max_tokens": 6000} if stage == "live" else {}), **({"temperature": 0.9, "max_tokens": 5000} if stage == "lines" else {}), **({"temperature": 0.3, "max_tokens": 2500} if stage == "chatjudge" else {})), "template": TEMPLATES[stage],
             # the cosplay planner thinks first (who she is, her world, her build) — DeepSeek's reasoning, kept short
-            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "on" if stage in ("cosplay", "live") else "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias", "lines")}
+            "prompt_file": f"studio_builtin_{stage}.txt", "thinking": "on" if stage in ("cosplay", "live") else "off", "see_image": stage not in ("krea", "tweak", "tags", "chat", "changes", "remix", "sort", "setplan", "name", "deep", "taste", "alias", "lines", "chatsim", "chatjudge")}
 
 
 def _pack_text(p: dict) -> str:
@@ -6804,7 +6821,7 @@ def main():
         web.get("/grok-relay/next", relay_next), web.post("/grok-relay/answer", relay_answer), web.get("/grok-relay/h3-grok.user.js", relay_script), web.get("/grok-relay/img/{id}/{n}", relay_img),
         web.get("/studio-api/health", health), web.get("/studio-api/debug-report", debug_report), web.get("/studio-api/ws", relay_ws),
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
-        web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status),
+        web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status), web.post("/studio-api/chatsim", chatsim),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
         web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear-test", posewear_test), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),

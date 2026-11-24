@@ -85,6 +85,8 @@ export interface SiteInfo {
   speechVoice?: string;
   /** urgf.ai Chat v4.1: how she types, sample exchanges, voice examples and her hot lines bank (the chat-lines writer) */
   chat?: SiteChat;
+  /** her last chat test (lib/chatTest.ts): a simulated chat with the site's model and prompt, checked and reviewed */
+  chatTest?: import("./chatTest").ChatTestResult;
   /** the result picked as her main picture in Cosplays (her card is a kept copy of it) */
   mainFrom?: FileRef;
   /** her main picture was picked for her (the newest), not by you yet */

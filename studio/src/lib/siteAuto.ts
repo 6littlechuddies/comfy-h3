@@ -470,7 +470,7 @@ HER LIFE IS HER OWN: she is a real adult woman who loves cosplaying that charact
 
 /** the deep profile: her life, how she reacts (two halves), sample texts, then the editor. Each is a separate small call.
  *  When the editor's answer is cut short or loses a section, the parts are put together as they are (with its NEVER SAY). */
-export async function deepProfile(c: Character, o: { onStep?: (t: string) => void } = {}): Promise<void> {
+export async function deepProfile(c: Character, o: { onStep?: (t: string) => void; feedback?: string } = {}): Promise<void> {
   c = await ensureName(c, o.onStep);
   const cur0 = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
   const site = cur0.site ?? {};
@@ -482,7 +482,8 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const who = [`Name: ${cur0.site?.name || cur0.name}. Adult woman.`, stripAges(describe(cur0)), canonNote(cur0.source), site.direction && `Owner's direction (sets her dynamic — it wins over any default): ${site.direction}`,
     dynamicNote(site.direction, site.personality, site.tags), factsLine && `FACTS (fixed — use exactly these, never another job, city or person):\n${factsLine}`, site.bio && `Bio: ${site.bio}`,
     site.backstory && `Backstory: ${site.backstory}`, site.personality && `Traits: ${site.personality}`, site.voice && `How she texts: ${site.voice}`, site.quirks && `Texting habits: ${site.quirks}`,
-    site.opinions && `Opinions: ${site.opinions}`, site.flaw && `Flaw: ${site.flaw}`, site.greeting && `Her first message: ${site.greeting}`].filter(Boolean).join("\n");
+    site.opinions && `Opinions: ${site.opinions}`, site.flaw && `Flaw: ${site.flaw}`, site.greeting && `Her first message: ${site.greeting}`,
+    o.feedback && `HER LAST CHAT TEST FOUND (write so this doesn't happen again):\n${o.feedback}`].filter(Boolean).join("\n");
   const call = (task: string, draft: string, label: string) => runWriter("deep", { task: task + TAIL, character: who, draft: draft || "(nothing yet)" }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } }).catch(() => "");
   const got: Record<string, string> = {};
   const draftNow = () => [`WHO YOU ARE\n${core}`, got.life, [got.react1, got.react2].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");

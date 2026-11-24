@@ -105,8 +105,14 @@ export async function runCosplays(o: { again?: boolean } = {}) {
         }
         if (!c.site?.mainFrom && !c.cover) { say(g.key, "Her main picture: the newest one (click another to change)…"); await setMain(c.id, g.pics[0], true); }
         const now = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-        if (o.again || !now.site?.persona) await doItAll(now, false, (t) => say(g.key, t));
-        else if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await writeChatLines(now, { onStep: (t) => say(g.key, t) }); }
+        if (o.again || !now.site?.persona) await doItAll(now, false, (t) => say(g.key, t)); // writes, then chat-tests and fixes
+        else {
+          if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await writeChatLines(now, { onStep: (t) => say(g.key, t) }); }
+          const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;
+          if (!fresh.site?.chatTest?.pass) { const { testAndFix } = await import("./chatTest"); await testAndFix(fresh, { onStep: (t) => say(g.key, t) }); }
+        }
+        const t = useCharacters.getState().list.find((x) => x.id === c!.id)?.site?.chatTest;
+        if (t && !t.pass) { say(g.key, `Failed the chat test (${t.score}/100) — open her to see why, or Write all again`); useCosplays.setState((s) => ({ done: s.done + 1 })); continue; }
         say(g.key, null);
       } catch (e) { say(g.key, `Didn't go: ${(e as Error).message}`); }
       useCosplays.setState((s) => ({ done: s.done + 1 }));

@@ -15,7 +15,7 @@ export function CosplaysHost() {
   return open ? <CosplaysPanel /> : null;
 }
 
-type Filter = "all" | "pick" | "write" | "ready" | "sent" | "problem";
+type Filter = "all" | "pick" | "write" | "test" | "ready" | "sent" | "problem";
 const hotOk = (c?: Character) => { const h = c?.site?.chat?.hot; return !!h && h.tease.length >= 8 && h.explicit.length >= 8 && h.after.length >= 8; };
 const bad = (t?: string) => !!t && /^(Didn't|Not sent)/.test(t);
 /** where a character is: what's left for her */
@@ -23,6 +23,7 @@ function stage(c: Character | undefined, status?: string): Exclude<Filter, "all"
   if (bad(status)) return "problem";
   if (!c || !c.site?.persona) return "write";
   if (c.site.sent?.ok) return "sent";
+  if (!c.site.chatTest?.pass) return "test";
   if (c.site.mainAuto || !c.site.mainFrom) return "pick";
   return "ready";
 }
@@ -50,10 +51,11 @@ function CosplaysPanel() {
   const count = (f: Filter) => (f === "all" ? rows.length : rows.filter((r) => r.st === f).length);
   const made = rows.filter((r) => r.c).length;
   const written = rows.filter((r) => r.c?.site?.persona).length;
+  const passed = rows.filter((r) => r.c?.site?.chatTest?.pass).length;
   const sent = count("sent"), toPick = count("pick"), ready = count("ready");
   const shown = rows.filter((r) => (filter === "all" || r.st === filter) && (!q.trim() || `${r.g.name} ${r.g.series} ${r.c?.site?.name ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())));
   const current = now ? groups.find((g) => g.key === now) : undefined;
-  const step = !groups.length || made < groups.length || written < groups.length ? 1 : toPick ? 2 : 3;
+  const step = !groups.length || made < groups.length || written < groups.length || passed < written ? 1 : toPick ? 2 : 3;
 
   const sendAll = async () => {
     const cfg = await (await fetch("/studio-api/site/config")).json().catch(() => ({}));
@@ -63,7 +65,7 @@ function CosplaysPanel() {
     let ok = 0;
     for (const { g } of rows) {
       const c = charFor(g, useCharacters.getState().list);
-      if (!c?.site?.persona) continue;
+      if (!c?.site?.persona || !c.site.chatTest?.pass) continue; // only what passed the chat test goes to the site
       const say = (t: string) => useCosplays.setState((s) => ({ status: { ...s.status, [g.key]: t } }));
       say("Sending…");
       const r = await sendOne(c, say).catch((e) => ({ ok: false, note: (e as Error).message }));
@@ -75,11 +77,11 @@ function CosplaysPanel() {
   };
 
   const STEPS = [
-    { n: 1, title: "Make them", sub: groups.length ? `${written} of ${groups.length} written` : "find, name, write" },
+    { n: 1, title: "Make & chat-test them", sub: groups.length ? `${written} of ${groups.length} written · ${rows.filter((r) => r.c?.site?.chatTest?.pass).length} passed` : "find, name, write, test" },
     { n: 2, title: "Pick each main picture", sub: written ? (toPick ? `${toPick} still on the newest` : "all picked") : "after they're made" },
     { n: 3, title: "Send to your site", sub: sent ? `${sent} sent${ready ? ` · ${ready} ready` : ""}` : ready ? `${ready} ready` : "as drafts" },
   ];
-  const FILTERS: [Filter, string][] = [["all", "All"], ["pick", "To pick"], ["write", "Not written"], ["ready", "Ready"], ["sent", "Sent"], ["problem", "Problems"]];
+  const FILTERS: [Filter, string][] = [["all", "All"], ["pick", "To pick"], ["write", "Not written"], ["test", "Failed test"], ["ready", "Ready"], ["sent", "Sent"], ["problem", "Problems"]];
 
   return createPortal(
     <div className="fade-in fixed inset-0 z-[82] flex flex-col bg-bg" role="dialog" aria-modal aria-label="Cosplays">
@@ -96,8 +98,8 @@ function CosplaysPanel() {
           : <>
             <button onClick={() => void runCosplays({ again: true })} disabled={!groups.length} title="Every profile and its chat lines written again — for when the writer has changed"
               className="press chip-raised flex h-10 items-center gap-2 px-3.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40"><Icon name="refresh" size={13} /> Write all again</button>
-            <button disabled={sending || !written} onClick={() => void sendAll()} title="Every written one to your site, as a draft"
-              className={cx("press flex h-10 items-center gap-2 px-4 text-[13px] font-semibold disabled:opacity-40", step === 3 ? "btn-primary" : "btn-raised")}><Icon name="up" size={14} /> {sending ? "Sending…" : `Send ${written || ""}`.trim()}</button>
+            <button disabled={sending || !passed} onClick={() => void sendAll()} title="Every one that passed her chat test, to your site as a draft"
+              className={cx("press flex h-10 items-center gap-2 px-4 text-[13px] font-semibold disabled:opacity-40", step === 3 ? "btn-primary" : "btn-raised")}><Icon name="up" size={14} /> {sending ? "Sending…" : `Send ${passed || ""}`.trim()}</button>
             <button onClick={() => void runCosplays()} title="Makes every cosplay that doesn't exist yet, names her for your site, writes her profile and chat lines, and gives her the newest picture as main. Done ones are skipped; nothing is sent."
               className={cx("press flex h-10 items-center gap-2 px-5 text-[13px] font-semibold", step === 1 ? "btn-primary" : "btn-raised")}><Icon name="sparkle" size={14} /> {made && made === groups.length && written === groups.length ? "Find new ones" : "Make them all"}</button>
           </>}
@@ -157,7 +159,7 @@ function CosplaysPanel() {
     </div>, document.body);
 }
 
-const PIPS: [string, (c?: Character) => boolean][] = [["Made", (c) => !!c], ["Profile", (c) => !!c?.site?.persona], ["Chat lines", hotOk], ["Sent", (c) => !!c?.site?.sent?.ok]];
+const PIPS: [string, (c?: Character) => boolean][] = [["Made", (c) => !!c], ["Profile", (c) => !!c?.site?.persona], ["Chat lines", hotOk], ["Chat test", (c) => !!c?.site?.chatTest?.pass], ["Sent", (c) => !!c?.site?.sent?.ok]];
 
 function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: ReturnType<typeof stage>; status?: string; working: boolean }) {
   const toast = useJobs((s) => s.toast);
@@ -201,11 +203,12 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
             <span key={l} className={cx("flex items-center gap-1.5 text-[12px]", on ? "text-good" : "text-dim")}>
               <span className={cx("flex h-3.5 w-3.5 items-center justify-center border", on ? "border-good/60 bg-good/10" : "border-line")}>{on && <Icon name="check" size={9} />}</span>
               {l}{l === "Chat lines" && hot ? <span className="font-mono text-[10.5px] opacity-75">{hot.tease.length}/{hot.explicit.length}/{hot.after.length}</span> : null}
+              {l === "Chat test" && c?.site?.chatTest ? <span className={cx("font-mono text-[10.5px]", c.site.chatTest.pass ? "opacity-75" : "text-bad")}>{c.site.chatTest.score}</span> : null}
             </span>); })}
         </div>
 
         <p className={cx("mt-1.5 min-h-[18px] truncate text-[12.5px]", bad(status) ? "text-bad" : working ? "text-accent" : "text-muted")} title={status}>
-          {status ?? (st === "pick" ? "Showing her newest picture — click another, or keep it" : st === "ready" ? "Ready to send" : st === "sent" ? "On your site as a draft" : !c ? "Not made yet" : "")}</p>
+          {status ?? (st === "pick" ? "Showing her newest picture — click another, or keep it" : st === "ready" ? "Ready to send" : st === "sent" ? "On your site as a draft" : st === "test" ? (c?.site?.chatTest ? `Failed the chat test (${c.site.chatTest.score}/100) — open her page to see why` : "Not chat-tested yet") : !c ? "Not made yet" : "")}</p>
 
         {/* the rest of her pictures */}
         <div className="mt-auto flex gap-1.5 overflow-x-auto pb-1 pt-2">
