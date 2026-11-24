@@ -1,6 +1,7 @@
 // The catalog: every picture and video this rental has made, straight from its disk (output/studio), by project folder,
 // newest first, searchable by the words it was made from. Nothing here is ever trimmed — the feeds and the tray only show
 // the latest; this shows all of it. Click to view, right-click for the usual menu (use in Create / Edit, site, face…).
+import { Thumb } from "./Thumb";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
@@ -150,7 +151,7 @@ function CatalogPanel() {
       onDrop={(e) => { setDropOn(null); if (!r.id) return; try { move(JSON.parse(e.dataTransfer.getData(CAT_DRAG)), r.id); } catch { /* */ } }}
       title={r.id ? `${r.name} — drop pictures here to move them into this project` : r.name}
       className={cx("press flex items-center gap-2 px-1.5 py-1 text-left text-[13px]", folder === r.key ? "bg-accent/10 text-ink" : "text-muted hover:bg-hover hover:text-ink", dropOn === r.key && "outline outline-2 outline-accent bg-accent/15")}>
-      <span className="h-8 w-8 shrink-0 overflow-hidden border border-line bg-raised2">{r.face ? <img src={viewUrl(r.face)} alt="" loading="lazy" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[12px] font-semibold text-dim">{r.name.slice(0, 1).toUpperCase()}</span>}</span>
+      <span className="h-8 w-8 shrink-0 overflow-hidden border border-line bg-raised2">{r.face ? <Thumb f={r.face} w={192} className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[12px] font-semibold text-dim">{r.name.slice(0, 1).toUpperCase()}</span>}</span>
       <span className="min-w-0 flex-1 truncate">{r.name}</span><span className="shrink-0 text-[11px] text-dim">{r.n}</span>
     </button>);
   return createPortal(
@@ -189,9 +190,7 @@ function CatalogPanel() {
                   draggable onDragStart={(e) => { const l = dragList(it); e.dataTransfer.setData(CAT_DRAG, JSON.stringify(l)); e.dataTransfer.effectAllowed = "move"; }}>
                   <button onClick={(e) => click(e, i)} onContextMenu={(e) => openPictureMenu(e, { output: asRef(it), label: it.meta?.label })}
                     title={[it.meta?.label, it.meta?.prompt, `${new Date(it.mtime * 1000).toLocaleString()}`].filter(Boolean).join("\n")} className="block h-full w-full">
-                    {it.kind === "video"
-                      ? <video src={viewUrl(it)} muted loop preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-cover" />
-                      : <img src={viewUrl(it)} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
+                    <Thumb f={asRef(it)} video={it.kind === "video"} className="h-full w-full object-cover" />
                   </button>
                   <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-1.5 pb-1 pt-4 text-left text-[10.5px] leading-tight text-white/85 opacity-0 group-hover:opacity-100">
                     {!folder && <b className="block truncate font-medium">{it.meta?.project ? chars.find((c) => c.id === it.meta?.project)?.name ?? it.folder : it.folder}</b>}{TAB_NAME[it.tab] ?? it.tab} · {new Date(it.mtime * 1000).toLocaleDateString()}

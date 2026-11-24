@@ -8,7 +8,7 @@
   GET     /studio-api/finish/<id>    job progress + result
   GET     /studio-api/cost           what this rental has cost so far (via the Vast API)
 """
-import asyncio, html, json, os, re, shutil, subprocess, time, uuid
+import asyncio, hashlib, html, json, os, re, shutil, subprocess, time, uuid
 import aiohttp
 from urllib.parse import urlparse, quote, unquote
 from aiohttp import web
@@ -6573,6 +6573,61 @@ async def local_studio(req):
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"} if "/assets/" in path.replace(os.sep, "/") else {})
 
 
+# small previews for grids (Catalog, pickers): a WebP a few dozen KB instead of a multi-MB PNG, made once and kept on disk
+# (outside the backed-up folders), keyed by the file's path, size and time — a changed file gets a new one. Videos: a frame.
+THUMB_DIR = os.environ.get("H3_THUMBS") or os.path.join(os.path.dirname(os.path.realpath(OUTPUT)), "h3_thumbs")
+THUMB_SIZES = (192, 384, 768)
+_THUMB_GATE: asyncio.Semaphore | None = None
+
+
+def _make_thumb(src: str, dst: str, w: int) -> bool:
+    import subprocess
+    from PIL import Image, ImageOps
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    tmp = dst + f".{os.getpid()}.tmp.webp"
+    if re.search(r"\.(mp4|webm|mov|mkv)$", src, re.I):
+        for ss in ("0.5", "0"):
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", ss, "-i", src, "-frames:v", "1", "-vf", f"scale='min({w},iw)':-2", "-quality", "70", tmp], capture_output=True, timeout=60)
+            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp): os.replace(tmp, dst); return True
+        return False
+    im = Image.open(src)
+    im.draft("RGB", (w * 2, w * 2))  # JPEGs decode at a smaller size straight away
+    im = ImageOps.exif_transpose(im)
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA"); bg = Image.new("RGB", im.size, (24, 24, 27)); bg.paste(im, mask=im.split()[-1]); im = bg
+    else: im = im.convert("RGB")
+    im.thumbnail((w, w * 3), Image.LANCZOS)
+    im.save(tmp, "WEBP", quality=72, method=4)
+    os.replace(tmp, dst)
+    return True
+
+
+async def thumb(req):
+    """/studio-api/thumb?filename&subfolder&type&w=384 — a small preview of a picture (or a video's frame)"""
+    global _THUMB_GATE
+    q = req.query
+    try: w = int(q.get("w", 384))
+    except ValueError: w = 384
+    w = min(THUMB_SIZES, key=lambda x: abs(x - w))
+    p = safe_join(folder(q.get("type", "output")), q.get("subfolder", "") or "", q.get("filename", ""))
+    if not os.path.isfile(p): raise web.HTTPNotFound()
+    st = os.stat(p)
+    key = hashlib.sha1(f"{p}|{st.st_mtime_ns}|{st.st_size}|{w}".encode()).hexdigest()
+    dst = os.path.join(THUMB_DIR, key[:2], key + ".webp")
+    if not os.path.isfile(dst):
+        _THUMB_GATE = _THUMB_GATE or asyncio.Semaphore(max(2, min(8, (os.cpu_count() or 4) // 2)))
+        async with _THUMB_GATE:
+            ok = False
+            if not os.path.isfile(dst):
+                try: ok = await asyncio.to_thread(_make_thumb, p, dst, w)
+                except Exception as e: print("thumb:", type(e).__name__, str(e)[:120], flush=True)  # noqa: BLE001
+            if not ok and not os.path.isfile(dst):
+                # couldn't make one (an odd format): the file itself, or nothing for a video
+                if re.search(r"\.(mp4|webm|mov|mkv)$", p, re.I): raise web.HTTPNotFound()
+                return web.FileResponse(p, headers={"Cache-Control": "public, max-age=86400"})
+    return web.FileResponse(dst, headers={"Cache-Control": "public, max-age=31536000, immutable", "Content-Type": "image/webp"})
+
+
 async def local_view(req):
     """pictures and videos straight from the folders (faster than going through ComfyUI, and ComfyUI Desktop may not serve
     every folder the Studio uses); anything not found here still goes to ComfyUI"""
@@ -6693,7 +6748,7 @@ def main():
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
         web.get("/studio-api/cost", cost),
         web.post("/studio-api/hf/request-key", hf_key_request), web.get("/studio-api/hf/request-key", hf_key_request),
-        web.post("/studio-api/output/delete", delete_output), web.post("/studio-api/keep", keep), web.get("/studio-api/kept/{path:.+}", get_kept), web.delete("/studio-api/kept/{path:.+}", del_kept),
+        web.post("/studio-api/output/delete", delete_output), web.post("/studio-api/keep", keep), web.get("/studio-api/kept/{path:.+}", get_kept), web.get("/studio-api/thumb", thumb), web.delete("/studio-api/kept/{path:.+}", del_kept),
         web.get("/studio-api/https", https_link),
         web.get("/studio-api/loras", list_loras), web.post("/studio-api/loras/fetch-missing", fetch_missing_loras), web.post("/studio-api/loras/add", add_lora),
         web.get("/studio-api/loras/job/{id}", lora_job_status), web.post("/studio-api/loras/forget", forget_lora), web.get("/studio-api/loras/failed", forget_failed), web.get("/studio-api/library/unused", library_unused), web.post("/studio-api/loras/failed", forget_failed),

@@ -1,6 +1,7 @@
 // Storage: what the rental's disk and your drive hold, a suggested clean-up (SmartClean.tsx: unused models, earlier tries
 // of reworked prompts, never-opened results, temp files), which projects take the most room, and a by-age clean-up for
 // old results (favourites are never touched), with a preview before anything is deleted.
+import { Thumb } from "./Thumb";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
@@ -295,7 +296,7 @@ function Cleanup({ folders, onDone }: { folders: string[]; onDone: () => void })
                   <button key={key(it)} onClick={() => setSkip((s) => { const n = { ...s }; if (n[key(it)]) delete n[key(it)]; else n[key(it)] = true; return n; })}
                     title={kept ? "Kept — click to delete it after all" : "Click to keep this one"} aria-pressed={!kept}
                     className={cx("relative aspect-[3/4] overflow-hidden rounded-md border bg-black", kept ? "border-good opacity-100" : "border-line opacity-80 hover:opacity-100")}>
-                    {it.kind === "video" ? <video src={viewUrl(it)} muted preload="metadata" className="h-full w-full object-cover" /> : <img src={viewUrl(it)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                    <Thumb f={it} video={it.kind === "video"} className="h-full w-full object-cover" />
                     {kept && <span className="absolute inset-x-0 bottom-0 bg-good/90 py-0.5 text-center text-[11px] font-semibold text-black">Keep</span>}
                   </button>
                 );

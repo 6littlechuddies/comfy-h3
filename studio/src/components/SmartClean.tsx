@@ -6,6 +6,7 @@
 //   unopened — made a week or more ago and never opened full-size
 //   scratch  — temp and work files
 // Click a thumbnail to keep it; shift-click keeps (or un-keeps) everything between two clicks.
+import { Thumb } from "./Thumb";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { viewUrl, type FileRef } from "../lib/api";
 import { useJobs } from "../lib/jobs";
@@ -49,7 +50,7 @@ function PickGrid({ items, skip, setSkip }: { items: Item[]; skip: Record<string
         return (
           <button key={keyOf(it)} onClick={(e) => click(i, e.shiftKey)} aria-pressed={!kept} title={kept ? "Kept — click to let it go after all" : "Click to keep this one (shift-click: everything up to here)"}
             className={cx("relative aspect-[3/4] overflow-hidden rounded-md border bg-black", kept ? "border-good" : "border-line opacity-80 hover:opacity-100")}>
-            {it.kind === "video" ? <video src={viewUrl(it)} muted preload="metadata" className="h-full w-full object-cover" /> : <img src={viewUrl(it)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+            <Thumb f={it} video={it.kind === "video"} className="h-full w-full object-cover" />
             {kept && <span className="absolute inset-x-0 bottom-0 bg-good/90 py-0.5 text-center text-[11px] font-semibold text-black">Keep</span>}
           </button>
         );
@@ -210,7 +211,7 @@ function FamilyView({ f, skip, setSkip }: { f: Family; skip: Record<string, true
                 {v.final || !drop.length
                   ? <div className="flex flex-wrap gap-1.5">{v.files.slice(0, 12).map((it) => (
                       <span key={keyOf(it)} title={it.keep || ""} className="relative h-16 w-12 overflow-hidden rounded border border-good/60 bg-black">
-                        {it.kind === "video" ? <video src={viewUrl(it)} muted preload="metadata" className="h-full w-full object-cover" /> : <img src={viewUrl(it)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                        <Thumb f={it} video={it.kind === "video"} className="h-full w-full object-cover" />
                       </span>))}{v.files.length > 12 && <span className="self-center text-[11.5px] text-dim">+{v.files.length - 12}</span>}</div>
                   : <PickGrid items={drop} skip={skip} setSkip={setSkip} />}
               </div>

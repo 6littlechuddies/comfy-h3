@@ -1,4 +1,5 @@
 // Under a picture slot: fill it from your own pictures (results, uploads — the tray) or from CivitAI, without dragging.
+import { Thumb } from "./Thumb";
 import { useEffect, useRef, useState } from "react";
 import { viewUrl } from "../lib/api";
 import { useTray, type Media } from "../lib/tray";
@@ -34,7 +35,7 @@ export function PicturePicker({ onPick, civitai, what = "picture" }: { onPick: (
               {items.map((it) => (
                 <button key={it.id} type="button" title={it.label} className="press aspect-[3/4] overflow-hidden border border-line2 hover:border-accent"
                   onClick={async () => { setOpen(false); onPick(await useTray.getState().asMedia(it.id)); }}>
-                  <img src={viewUrl(it.src)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                  <Thumb f={it.src} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

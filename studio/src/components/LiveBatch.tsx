@@ -1,6 +1,7 @@
 // Batch → Live packs: pick characters, paste (or drop screenshots of) what other creators offer as tips / call actions,
 // and each character gets her own actions planned in her manner, her still, and every clip made and fitted to its joins.
 // Sending stays per character, after you've watched her reel.
+import { Thumb } from "./Thumb";
 import { useRef, useState } from "react";
 import { uploadFile, viewUrl } from "../lib/api";
 import { coverOf, useCharacters } from "../lib/characters";
@@ -52,7 +53,7 @@ export function LiveBatchPanel() {
               <button key={c.id} onClick={() => { const n = new Set(sel); if (on) n.delete(c.id); else n.add(c.id); setSel(n); }} aria-pressed={on}
                 title={`${c.name}${onSite(c) ? "" : " — not on the site yet: clips can be made, send her first before the pack"}${made ? ` · ${made} clips made` : ""}`}
                 className={cx("press group relative flex flex-col overflow-hidden border text-left", on ? "border-accent" : "border-line hover:border-line2", !onSite(c) && "opacity-55")}>
-                <span className="aspect-[3/4] w-full bg-raised2">{f && <img src={viewUrl(f)} alt="" loading="lazy" className="h-full w-full object-cover" />}</span>
+                <span className="aspect-[3/4] w-full bg-raised2">{f && <Thumb f={f} className="h-full w-full object-cover" />}</span>
                 <span className={cx("truncate px-1 py-0.5 text-[10.5px]", on ? "bg-accent text-accentink" : "text-muted")}>{c.site?.name || c.name}</span>
                 {made > 0 && <span className="absolute right-0.5 top-0.5 bg-black/75 px-1 text-[9.5px] text-accent" title={`${made} clips made`}>{made}</span>}
               </button>);

@@ -30,6 +30,11 @@ export function viewUrl(f: FileRef): string {
   const q = new URLSearchParams({ filename: f.filename, subfolder: f.subfolder || "", type: f.type });
   return `/view?${q}`;
 }
+/** a small preview of a picture or a video's frame (made once on the rental, ~30 KB): for grids — the full file is viewUrl */
+export function thumbUrl(f: FileRef, w = 384): string {
+  const q = new URLSearchParams({ filename: f.filename, subfolder: f.subfolder || "", type: f.type, w: String(w) });
+  return `/studio-api/thumb?${q}${f.v ? `&v=${f.v}` : ""}`;
+}
 export const inputUrl = (name: string) => viewUrl({ filename: name, subfolder: "", type: "input" });
 
 export function kindOf(name: string): Kind | null {

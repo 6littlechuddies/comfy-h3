@@ -1,6 +1,7 @@
 // The Live pack builder: her still, idle loops and actions for the site's Live Stream (tips) and Live Action (call buttons).
 // Every clip shows how big its joins jumped before they were eased (the site plays them back to back as one shot), a reel
 // plays the whole pack in the order the site would, and nothing is sent until every clip is ticked as checked by eye.
+import { Thumb } from "./Thumb";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
@@ -126,7 +127,7 @@ function LivePack({ c }: { c: Character }) {
                       if (l.anchor && Object.values(l.clips).some((x) => x.status === "ready") && !confirm("A new still means every clip is made again (they all start or end on it). Go ahead?")) return;
                       await setAnchor(c.id, p); setPicking(false);
                     })} className="press aspect-[9/16] overflow-hidden border border-line hover:border-accent">
-                      <img src={viewUrl(p)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      <Thumb f={p} className="h-full w-full object-cover" />
                     </button>)) : <p className="col-span-3 text-[12px] text-dim">No pictures of her yet — make one in 03 Create, or make a still from her room below.</p>}
                 </div>
               </>}

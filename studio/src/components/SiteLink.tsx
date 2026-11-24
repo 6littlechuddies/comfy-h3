@@ -1,6 +1,7 @@
 // Your site: Characters › one character (profile + content folders) › one folder. Everything is sent as a draft through
 // the site's factory API; a person publishes it in the site's admin panel. Built for doing many at once: pick several
 // characters, let the writer fill their profiles, send them all.
+import { Thumb } from "./Thumb";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -785,7 +786,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           <span className="text-[12px] text-muted">Profile carousel <span className="text-dim">· after her card on her profile, up to 12, seen by everyone (no nudity) · {site.galleryFiles?.length ?? 0}/12 · add from the Catalog (tick → Carousel) or right-click a picture</span></span>
           {site.galleryFiles?.length ? <div className="flex flex-wrap gap-1.5">{site.galleryFiles.map((f, i) => (
             <span key={`${f.subfolder}/${f.filename}`} className="relative h-20 w-14 overflow-hidden border border-line">
-              <img src={viewUrl(f)} alt={`Carousel ${i + 1}`} className="h-full w-full object-cover" loading="lazy" />
+              <Thumb f={f} className="h-full w-full object-cover" />
               <button aria-label="Take out of the carousel" className="absolute right-0 top-0 bg-black/60 px-1 text-[11px] text-white hover:bg-bad" onClick={async () => { await (await import("../lib/siteMedia")).removeFromCarousel(c.id, f); }}>✕</button>
             </span>))}</div> : <span className="text-[12px] text-dim">None yet.</span>}
           <span className="text-[12px] text-muted">Banner <span className="text-dim">· the wide picture at the top of the explore page · {site.bannerFile ? "set" : "none — your site keeps what it has"}</span>
@@ -838,8 +839,7 @@ export function PicPick({ c, title, onPick, onClose, videos }: { c: Character; t
         <div className="grid min-h-0 grid-cols-3 gap-2 overflow-y-auto p-3 md:grid-cols-5">
           {(list ?? []).map((f) => (
             <button key={`${f.subfolder}/${f.filename}`} onClick={() => onPick(f)} className="press group aspect-[3/4] overflow-hidden border border-line bg-black hover:border-accent">
-              {videos ? <video src={viewUrl(f)} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-contain" />
-                : <img src={viewUrl(f)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />}</button>
+              <Thumb f={f} video={videos} className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" /></button>
           ))}
         </div>
         {list && !list.length && <p className="p-4 text-[13px] text-muted">No {videos ? "videos" : "pictures"} of {c.name} found yet — drop one from the tray into the box instead.</p>}
@@ -853,7 +853,7 @@ function FolderCard({ s, onOpen }: { s: SiteSet; onOpen: () => void }) {
     <button onClick={onOpen} className="press group flex aspect-[4/5] flex-col overflow-hidden border border-line text-left hover:border-accent">
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-line">
         {Array.from({ length: 4 }, (_, i) => pics[i]
-          ? (/\.(mp4|webm|mov)$/i.test(pics[i].filename) ? <video key={i} src={viewUrl(pics[i])} muted className="h-full w-full object-cover" /> : <img key={i} src={viewUrl(pics[i])} alt="" loading="lazy" className="h-full w-full object-cover" />)
+          ? (/\.(mp4|webm|mov)$/i.test(pics[i].filename) ? <Thumb key={i} f={pics[i]} video play={false} className="h-full w-full object-cover" /> : <Thumb key={i} f={pics[i]} className="h-full w-full object-cover" />)
           : <span key={i} className="hatch block h-full w-full" />)}
       </div>
       <div className="flex flex-col gap-0.5 px-2.5 py-2">
@@ -973,8 +973,7 @@ function Folder({ c, index }: { c: Character; index: number }) {
               <div key={k} className={cx("group relative aspect-[3/4] select-none overflow-hidden border-2 bg-black", n != null ? "border-accent" : "border-transparent")}>
                 <button onMouseDown={(e) => down(o, i, e)} onMouseEnter={() => enter(o)} onDragStart={(e) => e.preventDefault()} className={cx("press h-full w-full", n == null && "opacity-85 hover:opacity-100")} title="Click to add or remove · drag across several · Shift+click picks everything in between">
                   {/* the whole picture (not cropped), a little bigger on hover */}
-                  {o.kind === "video" ? <video src={viewUrl(o)} muted loop onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />
-                    : <img src={viewUrl(o)} alt="" loading="lazy" className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />}
+                  <Thumb f={o} video={o.kind === "video"} className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.06]" />
                 </button>
                 {n != null && <span className="pointer-events-none absolute left-1 top-1 flex h-6 min-w-6 items-center justify-center bg-accent px-1 font-mono text-[12px] font-bold text-accentink">{n + 1}</span>}
                 {o.kind === "video" && <span className="micro pointer-events-none absolute bottom-1 right-1 bg-black/70 px-1 text-white">VIDEO</span>}
