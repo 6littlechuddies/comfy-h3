@@ -289,9 +289,9 @@ function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; site?
     <span className="flex flex-wrap items-center gap-2 border-l border-line pl-3">
       <span className="text-muted">For {c.name} on your site:</span>
       <button className={btn} disabled={!one} title={one ? "Her card: the picture on the grid and in chat (her cover photo)" : "Tick exactly one picture"}
-        onClick={() => run(async () => (await import("../lib/siteMedia")).setCard(c.id, pics[0], { loop }))}>★ Card</button>
-      <label className="flex items-center gap-1 text-[12px] text-muted" title="Animate the card into her hover loop (a 5 s seamless loop, made in the queue)">
-        <input type="checkbox" checked={loop} onChange={(e) => { setLoop(e.target.checked); try { localStorage.setItem("h3.cat.cardLoop", e.target.checked ? "1" : "0"); } catch { /* */ } }} /> + hover loop</label>
+        onClick={() => run(async () => (await import("../lib/siteMedia")).setCard(c.id, pics[0], { pin: loop }))}>★ Card</button>
+      <label className="flex items-center gap-1 text-[12px] text-muted" title="Pin her for an animated cover (the video her card plays on hover) made from this picture later — Your site → Animated covers → Make the pinned ones">
+        <input type="checkbox" checked={loop} onChange={(e) => { setLoop(e.target.checked); try { localStorage.setItem("h3.cat.cardLoop", e.target.checked ? "1" : "0"); } catch { /* */ } }} /> + pin animated cover</label>
       <button className={btn} disabled={!pics.length} title="Her profile carousel, after her card — up to 12, seen by everyone (no nudity)"
         onClick={() => run(async () => (await import("../lib/siteMedia")).addToCarousel(c.id, pics))}>Carousel +{pics.length} <span className="text-dim">({c.site?.galleryFiles?.length ?? 0}/12)</span></button>
       <button className={btn} disabled={!one} title={one ? "The wide banner at the top of the explore page" : "Tick exactly one picture"}

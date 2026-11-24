@@ -9,7 +9,7 @@ import { coverOf, DEFAULT_AGE, describe, isAdult, useCharacters, VIEWS, type Cha
 import { useJobs } from "../lib/jobs";
 import { runWriter } from "../lib/writer";
 import { hasAge, stripAges } from "../lib/siteAuto";
-import { Btn, Icon, Slot, TextArea, TextIn, cx } from "./ui";
+import { Btn, DropSelect, Icon, Slot, TextArea, TextIn, cx } from "./ui";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/copy";
 import { isFav, toggleFav, useFavs } from "../lib/favs";
@@ -140,6 +140,8 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
   const ordered = (l: LoopPick[] | undefined) => l && [...l].sort((a, b) => Number(isFav(favs, b.file)) - Number(isFav(favs, a.file)));
   useEffect(() => { chars.forEach((c) => loopCandidates(c).then((l) => setCands((m) => ({ ...m, [c.id]: l }))).catch(() => setCands((m) => ({ ...m, [c.id]: [] })))); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const choose = (id: string, f: FileRef | undefined) => { const cur = useCharacters.getState().list.find((x) => x.id === id); if (cur) save({ ...cur, site: { ...cur.site, loopFile: f ? { filename: f.filename, subfolder: f.subfolder, type: f.type } : undefined } }); };
+  const [takes, setTakes] = useState(1);
+  const pinned = live.filter((x) => chars.some((c) => c.id === x.id) && x.site?.coverVideoPin);
   const autoAll = (onlyEmpty: boolean) => {
     let n = 0;
     for (const c of chars) {
@@ -149,15 +151,21 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
       if (!cur || !first || (onlyEmpty && cur.site?.loopFile)) continue;
       choose(c.id, first.file); n++;
     }
-    toast(n ? `Hover loop set for ${n} — check them, then Send as drafts` : "Nothing to set — no loops found for the ones without one", n ? "good" : "info");
+    toast(n ? `Animated cover set for ${n} — check them, then Send as drafts` : "Nothing to set — no videos found for the ones without one", n ? "good" : "info");
   };
   return createPortal(
     <div className="fade-in fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6" onMouseDown={onClose}>
       <div className="flex max-h-full w-full max-w-[1200px] flex-col border border-line bg-panel" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-          <b className="text-[14px]">Hover loops · {chars.length} character{chars.length === 1 ? "" : "s"}</b>
-          <span className="text-[12px] text-muted">Your ★ favourites come first, then loops from Video board / Animate. Hover to play, click to use. The site wants it to start on her full-body cover with small, calm motion.</span>
-          <div className="ml-auto flex gap-2">
+          <b className="text-[14px]">Animated covers · {chars.length} character{chars.length === 1 ? "" : "s"}</b>
+          <span className="text-[12px] text-muted">The video her card plays when someone hovers it on your site. Pin the ones that need one, make the pinned ones in one go (on a multi-GPU rental they run side by side), then click the video you want for each — or let ★ / newest pick for all. Each video stays with its character.</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Btn onClick={async () => { const { pinCoverVideo } = await import("../lib/siteMedia"); let n = 0; for (const c of chars) { const x = useCharacters.getState().list.find((y) => y.id === c.id); if (x && !x.site?.loopFile && !x.site?.coverVideoPin && (x.cover || x.views.front)) { pinCoverVideo(x.id); n++; } } toast(n ? `Pinned ${n} without an animated cover` : "Every one has one or is pinned already", "info"); }}
+              title="Pin every one without an animated cover (made from her card)">Pin all without one</Btn>
+            <DropSelect value={String(takes)} onChange={(e) => setTakes(Number(e.target.value))} aria-label="Takes per character" className="inset h-9 border border-line bg-raised px-2 text-[12.5px]">
+              {[1, 2, 3].map((n) => <option key={n} value={n}>{n} take{n > 1 ? "s" : ""} each</option>)}</DropSelect>
+            <Btn kind="primary" disabled={!pinned.length} onClick={async () => { const { makePinned } = await import("../lib/hoverLoop"); toast(`Making ${pinned.length * takes} animated cover${pinned.length * takes > 1 ? "s" : ""} — they're queued; each shows up here when done`, "good"); makePinned(pinned.map((c) => c.id), takes).then(() => chars.forEach((c) => loopCandidates(c).then((l) => setCands((m) => ({ ...m, [c.id]: l }))).catch(() => {}))); }}
+              title="Make every pinned one now, from the picture it was pinned with (her card)">Make the pinned ones · {pinned.length}</Btn>
             <Btn onClick={() => autoAll(true)} title="Her newest loop, only for characters without a hover loop yet">Newest loop where empty</Btn>
             <Btn kind="primary" onClick={() => autoAll(false)} title="Her newest loop for every one of them (replaces the ones you picked)">Newest loop for all</Btn>
             <button aria-label="Close" className="ml-2 text-muted hover:text-ink" onClick={onClose}><Icon name="x" size={16} /></button>
@@ -173,12 +181,13 @@ function BulkLoops({ chars, onClose }: { chars: Character[]; onClose: () => void
                 <div className="flex w-28 shrink-0 flex-col gap-1">
                   <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="aspect-[3/4] w-full border border-line object-cover" />
                   <span className="truncate text-[12.5px] font-semibold">{c.name}</span>
-                  <span className={cx("text-[11px]", cur ? "text-good" : "text-dim")}>{cur ? "Loop set" : "No loop"}</span>
+                  <span className={cx("text-[11px]", cur ? "text-good" : c.site?.coverVideoPin ? "text-accent" : "text-dim")}>{cur ? "Cover video set" : c.site?.coverVideoPin ? "Pinned — not made yet" : "None"}</span>
+                  <button className="self-start text-[11px] text-muted hover:text-ink" onClick={async () => { const m = await import("../lib/siteMedia"); if (c.site?.coverVideoPin) m.unpinCoverVideo(c.id); else m.pinCoverVideo(c.id); }}>{c.site?.coverVideoPin ? "Unpin" : "Pin for one"}</button>
                   {cur && <button className="self-start text-[11px] text-muted hover:text-bad" onClick={() => choose(c.id, undefined)}>Clear</button>}
                 </div>
                 <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">
                   {!list ? <span className="self-center text-[12px] text-muted">Finding her videos…</span>
-                    : !list.length ? <span className="self-center text-[12px] text-muted">No videos of {c.name} yet — make loops for her on the Video board (05 Animate).</span>
+                    : !list.length ? <span className="self-center text-[12px] text-muted">No videos of {c.name} yet — pin her, then Make the pinned ones.</span>
                     : list.slice(0, 12).map((x) => {
                       const on = !!cur && cur.filename === x.file.filename && (cur.subfolder || "") === (x.file.subfolder || "");
                       return (
@@ -444,15 +453,14 @@ function Characters({ connected }: { connected: boolean }) {
       } catch (e) { toast(`Names: ${(e as Error).message} — kept the old ones`, "bad"); }
       unnamed.forEach((c) => mark(c.id, "Waiting…"));
     }
-    // 2. hover loops for every one without one, made from her card — all queued now, so the GPU works while profiles are written
-    const { makeHoverLoop } = await import("../lib/hoverLoop");
-    const loops = new Map(ids.filter((id) => !useCharacters.getState().list.find((x) => x.id === id)?.site?.loopFile)
-      .map((id) => [id, makeHoverLoop(id).catch((e) => { toast(`${useCharacters.getState().list.find((x) => x.id === id)?.name}: hover loop skipped (${(e as Error).message})`, "info"); return null; })] as const));
+    // 2. no animated cover yet: pinned for one (made later, in Animated covers — the video work waits for a GPU rental)
+    const { pinCoverVideo } = await import("../lib/siteMedia");
+    for (const id of ids) { const x = useCharacters.getState().list.find((y) => y.id === id); if (x && !x.site?.loopFile && !x.site?.coverVideoPin) pinCoverVideo(id); }
     for (const id of ids) {
       const c = useCharacters.getState().list.find((x) => x.id === id);
       if (!c) { mark(id, null); continue; }
       mark(c.id, "Starting…");
-      try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t), loops.get(c.id)); ok++; toast(`${c.name}: ${note}`, "good"); }
+      try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t)); ok++; toast(`${c.name}: ${note}`, "good"); }
       catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
     }
@@ -506,14 +514,7 @@ function Characters({ connected }: { connected: boolean }) {
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
-        <Btn onClick={async () => {
-          const { makeHoverLoop } = await import("../lib/hoverLoop");
-          const need = (chosen.length ? chosen : list).filter((c) => !c.site?.loopFile && (c.cover || c.views.front));
-          if (!need.length) { toast("Every one has a hover loop already", "info"); return; }
-          toast(`Making ${need.length} hover loop${need.length > 1 ? "s" : ""} from their cards — they're queued; each is set when it's done`, "good");
-          for (const c of need) makeHoverLoop(c.id).catch((e) => toast(`${c.name}: ${(e as Error).message}`, "bad"));
-        }} disabled={Object.keys(busy).length > 0} title="For every ticked one (or everyone) without a hover loop: animate her card into one"><Icon name="film" size={14} /> Make missing loops · {(chosen.length ? chosen : list).filter((c) => !c.site?.loopFile).length}</Btn>
-        <Btn onClick={() => setLoops(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Pick each one's hover loop (the video on her card) from her Video board loops — or the newest for all"><Icon name="play" size={14} /> Hover loops{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={() => setLoops(true)} disabled={Object.keys(busy).length > 0} title="Animated covers: the video her card plays when someone hovers it on your site. See who has one, who's pinned for one, make the pinned ones (best on a multi-GPU rental) and pick each one's video — for the ticked ones, or everyone"><Icon name="play" size={14} /> Animated covers{(() => { const n = (chosen.length ? chosen : list).filter((c) => c.site?.coverVideoPin).length; return n ? ` · ${n} pinned` : ""; })()}</Btn>
         <DeepToggle />
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
         <Btn onClick={() => writeAll(false)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Write only the empty fields; what's there stays"><Icon name="script" size={14} /> Fill profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
@@ -522,7 +523,7 @@ function Characters({ connected }: { connected: boolean }) {
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
       {naming && <BulkNames chars={chosen} onClose={() => setNaming(false)} />}
-      {loops && <BulkLoops chars={chosen} onClose={() => setLoops(false)} />}
+      {loops && <BulkLoops chars={chosen.length ? chosen : list} onClose={() => setLoops(false)} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {list.map((c) => {
           const st = status(c);
@@ -707,9 +708,11 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
           })}
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="flex items-center text-[12px] text-muted">Hover loop <span className="ml-1.5 text-dim">· plays on her card when someone hovers it</span>
-            <button className="ml-auto text-[11.5px] text-accent hover:underline" title="Animate her card picture into a 5 s seamless loop (in the queue, a few minutes)"
-              onClick={async () => { try { await (await import("../lib/hoverLoop")).makeHoverLoop(c.id); } catch (e) { toast((e as Error).message, "bad"); } }}>Make it from her card</button>
+          <span className="flex items-center text-[12px] text-muted">Animated cover <span className="ml-1.5 text-dim">· the video her card plays when someone hovers it{site.coverVideoPin ? " · pinned" : ""}</span>
+            <button className="ml-auto text-[11.5px] text-accent hover:underline" title="Pin her: an animated cover is made from her card when you make the pinned ones (Your site → Animated covers)"
+              onClick={async () => { const m = await import("../lib/siteMedia"); if (site.coverVideoPin) m.unpinCoverVideo(c.id); else m.pinCoverVideo(c.id); }}>{site.coverVideoPin ? "Unpin" : "Pin for later"}</button>
+            <button className="ml-3 text-[11.5px] text-accent hover:underline" title="Make it now from her card (a 5 s seamless loop, a few minutes in the queue)"
+              onClick={async () => { try { await (await import("../lib/hoverLoop")).makeHoverLoop(c.id); } catch (e) { toast((e as Error).message, "bad"); } }}>Make now</button>
             <button className="ml-3 text-[11.5px] text-accent hover:underline" onClick={() => setPickLoop(true)}>Pick from their videos</button></span>
           <Slot className="h-44" accept={["video"]} value={site.loopFile ? { name: site.loopFile.filename, kind: "video", url: viewUrl(site.loopFile), label: "hover loop" } : null}
             hint="a short video of her — sent 540 px wide, the card's shape, no sound, ~1 MB"

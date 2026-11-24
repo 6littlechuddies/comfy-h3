@@ -201,10 +201,10 @@ export function PictureMenuHost() {
       },
     },
     {
-      key: "cardl", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s card + animate her hover loop`, hide: isVideo || !coverChar, run: async () => {
+      key: "cardl", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s card + pin her animated cover`, hide: isVideo || !coverChar, run: async () => {
         const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
-        await (await import("../lib/siteMedia")).setCard(coverChar!.id, ref, { loop: true });
-        return `${coverChar!.name}'s card is set — her hover loop is being made from it`;
+        await (await import("../lib/siteMedia")).setCard(coverChar!.id, ref, { pin: true });
+        return `${coverChar!.name}'s card is set and pinned for an animated cover — make the pinned ones in Your site → Animated covers`;
       },
     },
     {
@@ -220,7 +220,7 @@ export function PictureMenuHost() {
       },
     },
     {
-      key: "loop", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s hover loop (your site)`, hide: !isVideo || !coverChar, run: async () => {
+      key: "loop", icon: "film", label: `Make this ${coverChar?.name ?? "their"}'s animated cover (your site)`, hide: !isVideo || !coverChar, run: async () => {
         const ref: FileRef = t.output ?? await toMedia(t).then((m) => ({ filename: m.name, subfolder: "", type: "input" as const }));
         const st = useCharacters.getState();
         const c = st.list.find((x) => x.id === coverChar!.id)!;

@@ -37,6 +37,8 @@ export interface SiteInfo {
   avatarFile?: FileRef; coverFile?: FileRef;
   /** her hover loop: the short video her card plays when someone hovers it (made 540 px wide, the card's shape, when sent) */
   loopFile?: FileRef;
+  /** pinned for an animated cover (her hover video) made later, from this picture — made when you run the pinned ones */
+  coverVideoPin?: { from: FileRef; at: number };
   /** the wide banner at the top of the explore page (factory API "cover"); none = the site keeps what it has */
   bannerFile?: FileRef;
   /** her profile carousel, after her card (factory API "gallery"): pictures only, up to 12, in order — seen by everyone, so

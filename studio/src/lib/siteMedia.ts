@@ -9,15 +9,22 @@ const same = (a: FileRef, b: FileRef) => a.filename === b.filename && (a.subfold
 const cur = (id: string): Character => { const c = useCharacters.getState().list.find((x) => x.id === id); if (!c) throw new Error("That character is gone"); return c; };
 const resend = async (id: string) => { const { resendIfSent } = await import("../components/SiteLink"); const m = await resendIfSent(id); if (m) useJobs.getState().toast(m, /Couldn't/.test(m) ? "bad" : "good"); };
 
-/** her card: the cover photo everything shows. With `loop`, her hover loop is made from it too (a few minutes, in the queue) */
-export async function setCard(id: string, ref: FileRef, o: { loop?: boolean } = {}) {
+/** her card: the cover photo everything shows. With `pin`, she's pinned for an animated cover made from it later
+ *  (Your site → Animated covers → Make the pinned ones), so the video work can wait for a multi-GPU rental */
+export async function setCard(id: string, ref: FileRef, o: { pin?: boolean } = {}) {
   const { changeCover } = await import("./cover");
   await changeCover(id, ref); // also resends when she's on your site already
-  if (o.loop) {
-    const { makeHoverLoop } = await import("./hoverLoop");
-    makeHoverLoop(id, ref).catch((e) => useJobs.getState().toast(`${cur(id).name}'s hover loop: ${(e as Error).message}`, "bad"));
-  }
+  if (o.pin) pinCoverVideo(id, ref);
 }
+
+/** pin her for an animated cover from this picture (her card when none is given) */
+export function pinCoverVideo(id: string, from?: FileRef) {
+  const c = cur(id);
+  const f = from ?? c.cover ?? c.views.front;
+  if (!f) return;
+  useCharacters.getState().save({ ...c, site: { ...c.site, coverVideoPin: { from: f, at: Date.now() } } });
+}
+export const unpinCoverVideo = (id: string) => { const c = cur(id); const { coverVideoPin: _x, ...rest } = c.site ?? {}; useCharacters.getState().save({ ...c, site: rest }); };
 
 export async function setBanner(id: string, ref: FileRef | null) {
   const c = cur(id);
@@ -59,5 +66,5 @@ export async function removeFromCarousel(id: string, ref: FileRef) {
   useCharacters.getState().save({ ...c, site: { ...c.site, galleryFiles: (c.site?.galleryFiles ?? []).filter((x) => !same(x, ref)) } });
 }
 
-/** whose card on your site has no hover loop yet */
+/** whose card on your site has no animated cover yet */
 export const needsLoop = (c: Character) => !c.site?.loopFile;
