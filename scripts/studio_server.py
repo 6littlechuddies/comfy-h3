@@ -3253,7 +3253,10 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
         src = os.path.join(OUTPUT, "studio")
         if os.path.isdir(src):
             args = ["copy", src, f"proton:{folder}/results", "--transfers", "6", "--checkers", "8", "--retries", "3", "--low-level-retries", "5"]
-            if not full: args += ["--max-age", f"{max(1, PROTON_EVERY // 60) * 3}m"]  # only what's new since the last runs
+            # only what's new since the last run that WORKED (+15 min margin) — a fixed window used to drop every result
+            # made during a failing stretch (drive full, sign-in expired): once they aged past it they were never sent
+            if not full and PROTON.get("last_ok"):
+                args += ["--max-age", f"{int((time.time() - PROTON['last_ok'] + 900) // 60) + 1}m"]
             rc, out = await _rclone(*args)
             if rc != 0: _drive_signin_bad(out)
             if rc != 0: err = err or (("YOUR DRIVE IS FULL — results aren't being backed up (your characters and settings were saved). Free space in Storage: empty the drive's trash, prune old exports, or delete old results. " if _full(out) else _why_drive(out) + "copying results failed: ") + _redact(out)[-400:])
