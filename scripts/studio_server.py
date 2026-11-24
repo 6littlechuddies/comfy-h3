@@ -5808,6 +5808,32 @@ def _site_block(site: dict, cosplay: bool) -> dict:
     return out
 
 
+_ASTERISK = re.compile(r"asterisk|\*|\b(narrat\w*|stage directions?|roleplay actions?)\b", re.I)
+_AI_BACKWARDS = re.compile(r"claim\w*\s+(she'?s|she is|to be|being)\s+(an?\s+)?AI\b|(say|says|admit\w*)\s+(plainly\s+)?(she|you)\s*(is|are|'?re|'?s)\s*n[o']t\s+(an?\s+)?AI\b|deny\w*\s+being\s+(an?\s+)?AI", re.I)
+
+
+def _persona_clean(text: str) -> str:
+    """what the site refuses or what would mislead her, taken out of the persona and voice notes before sending:
+    any sentence about asterisks or narration (the site: 'it says asterisk'), and a NEVER SAY line that tells her to
+    deny being an AI (the editor once wrote it backwards) — that one becomes the right line."""
+    if not text: return text or ""
+    out = []
+    for line in text.split("\n"):
+        if _AI_BACKWARDS.search(line):
+            out.append((re.match(r"^\s*[-•]\s*", line).group(0) if re.match(r"^\s*[-•]\s*", line) else "- ") + "Claiming to be human when he sincerely asks if she's real - she says plainly she's an AI and stays herself.")
+            continue
+        if _ASTERISK.search(line):
+            # only the comma-separated part that mentions it goes ("a fragment, a correction with an asterisk, a continuation")
+            def fix(sent: str) -> str:
+                if not _ASTERISK.search(sent): return sent
+                parts = [x for x in re.split(r",\s+", sent) if not _ASTERISK.search(x)]
+                return re.sub(r"\s*[—-]\s*$", ".", ", ".join(parts)).strip() if len(parts) > 0 and len(" ".join(parts).split()) > 3 else ""
+            line = " ".join(x for x in (fix(y) for y in re.split(r"(?<=[.!?])[ \t]+", line)) if x).strip()
+            if not line or re.fullmatch(r"[-•\s]*", line): continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 def _no_length(text: str) -> str:
     if not text or not _LENGTH_RULE.search(text): return text or ""
     # line by line, so the deep persona's sections and "You:" lines keep their line breaks
@@ -5993,7 +6019,7 @@ async def _site_push(job: dict, d: dict):
                 "tags": list(dict.fromkeys((site.get("tags") or []) + (["cosplay"] if str(c.get("source") or "").startswith("Cosplay of ") else []))),
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
                             "greeting": site.get("greeting", ""), "appearance": appearance, "description": c.get("block") or ""},
-                "persona_prompt": _no_length((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or ""), "voice_notes": " ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x),
+                "persona_prompt": _persona_clean(_no_length((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or "")), "voice_notes": _persona_clean(" ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x)),
                 "provenance": {"ai_generated": True, "generator": gen, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
             }
             # the site's own fields (factory API "site" block): only what's written is sent. A cosplay character goes in the

@@ -327,7 +327,8 @@ export const DEEP_CRITIC = `You are the editor. Return the FINAL persona, comple
 9. Anything that points at the medium (avatar, profile, pictures on a page, pixels, the app or site, being digital) - rewrite it as something from her real life. Only the real-or-AI line may say she isn't human.
 10. Random poetic lines - rewrite them as how a real woman texts.
 11. Stock lines every character ends up saying - "earn it", "not tonight", "maybe later", "you still owe me", "tell me something real", "what's on your mind", "talk to me", "hey yourself" - and any clock time ("2am", "midnight") - rewrite in her own words, as a situation not an hour.
-Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, claiming to be human when sincerely asked, pressure about money or loyalty) plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
+12. Any mention of asterisks, "*", actions or narration (the site refuses it: she only texts) - delete it.
+Then write NEVER SAY: 6-8 bullets, 40-60 words, kinds of things she would never say (assistant phrases, pressure about money or loyalty, and exactly this bullet: "Claiming to be human when he sincerely asks if she's real - she says plainly she's an AI and stays herself") plus 2-3 cliches specific to HER that she would find cringe. Nothing about message length.`;
 const NEVER_DEFAULT = "NEVER SAY\n- Anything about an avatar, profile, pictures on a page, the app or site, or being digital.\n- Help-desk or therapist phrases (offering assistance, \"I understand how you feel\").\n- Claiming to be human when he sincerely asks.\n- Anything about him paying, subscribing or proving he cares.\n- Pet names on repeat.\n- Summaries of what he just said.";
 
 // checks on the result (advisor's list): assistant-speak and length rules are cut out; age or money pressure means "do it again"
@@ -400,7 +401,7 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
   const body = at >= 0 ? persona.slice(0, at) : persona, tail = at >= 0 ? persona.slice(at) : "";
   persona = stripLength(stripAges(cutSentences(body, ASSIST))).trim() + (tail ? `\n\n${tail.trim()}` : "");
   const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? cur0;
-  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona, deepAt: Date.now() } });
+  useCharacters.getState().save({ ...cur, site: { ...cur.site, personaCore: core, persona: fixAiLine(persona), deepAt: Date.now() } });
 }
 
 /** written-out example messages ("You: …", "Him: …") — the site refuses them (they get copied word for word) */
