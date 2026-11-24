@@ -27,7 +27,7 @@ function line(r: ImportRun): string {
       return [`${from} · ${mb(r.got)} of ${mb(r.size)}`, r.mbps && `${r.mbps} MB/s`, left(r.leftS)].filter(Boolean).join(" · ");
     case "unpacking": return r.total ? `Unpacking pictures · ${r.done} of ${r.total}` : "Unpacking…";
     case "done":
-      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
+      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}${r.res_total ? ` (newest first) · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}` : ""}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
     case "error": return r.error || "Couldn't import that file";
     default: return "";
   }

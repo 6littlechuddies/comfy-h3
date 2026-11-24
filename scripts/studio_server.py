@@ -3252,7 +3252,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
         if not err: await _proton_prune(folder)
         src = os.path.join(OUTPUT, "studio")
         if os.path.isdir(src):
-            args = ["copy", src, f"proton:{folder}/results", "--transfers", "2", "--checkers", "4", "--retries", "3", "--low-level-retries", "5"]
+            args = ["copy", src, f"proton:{folder}/results", "--transfers", "6", "--checkers", "8", "--retries", "3", "--low-level-retries", "5"]
             if not full: args += ["--max-age", f"{max(1, PROTON_EVERY // 60) * 3}m"]  # only what's new since the last runs
             rc, out = await _rclone(*args)
             if rc != 0: _drive_signin_bad(out)
@@ -3634,8 +3634,23 @@ async def _proton_restore(force: bool = False):
             set_last_change(max(cloud_t, 0) or time.time()); PROTON["sent_change"] = last_change()
         if it["state"] == "done":  # the result files follow in the background (they sync to Proton on their own)
             it["results"] = "copying"
-            rc, out = await _rclone("copy", f"proton:{folder}/results", os.path.join(OUTPUT, "studio"), "--ignore-existing", "--transfers", "4", timeout=7200)
+            dest = os.path.join(OUTPUT, "studio")
+            # how many there are (shown as "N of M"), then the copy: newest first, 16 at a time (it was 4, in no order —
+            # a thousand pictures took ages and the Catalog filled in at random)
+            rc0, sz = await _rclone("size", f"proton:{folder}/results", "--json", "--fast-list", timeout=600)
+            try: it["res_total"] = int(json.loads(sz[sz.index("{"): sz.rindex("}") + 1]).get("count") or 0)
+            except ValueError: it["res_total"] = 0
+            count = lambda: sum(len(f) for _, _, f in os.walk(dest)) if os.path.isdir(dest) else 0
+            async def tick():
+                while it.get("results") == "copying":
+                    it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
+                    await asyncio.sleep(10)
+            ticker = asyncio.get_running_loop().create_task(tick())
+            rc, out = await _rclone("copy", f"proton:{folder}/results", dest, "--ignore-existing", "--transfers", "16", "--checkers", "16",
+                                    "--fast-list", "--order-by", "modtime,descending", "--retries", "3", timeout=4 * 3600)
+            it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
             it["results"] = "done" if rc == 0 or "not found" in out.lower() else "failed"  # no results folder yet is fine
+            ticker.cancel()
     except Exception as e:  # noqa: BLE001
         print("!! Proton restore:", _redact(str(e)), flush=True)
         try:
@@ -5401,7 +5416,7 @@ async def import_latest(req):
     """the import running (or just finished) on this rental — the startup screen and the Studio both show it"""
     if not IMPORTS: return web.json_response(None)
     iid, it = max(IMPORTS.items(), key=lambda kv: kv[1]["at"])
-    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results")}, "cloud": _cloud()})
+    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results", "res_total", "res_have")}, "cloud": _cloud()})
 
 
 # ------------------------------------------------------------------ download switches ("later" / "Download now")
