@@ -102,6 +102,18 @@ function CatalogPanel() {
     for (const it of list) deleteFile(asRef(it));
     removeLocal(list); toast(`Deleted ${list.length}`, "good");
   };
+  // ticked pictures → characters (cosplay ones grouped and named by their Batch label, as from the results feed)
+  const newChars = async (list: CatItem[]) => {
+    const pics = list.filter((it) => it.kind === "image");
+    if (!pics.length) { toast("Tick pictures (not videos)", "info"); return; }
+    toast(`Making characters from ${pics.length} picture${pics.length > 1 ? "s" : ""} — reading each one takes about half a minute`, "info");
+    try {
+      const { charactersFromResults } = await import("../lib/newChar");
+      const r = await charactersFromResults(pics.map((it) => ({ o: { ...asRef(it), type: "output" }, label: it.meta?.label ?? it.filename })), { gallery: true, onStep: (m) => toast(m, "info") });
+      toast(`Made ${r.made.length}: ${r.made.map((c) => c.site?.name ? `${c.name} (site: ${c.site.name})` : c.name).join(", ")}${r.failed.length ? ` · didn't go: ${r.failed.join("; ").slice(0, 200)}` : ""}`, r.made.length ? "good" : "bad");
+      setPicked({}); setTimeout(() => load(0), 400);
+    } catch (e) { toast((e as Error).message, "bad"); }
+  };
   const fav = (list: CatItem[]) => {
     const on = list.some((it) => !isFav(favs, asRef(it)));
     for (const it of list) if (isFav(useFavs.getState().set, asRef(it)) !== on) toggleFav(asRef(it));
@@ -203,6 +215,8 @@ function CatalogPanel() {
           {siteChar && <SiteRoles c={siteChar} picked={Object.values(picked).map(asRef)} onDone={() => setPicked({})} />}
           <button onClick={() => setPicked(Object.fromEntries(items.map((x) => [fileKey(x), x])))} className="text-muted underline-offset-2 hover:text-ink hover:underline">All {items.length} loaded</button>
           <span className="ml-auto flex flex-wrap items-center gap-2">
+            <button onClick={() => void newChars(Object.values(picked))} title="Each picture becomes a character with its own project; pictures of the same cosplay (by their Batch label) become one character, the rest go in her free Gallery set"
+              className="press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3"><Icon name="user" size={13} /> New characters</button>
             <button onClick={() => fav(Object.values(picked))} className="press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3"><StarIcon on /> Favourite</button>
             <DropSelect value="" aria-label="Move to a project" onChange={(e) => { const v = e.target.value; if (v) move(Object.values(picked), v === "@free" ? null : v); }} className="inset h-8 border border-line bg-raised px-2 text-[12.5px]">
               <option value="">Move to…</option><option value="@free">Free work</option>
