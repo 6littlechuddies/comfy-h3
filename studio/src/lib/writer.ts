@@ -4,6 +4,7 @@ import { bigWriterFits, useDownloads } from "./downloads";
 import { buildStage, MINOR_FLAG } from "./graphs";
 import { useJobs, waitForJob, type Tab } from "./jobs";
 import { activePack, fillTemplate, packText, usePacks, type Stage } from "./packs";
+import { deepseekOn, ensureDeepseek } from "./deepseek";
 import { askOutside, grokSees, grokStatus, writerOutside } from "./outside";
 import { newSeed } from "./settings";
 import { ADULT_NOTE, explicitStop, described, minorWords, stopMessage } from "./adult";
@@ -28,11 +29,13 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
   const hits = minorWords(...texts);
   if (hits.length) throw new Error(explicitStop(hits));
   const input = fillTemplate(pack.template || usePacks.getState().templates[stage] || "", vars);
-  // "Grok tab · copy & paste": steps that have to look at a picture stay on the local writer
+  await ensureDeepseek();
+  const useDs = deepseekOn();
+  // "Grok tab · copy & paste": skipped while DeepSeek is on; steps that have to look at a picture stay on the local writer
   const sees = !!o.images?.length && (pack.see_image !== false || stage === "describe");
   // a step that looks at pictures goes to Grok too when its tab is connected (the helper attaches them); else the local writer
-  const grokEyes = sees && grokSees() && writerOutside() && !LOCAL_ONLY.includes(stage) && (await grokStatus()).connected;
-  if (writerOutside() && (!sees || grokEyes) && !LOCAL_ONLY.includes(stage)) {
+  const grokEyes = !useDs && sees && grokSees() && writerOutside() && !LOCAL_ONLY.includes(stage) && (await grokStatus()).connected;
+  if (!useDs && writerOutside() && (!sees || grokEyes) && !LOCAL_ONLY.includes(stage)) {
     const note = grokEyes ? `\n\n(The pictures this refers to are attached to this message, in order: the first attached image is picture 1, the second is picture 2.)` : "";
     const ans = await askOutside(`${o.label} · Grok`, await packText(pack.id), input + note, grokEyes ? o.images : undefined);
     if (ans !== null) {
@@ -41,11 +44,11 @@ export async function runWriter(stage: Stage, vars: Record<string, string>, o: {
       return ans;
     }
   }
-  const { big } = writerSize(o.big ?? true);
+  const { big } = useDs ? { big: true } : writerSize(o.big ?? true);
   const once = async (inp: string) => {
     const graph = buildStage({ promptFile: pack.prompt_file, promptChars: pack.chars, input: inp, params: pack.params,
       images: pack.see_image === false && stage !== "describe" ? [] : o.images, big, seed: newSeed(), thinking: pack.thinking === "on" ? "on" : "off" });
-    const job = await useJobs.getState().run(o.tab, `${o.label} · ${(await import("./deepseek")).deepseekOn() ? "DeepSeek" : "27B"}`, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
+    const job = await useJobs.getState().run(o.tab, `${o.label} · ${useDs ? "DeepSeek" : "27B"}`, graph, o.key ?? `writer:${stage}:${big ? "big" : "small"}`, { kind: `writer:${stage}`, quiet: true, front: true, ...o.meta });
     const done = await waitForJob(job.id);
     return (done.texts.out ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim().replace(/^["“]|["”]$/g, "");
   };

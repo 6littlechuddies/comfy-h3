@@ -41,9 +41,10 @@ export async function debugReport(): Promise<string> {
   const jobs = useJobs.getState().jobs.filter((j) => j.status === "running" || j.status === "queued");
   const server = await fetch("/studio-api/deepseek/log").then((r) => (r.ok ? r.json() : { error: `rental answered ${r.status} (older code?)` })).catch((e) => ({ error: String(e) }));
   let deep = "?"; try { deep = (await import("./siteAuto")).deepOn() ? "full" : "quick"; } catch { /* */ }
+  let grokWait = 0; try { grokWait = (await import("./outside")).useOutside.getState().reqs.length; } catch { /* */ }
   return [
     `H3 Studio cosplay debug report · ${new Date().toISOString()}`,
-    `running: ${s.running} · ${s.done}/${s.total} done · at once: ${s.atOnce} · working now: ${s.working.length} · profiles: ${deep}`,
+    `running: ${s.running} · ${s.done}/${s.total} done · at once: ${s.atOnce} · working now: ${s.working.length} · profiles: ${deep}${grokWait ? ` · waiting on Grok copy-paste: ${grokWait}` : ""}`,
     "",
     "WORKING NOW (character · step · how long on it)",
     ...s.working.map((k) => `- ${name(k)} · ${s.status[k] ?? "?"} · ${Math.round((now - (s.statusAt[k] ?? now)) / 1000)} s`),
