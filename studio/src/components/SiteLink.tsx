@@ -504,14 +504,42 @@ function Characters({ connected }: { connected: boolean }) {
   const chosen = list.filter((c) => sel.has(c.id));
   const [loops, setLoops] = useState(false);
   const [naming, setNaming] = useState(false);
+  const runPool = async <T,>(items: T[], limit: number, fn: (x: T) => Promise<void>) => {
+    let i = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) await fn(items[i++]);
+    });
+    await Promise.all(workers);
+  };
   const writeAll = async (all = false) => {
     if (all && !window.confirm(`Rewrite every field of ${chosen.length} character${chosen.length > 1 ? "s" : ""}? What you wrote yourself in their profiles is replaced (their names, pictures and sets stay).`)) return;
-    for (const c of chosen) {
+    chosen.forEach((c) => mark(c.id, "Waiting…"));
+    await runPool(chosen, 6, async (c) => {
       mark(c.id, all ? "Rewriting profile…" : "Writing profile…");
       try { await writeProfile(c, all, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
-    }
+    });
     toast(`Profiles written for ${chosen.length} — check them, then send`, "good");
+  };
+  const rewriteAndTestAll = async () => {
+    if (!window.confirm(`Rewrite every profile field and run the chat test (with auto-fix) on ${chosen.length} character${chosen.length > 1 ? "s" : ""}? Nothing is sent to your site.`)) return;
+    let passed = 0, failed = 0;
+    chosen.forEach((c) => mark(c.id, "Waiting…"));
+    await runPool(chosen, 6, async (c) => {
+      try {
+        mark(c.id, "Rewriting profile…");
+        await writeProfile(c, true, (t) => mark(c.id, t));
+        const cur = useCharacters.getState().list.find((x) => x.id === c.id) ?? c;
+        mark(c.id, "Chat test…");
+        const t = await (await import("../lib/chatTest")).testAndFix(cur, { onStep: (m) => mark(c.id, m) });
+        if (t?.pass) passed++; else failed++;
+      } catch (e) {
+        failed++;
+        toast(`${c.name}: ${(e as Error).message}`, "bad");
+      }
+      mark(c.id, null);
+    });
+    toast(`Done: ${passed} of ${chosen.length} passed the chat test${failed ? ` · ${failed} failed (open Chat test to see why)` : ""}`, failed ? "info" : "good");
   };
   const allInOne = async () => {
     let ok = 0;
@@ -593,6 +621,7 @@ function Characters({ connected }: { connected: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several (drag across the boxes) to do them together.</p>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
+        {list.some((c) => c.style === "realistic" && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every realistic (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).map((c) => c.id)))}>Select realistic ({list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).length})</button>}
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then click each one's main picture and send"><Icon name="sparkle" size={13} /> Cosplays</Btn>
@@ -601,6 +630,7 @@ function Characters({ connected }: { connected: boolean }) {
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
         <Btn onClick={() => writeAll(false)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Write only the empty fields; what's there stays"><Icon name="script" size={14} /> Fill profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => writeAll(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Rewrite every profile field with the current writer (greeting, persona, tagline, levels, texting…) — names, pictures and sets stay"><Icon name="script" size={14} /> Rewrite profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={rewriteAndTestAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Rewrite every profile field and run the chat test (with auto-fix) on the ticked characters, 6 at once — nothing is sent to your site"><Icon name="sparkle" size={14} /> Rewrite &amp; test{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
