@@ -6,7 +6,7 @@ import { minorWords } from "./adult";
 /** the site's §3.9 stock lines, fix pack v4.2's bans (Candy's shared lines, the old shared bank) — never in any field.
  *  "earn it" is allowed only on a dom card (EARN, checked separately) */
 export const STOCK = /\b(not tonight|maybe later|pull(s|ed)? you in by the collar|what pulled you away|you still owe me|tell me (something|one)|one true thing|make me laugh first|buy me a drink first|one line from|that'?s the (trade|deal|price)|my price|owe me|work for it|not there yet|use your imagination|let me find a decent one|hey yourself|i'?ve been called worse|wedding or me|i never do that|(can'?t|cannot|won'?t|don'?t|do not) (do|send) voice( notes?| messages?)?|real girl|not a bot|flesh and blood|are you a bot|are you broken|not yet you|you haven'?t earned|i'?ll give you that|and maybe i'?ll|you'?d have to|you'?re not getting|i'?m not giving|what'?s the first thing|straight to it,? huh|bold of you|keeping you up|at this hour|text at 2 ?am)\b|\bhey\.? you look like/i;
-export const EARN = /\bearn(ed)? it\b/i;
+export const EARN = /\bearn(?:ed|ing)? (?:it|my|your|that|this)\b/i;
 /** the site as a product: she doesn't know a paywall exists (his profile, feed, bio and their DMs are fine: it's a dating
  *  site's DMs). In the premium / tokens examples she may echo HIS word to shrug it off */
 export const PRODUCT = /\b(pixel(s|ated)?|virtual|digital (girl|me|person|companion|world|body)|tokens?|credits?|coins?|unlock(ed|s|ing)?|subscri\w*|paywall|premium|locked (photo|pic|picture|content|card|set)|(next|your|my|relationship|account|friendship) level|buy (premium|credits|tokens|coins|a plan|more)|pay(ing)? for (it|this|premium|more)|for free|my avatar|this (app|site|platform))\b/i;

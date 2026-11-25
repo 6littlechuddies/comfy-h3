@@ -1,6 +1,6 @@
 // The import in progress — a .zip you dropped (sent in pieces, then unpacked on the rental) or your newest export coming
 // back from Proton Drive on a fresh rental — with a real progress bar. Bottom left, out of the way of toasts.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { afterImport, importNote } from "../lib/characters";
 import { useImport, watchRestore, type ImportRun } from "../lib/importer";
 import { Icon, cx } from "./ui";
@@ -54,8 +54,15 @@ export function ImportCard() {
   const r = useImport((s) => s.run);
   const hidden = useImport((s) => s.hidden);
   const hide = useImport((s) => s.hide);
+  const [mini, setMini] = useState(false);
   // a fresh rental may be restoring your work from Proton Drive by itself: show that here too
   useEffect(() => { watchRestore(afterImport); }, []);
+  // while results copy in the background, shrink into a tiny corner pill after 8s so it doesn't block the Studio
+  useEffect(() => {
+    if (r?.state !== "done" || r.results !== "copying") { setMini(false); return; }
+    const t = setTimeout(() => setMini(true), 8000);
+    return () => clearTimeout(t);
+  }, [r?.id, r?.state, r?.results]);
   // closing the tab mid-upload loses it: ask first
   useEffect(() => {
     if (r?.state !== "uploading") return;
@@ -70,6 +77,20 @@ export function ImportCard() {
     return () => clearTimeout(t);
   }, [r?.state, r?.results, hide]);
   if (!r || hidden || r.state === "none") return null;
+  if (mini && r.state === "done" && r.results === "copying") {
+    const label = r.res_bundle === "downloading" ? `Bundle ${mb(r.res_bundle_got ?? 0)} / ${mb(r.res_bundle_size ?? 0)}`
+      : r.res_bundle === "unpacking" ? `Unpacking ${(r.res_have ?? 0).toLocaleString()} / ${(r.res_total ?? 0).toLocaleString()}`
+      : r.res_total ? `Restoring ${(r.res_have ?? 0).toLocaleString()} / ${r.res_total.toLocaleString()}` : "Restoring…";
+    return (
+      <div className="fixed bottom-3 left-3 z-[85] flex items-center gap-2 border border-line bg-panel/90 px-2.5 py-1 text-[11.5px] text-muted shadow-lg backdrop-blur" role="status">
+        <button onClick={() => setMini(false)} className="press flex items-center gap-1.5 hover:text-ink" title="Show restore details">
+          <span className="pulse h-1.5 w-1.5 bg-good" />
+          <span className="font-mono">{label}</span>
+        </button>
+        <button onClick={hide} className="press text-dim hover:text-ink" aria-label="Hide"><Icon name="x" size={11} /></button>
+      </div>
+    );
+  }
   const pct = importPct(r);
   const busy = !["done", "error"].includes(r.state) || r.results === "copying";
   const title = r.state === "error" ? "Import stopped" : r.state === "done" ? (r.source === "proton" ? "Your work is back" : "Imported") : r.source === "proton" ? "Bringing back your work" : "Importing";

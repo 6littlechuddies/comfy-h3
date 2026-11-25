@@ -176,7 +176,7 @@ export async function testChat(c0: Character, o: { onStep?: (t: string) => void;
   const { checks, stats } = analyze(turns, cold, card, extras.map((x) => x.turns));
   o.onStep?.("Chat test: the cloud reviewer is reading every reply…");
   const s = c.site ?? {}, ch = s.chat ?? {};
-  const cardText = [`${card.name}, ${Math.max(21, c.age ?? 24)}: ${s.tagline ?? ""}`, `Bio: ${s.bio ?? ""}`, `Personality: ${s.personality ?? ""}; tags: ${(s.tags ?? []).join(", ")}`, `Direction (her dynamic): ${s.direction ?? "-"}`,
+  const cardText = [`${card.name}, ${Math.max(21, c.age ?? 24)}: ${s.tagline ?? ""}`, `User's account name in these chats: ${HIS_NAME} (she already knows it from his profile; using it is expected, not a hallucination).`, `Bio: ${s.bio ?? ""}`, `Personality: ${s.personality ?? ""}; tags: ${(s.tags ?? []).join(", ")}`, `Direction (her dynamic): ${s.direction ?? "-"}`,
     `Facts: job ${s.facts?.job ?? "?"}; city ${s.facts?.city ?? "?"}; home ${s.facts?.home ?? "?"}; wearing ${s.facts?.wearing ?? "?"}`,
     `People: ${(s.people ?? []).map((p) => `${p.name} (${p.relation}${p.note ? `, ${p.note}` : ""})`).join("; ") || "-"}`, `Her situation: ${s.scenario ?? s.statusLine ?? "-"}`, `Backstory: ${s.backstory ?? "-"}`,
     `Style: hold profile ${ch.holdProfile ?? "?"} (holds ${card.holds}); effort pushback ${ch.effortPushback ?? "?"}; casing ${ch.casing ?? "?"}${ch.casingCustom ? ` (${ch.casingCustom})` : ""}; languages ${ch.languages ?? "english"}`,

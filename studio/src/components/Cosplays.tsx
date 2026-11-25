@@ -53,6 +53,7 @@ function CosplaysPanel() {
   const written = rows.filter((r) => r.c?.site?.persona).length;
   const passed = rows.filter((r) => r.c?.site?.chatTest?.pass).length;
   const sent = count("sent"), toPick = count("pick"), ready = count("ready");
+  const autoCount = rows.filter((r) => r.c?.site?.mainAuto && r.g.pics[0]).length;
   const shown = rows.filter((r) => (filter === "all" || r.st === filter) && (!q.trim() || `${r.g.name} ${r.g.series} ${r.c?.site?.name ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())));
   const current = now ? groups.find((g) => g.key === now) : undefined;
   const step = !groups.length || made < groups.length || written < groups.length || passed < written ? 1 : toPick ? 2 : 3;
@@ -143,12 +144,12 @@ function CosplaysPanel() {
           {FILTERS.map(([f, l]) => { const n = count(f); if (f !== "all" && !n && filter !== f) return null; return (
             <button key={f} onClick={() => setFilter(f)} className={cx("press tag-btn !inline-flex !h-8 items-center gap-2 !px-3 !text-[12.5px]", filter === f && "on", f === "problem" && filter !== f && "!border-bad/50 !text-bad")}>
               {l}<span className={cx("font-mono text-[11px]", filter === f ? "opacity-70" : "text-dim")}>{n}</span></button>); })}
-          {toPick > 0 && !running && (
+          {autoCount > 0 && !running && (
             <button onClick={async () => {
               let n = 0;
-              for (const r of rows) if (r.st === "pick" && r.c && r.g.pics[0]) { await setMain(r.c.id, r.g.pics[0], false); n++; }
+              for (const r of rows) if (r.c?.site?.mainAuto && r.g.pics[0]) { await setMain(r.c.id, r.g.pics[0], false); n++; }
               if (n) toast(`Kept newest picture as main for ${n} character${n === 1 ? "" : "s"}`, "good");
-            }} className="press chip-raised ml-1 h-8 px-3 text-[12px] text-ink hover:border-accent">Keep newest for all ({toPick})</button>)}
+            }} className="press chip-raised ml-1 h-8 px-3 text-[12px] text-ink hover:border-accent">Keep newest for all ({autoCount})</button>)}
           {count("test") > 0 && !running && (
             <button onClick={() => void runCosplays({ onlyFailed: true, fix: true })}
               className="press chip-raised h-8 px-3 text-[12px] text-accent hover:border-accent">Fix all failed ({count("test")})</button>)}
