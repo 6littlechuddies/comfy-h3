@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { viewUrl, type FileRef } from "../lib/api";
-import { coverOf, useCharacters } from "../lib/characters";
+import { coverOf, useCharacters, type Character } from "../lib/characters";
 import { isFav, toggleFav, useFavs } from "../lib/favs";
 import { useJobs } from "../lib/jobs";
 import { deleteFile } from "../lib/made";
@@ -133,7 +133,9 @@ function CatalogPanel() {
   const used = new Set<string>();
   const rows = chars.map((c) => {
     const keys = keysOf(c).split("\n"); keys.forEach((k) => used.add(k));
-    return { key: keys.join("\n"), id: c.id as string | null, name: c.name, n: keys.reduce((a, k) => a + (count.get(k) ?? 0), 0), face: coverOf(c) ?? keys.map((k) => thumb.get(k)).find(Boolean),
+    // a cosplay shows under her site name ("Maki"), with the character's own name kept in the hover
+    const cos = /^Cosplay of /.test(c.source ?? "") && c.site?.name?.trim() ? c.site.name.trim() : "";
+    return { key: keys.join("\n"), id: c.id as string | null, name: cos || c.name, also: cos && cos !== c.name ? c.name : "", n: keys.reduce((a, k) => a + (count.get(k) ?? 0), 0), face: coverOf(c) ?? keys.map((k) => thumb.get(k)).find(Boolean),
       group: c.style === "anime" ? "Anime" : /^Cosplay of /.test(c.source ?? "") ? "Realistic cosplays" : "Realistic" };
   });
   const rest = folders.filter((f) => !used.has(f.name) && !f.name.startsWith("@")).map((f) => ({ key: f.name, id: null as string | null, name: f.name || "Older (no project)", n: f.count, face: f.thumb, group: "Other folders" }));
@@ -144,12 +146,12 @@ function CatalogPanel() {
   const siteChar = chars.find((c) => folder.split("\n")[0] === `@${c.id}`) ?? sel;
   const [dropOn, setDropOn] = useState<string | null>(null);
   const dragList = (it: CatItem) => (picked[fileKey(it)] ? Object.values(picked) : [it]);
-  const projectRow = (r: { key: string; id: string | null; name: string; n: number; face?: FileRef }) => (
+  const projectRow = (r: { key: string; id: string | null; name: string; also?: string; n: number; face?: FileRef }) => (
     <button key={r.key} onClick={() => setFolder(r.key)}
       onDragOver={(e) => { if (!r.id || !e.dataTransfer.types.includes(CAT_DRAG)) return; e.preventDefault(); setDropOn(r.key); }}
       onDragLeave={() => setDropOn((d) => (d === r.key ? null : d))}
       onDrop={(e) => { setDropOn(null); if (!r.id) return; try { move(JSON.parse(e.dataTransfer.getData(CAT_DRAG)), r.id); } catch { /* */ } }}
-      title={r.id ? `${r.name} — drop pictures here to move them into this project` : r.name}
+      title={r.id ? `${r.name}${r.also ? ` (in the Studio: ${r.also})` : ""} — drop pictures here to move them into this project` : r.name}
       className={cx("press flex items-center gap-2 px-1.5 py-1 text-left text-[13px]", folder === r.key ? "bg-accent/10 text-ink" : "text-muted hover:bg-hover hover:text-ink", dropOn === r.key && "outline outline-2 outline-accent bg-accent/15")}>
       <span className="h-8 w-8 shrink-0 overflow-hidden border border-line bg-raised2">{r.face ? <Thumb f={r.face} w={192} className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[12px] font-semibold text-dim">{r.name.slice(0, 1).toUpperCase()}</span>}</span>
       <span className="min-w-0 flex-1 truncate">{r.name}</span><span className="shrink-0 text-[11px] text-dim">{r.n}</span>
@@ -174,7 +176,8 @@ function CatalogPanel() {
           <button onClick={() => { setFolder(""); setOnlyFav(true); }} className={cx("press flex items-center justify-between px-2 py-1.5 text-left text-[13px]", !folder && onlyFav ? "bg-accent/10 text-ink" : "text-muted hover:text-ink")}><span className="flex items-center gap-1.5"><StarIcon on /> Favourites</span><span className="text-[11px] text-dim">{Object.keys(favs).filter((k) => k.startsWith("output/")).length}</span></button>
           {groups.map(({ g, rows: rs }) => (
             <div key={g} className="mt-2 flex flex-col gap-0.5">
-              <span className="px-1.5 pb-0.5 text-[11px] font-semibold text-dim">{g}</span>
+              <span className="flex items-center px-1.5 pb-0.5 text-[11px] font-semibold text-dim">{g}
+                {g === "Realistic cosplays" && <RenameCosplays chars={chars} />}</span>
               {rs.map(projectRow)}
             </div>
           ))}
@@ -221,7 +224,7 @@ function CatalogPanel() {
             <button onClick={() => fav(Object.values(picked))} className="press chip-raised flex h-8 items-center gap-1.5 rounded-sm px-3"><StarIcon on /> Favourite</button>
             <DropSelect value="" aria-label="Move to a project" onChange={(e) => { const v = e.target.value; if (v) move(Object.values(picked), v === "@free" ? null : v); }} className="inset h-8 border border-line bg-raised px-2 text-[12.5px]">
               <option value="">Move to…</option><option value="@free">Free work</option>
-              {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {chars.map((c) => <option key={c.id} value={c.id}>{/^Cosplay of /.test(c.source ?? "") && c.site?.name ? c.site.name : c.name}</option>)}
             </DropSelect>
             <button onClick={() => void del(Object.values(picked))} className="press flex h-8 items-center gap-1.5 rounded-sm border border-bad/50 px-3 text-bad hover:bg-bad/10"><Icon name="trash" size={13} /> Delete</button>
             <button onClick={() => setPicked({})} className="text-muted hover:text-ink">Clear</button>
@@ -294,7 +297,7 @@ export function sortPlan(all: CatItem[], chars: { id: string; name: string; sour
 }
 
 /** the selection bar's "for her site" part: her card (+ its hover loop), banner and profile carousel, from the ticked pictures */
-function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; site?: { galleryFiles?: FileRef[] } }; picked: FileRef[]; onDone: () => void }) {
+function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; source?: string; site?: { galleryFiles?: FileRef[]; name?: string } }; picked: FileRef[]; onDone: () => void }) {
   const [loop, setLoop] = useState(() => { try { return localStorage.getItem("h3.cat.cardLoop") !== "0"; } catch { return true; } });
   const pics = picked.filter((f) => !/\.(mp4|webm|mov|gif)$/i.test(f.filename));
   const one = pics.length === 1;
@@ -302,7 +305,7 @@ function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; site?
   const run = async (f: () => Promise<unknown>) => { try { await f(); onDone(); } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } };
   return (
     <span className="flex flex-wrap items-center gap-2 border-l border-line pl-3">
-      <span className="text-muted">For {c.name} on your site:</span>
+      <span className="text-muted">For {/^Cosplay of /.test(c.source ?? "") && c.site?.name ? c.site.name : c.name} on your site:</span>
       <button className={btn} disabled={!one} title={one ? "Her card: the picture on the grid and in chat (her cover photo)" : "Tick exactly one picture"}
         onClick={() => run(async () => (await import("../lib/siteMedia")).setCard(c.id, pics[0], { pin: loop }))}>★ Card</button>
       <label className="flex items-center gap-1 text-[12px] text-muted" title="Pin her for an animated cover (the video her card plays on hover) made from this picture later — Your site → Animated covers → Make the pinned ones">
@@ -313,4 +316,22 @@ function SiteRoles({ c, picked, onDone }: { c: { id: string; name: string; site?
         onClick={() => run(async () => (await import("../lib/siteMedia")).setBanner(c.id, pics[0]))}>Banner</button>
     </span>
   );
+}
+
+/** cosplays still under the character's own name ("Makima"): one click gives them all site names ("Maki") */
+function RenameCosplays({ chars }: { chars: Character[] }) {
+  const [busy, setBusy] = useState(false);
+  const canon = (c: Character) => (c.source ?? "").replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "").trim().toLowerCase();
+  const left = chars.filter((c) => /^Cosplay of /.test(c.source ?? "") && (!c.site?.name?.trim() || c.site.name.trim().toLowerCase() === canon(c) || c.site.name.trim().toLowerCase() === canon(c).split(/\s+/)[0])).length;
+  if (!left) return null;
+  const go = async () => {
+    setBusy(true);
+    try {
+      const { nameCosplays } = await import("../lib/cosplayRun");
+      const r = await nameCosplays();
+      useJobs.getState().toast(r.renamed.length ? `Renamed ${r.renamed.length}: ${r.renamed.slice(0, 5).map((x) => `${x.from} → ${x.to}`).join(", ")}${r.renamed.length > 5 ? "…" : ""} — send them again to update the site` : "Nothing to rename", "good");
+    } catch (e) { useJobs.getState().toast((e as Error).message, "bad"); } finally { setBusy(false); }
+  };
+  return <button disabled={busy} onClick={() => void go()} title="Give every cosplay still under the character's own name a site name: a near-twin, a translation or a shortening (Makima → Maki), never the exact name"
+    className="press ml-auto font-normal text-accent hover:underline disabled:opacity-50">{busy ? "Naming…" : `Rename ${left}`}</button>;
 }

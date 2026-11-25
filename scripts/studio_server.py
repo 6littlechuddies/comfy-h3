@@ -5924,7 +5924,9 @@ def _chat_block(site: dict) -> dict:
     examples, the examples and the hot lines bank). The site's JSON paths for these aren't published yet: this is the
     proposed shape under site.chat — when the site refuses it, the character is sent again without it (the note says so)."""
     ch = site.get("chat") or {}
-    out: dict = {}
+    # every character from the Studio is written for Chat v4.1 (the House prompt is what made the "earn it" walls): ask the
+    # site to run her on it. Until the site takes the flag, the send note says so and the toggle in admin does the same job
+    out: dict = {"chat_v41": True}
     sw = [str(w).strip()[:30] for w in (site.get("signatureWords") or []) if str(w).strip()][:6]
     if sw: out["signature_words"] = sw
     se = [e for e in (str(x).strip() for x in (site.get("signatureEmojis") or [])) if e and _site_emoji(e)][:3]
@@ -6240,7 +6242,7 @@ async def _site_push(job: dict, d: dict):
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
             if left:
                 if "all chat lines" in left: code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
-                job["chat_note"] = "the site didn't take: " + ", ".join(left)
+                job["chat_note"] = "the site didn't take: " + ", ".join(left) + (" — turn Chat v4.1 on for her in admin" if "chat_v41" in left or "all chat lines" in left else "")
             elif "chat" in (manifest.get("site") or {}): job["chat_note"] = "chat lines sent"
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
             job["character"] = res

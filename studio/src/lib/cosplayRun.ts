@@ -25,6 +25,36 @@ export function charFor(g: { name: string; series: string }, list = useCharacter
     ?? list.find((c) => c.name.toLowerCase() === n && /cosplay/i.test(c.source ?? ""));
 }
 
+/** the name a character goes by: a cosplay's site name ("Maki"), else her own */
+export const shownName = (c: Character) => (/^Cosplay of /.test(c.source ?? "") && c.site?.name ? c.site.name : c.name);
+
+/** every cosplay still showing the character's own name ("Makima", or "Tifa" for Tifa Lockhart) gets a site name in one
+ *  writer call (a near-twin, a translation or a shortening, never the exact name); what's already written with the old
+ *  name in her profile takes the new one. Her Studio name stays (her folders and pictures are filed under it). */
+export async function nameCosplays(onStep?: (t: string) => void): Promise<{ renamed: { from: string; to: string }[] }> {
+  const { exact, siteAlias } = await import("./newChar");
+  const list = useCharacters.getState().list.filter((c) => /^Cosplay of /.test(c.source ?? ""));
+  const canon = (c: Character) => c.source!.replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "").trim();
+  const todo = list.filter((c) => !c.site?.name?.trim() || exact(canon(c), c.site.name) || exact(canon(c), shownName(c)));
+  if (!todo.length) return { renamed: [] };
+  onStep?.(`Thinking of site names for ${todo.length} cosplay${todo.length === 1 ? "" : "s"}…`);
+  const names = await siteAlias(todo.map(canon));
+  const renamed: { from: string; to: string }[] = [];
+  todo.forEach((c0, i) => {
+    const to = names[i]?.trim();
+    const cur = useCharacters.getState().list.find((x) => x.id === c0.id);
+    if (!to || !cur) return;
+    const from = shownName(cur), old = cur.site?.name?.trim();
+    const site = { ...(cur.site ?? {}) } as Record<string, unknown>;
+    // her profile text written under the old site name follows the new one (the character's own name too, when it's exact)
+    for (const bad of [old, exact(canon(cur), cur.name) ? cur.name : ""].filter((x): x is string => !!x && x.length >= 3))
+      for (const [k, v] of Object.entries(site)) if (typeof v === "string" && v.includes(bad)) site[k] = v.split(bad).join(to);
+    useCharacters.getState().save({ ...cur, site: { ...(site as NonNullable<Character["site"]>), name: to } });
+    renamed.push({ from, to });
+  });
+  return { renamed };
+}
+
 /** every cosplay picture in the catalog, grouped by character (newest first in each) */
 export async function scanCosplays(): Promise<CosGroup[]> {
   const groups = new Map<string, CosGroup>();
@@ -83,6 +113,9 @@ export async function runCosplays(o: { again?: boolean } = {}) {
   if (useCosplays.getState().running) return;
   useCosplays.setState({ running: true, stop: false, status: {}, done: 0, total: 0, now: null });
   try {
+    // cosplays still under the character's own name get their site names first (one writer call for all of them)
+    const nm = await nameCosplays((t) => say("_", t)).catch(() => ({ renamed: [] as { from: string; to: string }[] }));
+    if (nm.renamed.length) say("_", `Renamed ${nm.renamed.length}: ${nm.renamed.slice(0, 6).map((r) => `${r.from} → ${r.to}`).join(", ")}${nm.renamed.length > 6 ? "…" : ""}`);
     say("_", "Looking through your results for cosplay pictures…");
     const groups = await scanCosplays();
     useCosplays.setState({ groups });
