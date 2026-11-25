@@ -192,7 +192,7 @@ async function doGroup(g: CosGroup, o: { again?: boolean; fix?: boolean }, alias
     }
     if (!c.site?.mainFrom && !c.cover) { say(g.key, "Her main picture: the newest one (click another to change)…"); await untilStop(setMain(c.id, g.pics[0], true)); }
     const now = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-    if (o.again || !now.site?.persona) await untilStop(doItAll(now, false, (t) => say(g.key, t))); // writes, then chat-tests and fixes
+    if (o.again || !now.site?.persona) await untilStop(doItAll(now, false, (t) => say(g.key, t), undefined, !!o.again)); // writes, then chat-tests and fixes
     else {
       if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await untilStop(writeChatLines(now, { onStep: (t) => say(g.key, t) })); }
       const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;

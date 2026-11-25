@@ -46,12 +46,12 @@ const randomAge = () => 21 + Math.floor(Math.random() ** 1.6 * 10);
 
 /** everything for one character, in order: (named already by the batch) an age, her profile, her hover loop, sent as a
  *  draft. Her pictures aren't sorted into sets here — for now sets are made by hand in her folders. */
-export async function doItAll(c: Character, connected: boolean, step: (t: string) => void, loopMade?: Promise<unknown>): Promise<string> {
+export async function doItAll(c: Character, connected: boolean, step: (t: string) => void, loopMade?: Promise<unknown>, all = false): Promise<string> {
   const { fillProfile } = await import("../lib/siteAuto");
   const now0 = useCharacters.getState().list.find((x) => x.id === c.id)!;
   if (!(Number(now0.age) >= 21) || Number(now0.age) === DEFAULT_AGE) useCharacters.getState().save({ ...now0, age: randomAge() });
   step("Writing her profile…");
-  await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: step });
+  await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id)!, { all, onStep: step });
   // no hover loop picked yet: her newest loop (Video board / Animate), so the card moves on the site
   const now = useCharacters.getState().list.find((x) => x.id === c.id)!;
   // her hover loop, being made from her card in the queue since the start: waited for before she's sent
