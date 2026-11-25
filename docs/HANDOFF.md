@@ -113,6 +113,10 @@ All in `studio/src/lib/` unless noted. A character goes through these steps in o
    label, "cosplaying X from Y", or a known name in the prompt). For each one it makes the missing character, names her,
    writes her, chat-tests and fixes her, and picks the newest picture as main. The review screen lets you click the main
    picture and send.
+   - Cosplays go by their site name everywhere the owner sees them (Catalog shows `site.name`; the Studio `name` stays,
+     because her folders are filed under it). `nameCosplays()` renames every cosplay still on the character's own name,
+     in one writer call. Every send includes `site.chat.chat_v41: true`; whether the site honours that flag is
+     unconfirmed (otherwise it's the per-character toggle in admin).
 
 Other pieces worth knowing:
 - `siteMedia.ts`: card, banner, carousel and pinned animated covers.
