@@ -105,43 +105,52 @@ export function ContentPlan() {
 
 /** one click: the writer (or your Grok tab) plans sets that fit each picked character, writes every prompt, queues it all */
 function AutoPlanBox() {
-  const chars = useCharacters(useShallow((s) => s.list.filter((c) => isAdult(c) && c.style === "realistic" && c.views.front)));
+  const chars = useCharacters(useShallow((s) => s.list.filter((c) => isAdult(c) && (c.views.front || c.cover))));
   const sel = useCharacters((s) => s.sel);
   const sets = useInspo((s) => s.sets);
   const toast = useJobs((s) => s.toast);
   const [who, setWho] = useState<string[]>(sel ? [sel] : []);
-  const [n, setN] = useState(4);
-  const [per, setPer] = useState(6);
-  const [mix, setMix] = useState<"sfw" | "mixed" | "bold">("mixed");
+  const [n, setN] = useState(3);
+  const [per, setPer] = useState(10);
+  const [mix, setMix] = useState<"progression" | "sfw" | "mixed" | "bold">("progression");
   const [backdrop, setBackdrop] = useState<"places" | "plain">("places");
   const [poseSet, setPoseSet] = useState("");
+  const [usePoseWear, setUsePoseWear] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [review, setReview] = useState(() => { try { return localStorage.getItem("h3.autoplan.review") !== "off"; } catch { return true; } });
   const go = async () => {
     setBusy("Starting…");
     try {
       const { planAndQueue } = await import("../lib/autoPlan");
-      const r = await planAndQueue(chars.filter((c) => who.includes(c.id)), { sets: n, per, mix, backdrop, poseSet: poseSet || undefined, faceFix: true }, setBusy, review);
+      const r = await planAndQueue(chars.filter((c) => who.includes(c.id)), { sets: n, per, mix, backdrop, poseSet: poseSet || undefined, faceFix: true, usePoseWear }, setBusy, review);
       toast(review ? `${r.rows} prompts written into the rows below — read or edit any of them, then press Queue.` : `Planned and queued ${r.jobs} pictures in ${n * who.length} sets — each lands in its site set as it's done.`, "good", "batch");
     } catch (e) { toast((e as Error).message, "bad", "batch"); } finally { setBusy(null); }
   };
   const total = who.length * n * per;
   return (
     <div className="flex flex-col gap-2.5 rounded-lg border border-accent/50 bg-accent/[.04] p-3 text-[12.5px]">
-      <b className="font-medium">Plan it for me</b>
-      <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">Pick characters — the writer (or your Grok tab) plans sets that fit who they are, a different pose and angle per picture, writes every prompt and queues it. Pictures come from their sheet, so back and side shots use their back and side views.</p>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex items-center gap-2">
+        <b className="font-medium">Photo packs · Plan it for me</b>
+        {chars.length > 1 && (
+          <button onClick={() => setWho(who.length === chars.length ? [] : chars.map((c) => c.id))}
+            className="ml-auto text-[11.5px] text-accent hover:underline">{who.length === chars.length ? "Clear all" : `Select all (${chars.length})`}</button>
+        )}
+      </div>
+      <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">Plans non-repetitive sets from each character's world &amp; facts (SFW → Suggestive → Explicit), auto-pairs PoseWear depth poses, keeps her face &amp; LoRAs, and sorts each finished shot into her site sets.</p>
+      <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
         {chars.map((c) => (
           <button key={c.id} onClick={() => setWho((w) => (w.includes(c.id) ? w.filter((x) => x !== c.id) : [...w, c.id]))} aria-pressed={who.includes(c.id)}
-            className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", who.includes(c.id) && "on")}>{c.name}</button>
+            className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", who.includes(c.id) && "on")}>{c.site?.name || c.name}</button>
         ))}
-        {!chars.length && <span className="text-dim">No realistic characters with a front picture yet.</span>}
+        {!chars.length && <span className="text-dim">No characters with a front picture yet.</span>}
       </div>
       <Seg label="Sets each" value={n} onChange={setN} options={[2, 3, 4, 6].map((x) => ({ value: x, label: String(x) }))} />
       <Seg label="Pictures per set" value={per} onChange={setPer} options={[4, 6, 8, 10].map((x) => ({ value: x, label: String(x) }))} />
-      <Seg label="How bold" value={mix} onChange={setMix} options={[{ value: "sfw", label: "All free" }, { value: "mixed", label: "Half premium" }, { value: "bold", label: "Mostly premium" }]} />
+      <Seg label="Progression" value={mix} onChange={setMix} options={[{ value: "progression", label: "SFW → Explicit" }, { value: "sfw", label: "All free" }, { value: "mixed", label: "Half premium" }, { value: "bold", label: "Mostly premium" }]} />
       <Seg label="Backgrounds" value={backdrop} onChange={setBackdrop} options={[{ value: "places", label: "Places that fit them" }, { value: "plain", label: "Plain backdrop" }]} />
-      <label className="flex flex-col gap-1"><span className="text-muted">Pose ideas (optional)</span>
+      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted"><input type="checkbox" className="mt-0.5" checked={usePoseWear} onChange={(e) => setUsePoseWear(e.target.checked)} />
+        <span>Auto-pick unique PoseWear depth poses per shot (non-repeating poses, depth silhouette only)</span></label>
+      <label className="flex flex-col gap-1"><span className="text-muted">Extra pose ideas (optional)</span>
         <DropSelect value={poseSet} onChange={(e) => setPoseSet(e.target.value)} className="inset h-9 border px-2 text-[12.5px]">
           <option value="">The writer's own</option>
           {sets.filter((x) => x.kind === "pose").map((x) => <option key={x.id} value={x.id}>{x.name} ({x.items.length})</option>)}

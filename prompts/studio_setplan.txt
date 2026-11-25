@@ -6,14 +6,15 @@ PROFILE: who they are (bio, personality, backstory, tags) — may be empty.
 SETS: how many sets to plan.
 PICTURES PER SET: how many pictures in each set.
 MIX: how bold the sets are —
+  progression = a creator's full photo-pack arc across SETS: Set 1 is free and sfw (Shot 1 is her welcoming intro picture for when he opens her chat), middle set(s) are premium suggestive (lingerie, teasing, slipping off clothes, implied), and the final set(s) are premium explicit (fully nude/explicit, consensual adults only; at most 2 two-person adult shots with a man whose face is mostly out of frame);
   sfw = every set free and fully clothed (swimwear and gym wear are fine);
   mixed = about half free sfw sets, half premium sets that are suggestive (lingerie, teasing, implied);
   bold = mostly premium; premium sets may be explicit.
-BACKDROP: places = real settings that fit them; plain = every picture on a plain seamless studio backdrop (grey or white), only the outfit and pose change.
+BACKDROP: places = settings that fit THIS character's actual world (if she is a dark fantasy/escapist character, use her gothic hall, candlelit chambers, obsidian balcony, etc.; if modern realistic, use her real life: gym, rooftop, hotel, apartment, studio); plain = every picture on a plain seamless studio backdrop (grey or white), only the outfit and pose change.
 POSE IDEAS: poses the owner likes (use them where they fit; may be empty).
-ALREADY MADE: set titles they already have — don't repeat them.
+ALREADY MADE: set titles she or OTHER characters already have — NEVER repeat or closely copy them.
 
-Pick sets that THIS person would really post, from their personality, job, hobbies and style: a gym girl gets gym mirror selfies and post-workout sets, a bookish one cozy library and rainy-window sets, a party girl nightlife and hotel-room sets. Vary them: different places, times of day, outfits and moods. In each set, every picture is a different pose and camera angle — include close-ups, waist-up and full body, some three-quarter and side angles, and at least one from behind or over the shoulder per set. Write each pose limb by limb in one sentence (weight, legs, hands, torso, head and eyes), with the outfit (how much is worn) in it. Keep each set's outfit consistent within the set.
+Pick sets that THIS exact person would really post, grounded in her facts, world, personality, job, hobbies and style. Vary every set: different places, lighting, times of day, outfits and moods — zero repetitive bedroom/mirror clichés across characters. In each set, every picture is a different pose, framing and camera angle — include close-ups, waist-up, three-quarter, side, full body, low-angle, candid, and at least one from behind or over the shoulder per set. Write each pose limb by limb in one vivid sentence (weight, legs, hands, torso, head, eyes and expression), with the outfit (how much is worn, progressing naturally within suggestive/explicit sets) in it. Keep each set's outfit and lighting cohesive within the set.
 
 Answer with ONE JSON object and nothing else:
 {"sets": [{"title": "Rooftop Golden Hour", "tier": "free", "rating": "sfw", "setting": "a city rooftop at golden hour, warm low sun, skyline behind, a low wall and potted plants", "outfit": "a white linen sundress", "poses": ["standing at the low wall with her weight on one leg, one hand on the wall, the other holding her hair back in the wind, looking over her shoulder at the camera", "..."]}]}
