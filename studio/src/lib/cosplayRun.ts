@@ -12,9 +12,13 @@ export type CosGroup = { key: string; name: string; series: string; pics: CosPic
 
 export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: Record<string, string>; running: boolean; scanned: number; stop: boolean;
   /** the run's progress: how many characters are through, of how many, and which one is being worked on */ done: number; total: number; now: string | null;
+  /** every character being worked on right now (several run at once) */ working: string[];
+  /** how many characters run at once (the writing and testing is DeepSeek calls, so several at a time is fine) */ atOnce: number;
   /** when the current step started (shown as a timer, so a long step visibly isn't frozen) */ since: number }>(() => ({
-  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0,
+  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0, working: [],
+  atOnce: (() => { try { return Math.max(1, Math.min(8, Number(localStorage.getItem("h3.cos.atOnce")) || 4)); } catch { return 4; } })(),
 }));
+export function setAtOnce(n: number) { useCosplays.setState({ atOnce: n }); try { localStorage.setItem("h3.cos.atOnce", String(n)); } catch { /* */ } }
 export const openCosplays = () => useCosplays.setState({ open: true });
 const say = (key: string, t: string | null) => useCosplays.setState((s) => { const st = { ...s.status }; if (t) st[key] = t; else delete st[key]; return { status: st, since: t && t !== s.status[key] ? Date.now() : s.since }; });
 /** waits for a step, but gives up the moment Stop is pressed (the step itself may still finish in the background) */
@@ -121,7 +125,7 @@ export async function setMain(id: string, pic: FileRef, auto = false) {
 async function doGroup(g: CosGroup, o: { again?: boolean }, aliases: Record<string, string>) {
   const { charactersFromResults } = await import("./newChar");
   const { doItAll } = await import("../components/SiteLink");
-  useCosplays.setState({ now: g.key });
+  useCosplays.setState((s) => ({ now: g.key, working: [...s.working.filter((k) => k !== g.key), g.key] }));
   try {
     let c = charFor(g);
     if (!c) {
@@ -141,6 +145,7 @@ async function doGroup(g: CosGroup, o: { again?: boolean }, aliases: Record<stri
     const t = useCharacters.getState().list.find((x) => x.id === c!.id)?.site?.chatTest;
     say(g.key, t && !t.pass ? `Failed the chat test (${t.score}/100) — open her to see why, or Write all again` : null);
   } catch (e) { say(g.key, (e as Error).message === "Stopped" ? "Stopped" : `Didn't go: ${(e as Error).message}`); }
+  finally { useCosplays.setState((s) => ({ working: s.working.filter((k) => k !== g.key) })); }
 }
 
 /** site names for every cosplay that isn't made yet, in one writer call (90 s at most, then plain near-twins) */
@@ -156,7 +161,7 @@ async function aliasesFor(groups: CosGroup[]): Promise<Record<string, string>> {
 /** the one button: find → name → make → write → test, for every cosplay (skipping what's already done unless `again`) */
 export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
   if (useCosplays.getState().running) return;
-  useCosplays.setState({ running: true, stop: false, done: 0, total: 0, now: null, since: Date.now() });
+  useCosplays.setState({ running: true, stop: false, done: 0, total: 0, now: null, since: Date.now(), working: [] });
   try {
     let groups = useCosplays.getState().groups;
     if (!o.only || !groups.length) {
@@ -173,15 +178,20 @@ export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
     say("_", o.only ? null : `${todo.length} cosplay characters`);
     if (!o.only) todo.forEach((g) => say(g.key, "Waiting…"));
     useCosplays.setState({ total: todo.length });
-    for (const g of todo) {
-      if (useCosplays.getState().stop) { say(g.key, "Stopped"); continue; }
-      await doGroup(g, o, aliases);
-      useCosplays.setState((s) => ({ done: s.done + 1 }));
-    }
+    // several at once: each worker takes the next character until none are left
+    const queue = [...todo];
+    const worker = async () => {
+      for (let g = queue.shift(); g; g = queue.shift()) {
+        if (useCosplays.getState().stop) { say(g.key, "Stopped"); continue; }
+        await doGroup(g, o, aliases);
+        useCosplays.setState((s) => ({ done: s.done + 1 }));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(useCosplays.getState().atOnce, todo.length) }, worker));
     say("_", useCosplays.getState().stop ? "Stopped — press Make them all again to carry on where it left off" : o.only ? null : "Done — click each one's main picture, then Send");
   } catch (e) { say("_", (e as Error).message === "Stopped" ? "Stopped — press Make them all again to carry on where it left off" : `Didn't go: ${(e as Error).message}`); }
   finally {
     // anything still marked as waiting didn't start
-    useCosplays.setState((s) => ({ running: false, now: null, status: Object.fromEntries(Object.entries(s.status).filter(([, v]) => v !== "Waiting…")) }));
+    useCosplays.setState((s) => ({ running: false, now: null, working: [], status: Object.fromEntries(Object.entries(s.status).filter(([, v]) => v !== "Waiting…")) }));
   }
 }

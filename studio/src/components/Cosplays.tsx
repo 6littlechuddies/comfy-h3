@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { viewUrl } from "../lib/api";
 import { useCharacters, type Character } from "../lib/characters";
-import { charFor, runCosplays, scanCosplays, setMain, useCosplays, type CosGroup } from "../lib/cosplayRun";
+import { charFor, runCosplays, scanCosplays, setAtOnce, setMain, useCosplays, type CosGroup } from "../lib/cosplayRun";
 import { useJobs } from "../lib/jobs";
 import { Thumb } from "./Thumb";
-import { Icon, cx } from "./ui";
+import { DropSelect, Icon, cx } from "./ui";
 import { openViewer } from "./Viewer";
 
 export function CosplaysHost() {
@@ -29,7 +29,7 @@ function stage(c: Character | undefined, status?: string): Exclude<Filter, "all"
 }
 
 function CosplaysPanel() {
-  const { groups, status, running, scanned, done, total, now } = useCosplays();
+  const { groups, status, running, scanned, done, total, now, working, atOnce } = useCosplays();
   const chars = useCharacters((s) => s.list);
   const toast = useJobs((s) => s.toast);
   const [sending, setSending] = useState(false);
@@ -96,6 +96,8 @@ function CosplaysPanel() {
         {running
           ? <button onClick={() => useCosplays.setState({ stop: true })} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop</button>
           : <>
+            <label className="flex items-center gap-1.5 text-[12px] text-muted" title="How many characters are made at the same time. The writing and chat tests are DeepSeek calls, so 4–6 is fine; on the local writer (no DeepSeek key) keep it at 1">At once
+              <DropSelect value={String(atOnce)} onChange={(e) => setAtOnce(Number(e.target.value))} className="inset h-10 border px-2 text-ink">{[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
             <button onClick={() => void runCosplays({ again: true })} disabled={!groups.length} title="Every profile and its chat lines written again — for when the writer has changed"
               className="press chip-raised flex h-10 items-center gap-2 px-3.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40"><Icon name="refresh" size={13} /> Write all again</button>
             <button disabled={sending || !passed} onClick={() => void sendAll()} title="Every one that passed her chat test, to your site as a draft"
@@ -125,6 +127,7 @@ function CosplaysPanel() {
           <div className="flex items-center gap-3 text-[12.5px]">
             <span className="pulse h-2 w-2 shrink-0 bg-accent" />
             <span className="min-w-0 flex-1 truncate text-ink">{current ? <><b>{charFor(current, chars)?.site?.name || current.name}</b> <span className="text-muted">· {status[current.key]}</span></> : status._ || "Starting…"}</span>
+            {working.length > 1 && <span className="font-mono text-[12px] text-dim" title={working.map((k) => groups.find((g) => g.key === k)?.name).join(", ")}>{working.length} at once</span>}
             <Elapsed />
             <span className="font-mono text-[12px] text-muted">{total ? `${done} / ${total}` : scanned ? `${scanned.toLocaleString()} looked at` : ""}</span>
           </div>
@@ -154,7 +157,7 @@ function CosplaysPanel() {
           </div>)}
         {!!groups.length && !shown.length && <p className="mt-10 text-center text-[13px] text-muted">Nothing here{q ? ` for “${q}”` : ""}.</p>}
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {shown.map(({ g, c, st }) => <Card key={g.key} g={g} c={c} st={st} status={status[g.key]} working={now === g.key} />)}
+          {shown.map(({ g, c, st }) => <Card key={g.key} g={g} c={c} st={st} status={status[g.key]} working={working.includes(g.key)} />)}
         </div>
       </div>
     </div>, document.body);
