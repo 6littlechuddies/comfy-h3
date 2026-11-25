@@ -190,16 +190,38 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
     try { await setMain(c.id, p); } catch (e) { toast((e as Error).message, "bad"); }
   };
   const keep = async () => { if (c && mainPic) await pick(mainPic); };
+  const dropPic = async (p: CosGroup["pics"][number], e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { deleteFile } = await import("../lib/made");
+    deleteFile(p);
+    const nextPics = g.pics.filter((x) => !(x.filename === p.filename && (x.subfolder ?? "") === (p.subfolder ?? "")));
+    useCosplays.setState((s) => ({
+      groups: nextPics.length ? s.groups.map((x) => (x.key === g.key ? { ...x, pics: nextPics } : x)) : s.groups.filter((x) => x.key !== g.key),
+    }));
+    if (c && isMain(p) && nextPics[0]) await setMain(c.id, nextPics[0], true).catch(() => {});
+    toast(`Deleted ${p.filename}`, "info");
+  };
+  const dropChar = async () => {
+    if (!window.confirm(`Delete ${c?.site?.name || c?.name || g.name} and ${g.pics.length} picture${g.pics.length === 1 ? "" : "s"}?`)) return;
+    const { deleteFile } = await import("../lib/made");
+    for (const p of g.pics) deleteFile(p);
+    if (c) useCharacters.getState().remove(c.id);
+    useCosplays.setState((s) => ({ groups: s.groups.filter((x) => x.key !== g.key) }));
+    toast(`Deleted ${c?.site?.name || c?.name || g.name}`, "info");
+  };
   return (
     <article className={cx("card fade-up flex min-w-0 gap-4 border p-3", working ? "border-accent/70" : st === "problem" ? "border-bad/50" : "border-line")}>
       {/* her main picture */}
-      <div className="relative w-[168px] shrink-0">
+      <div className="group/main relative w-[168px] shrink-0">
         <button onDoubleClick={() => mainPic && view(mainPic)} title="Her main picture — her card on your site, and her animated cover later. Double-click to see it big"
           className="press block aspect-[3/4] w-full overflow-hidden border border-line bg-black">
           {mainPic ? <Thumb f={mainPic} className="h-full w-full object-cover" /> : <span className="hatch block h-full w-full" />}
         </button>
         <span className={cx("micro absolute left-0 top-0 px-1.5 py-1", c?.site?.mainAuto || !main ? "bg-black/75 text-muted" : "bg-accent text-accentink")}>
           {c?.site?.mainAuto || !main ? "Newest" : "Main"}</span>
+        {mainPic && !working && (
+          <button onClick={(e) => void dropPic(mainPic, e)} title="Delete this picture"
+            className="press absolute right-1 top-1 flex h-6 w-6 items-center justify-center bg-black/80 text-[13px] text-muted opacity-0 transition-opacity hover:bg-bad hover:text-white group-hover/main:opacity-100">×</button>)}
         {c?.site?.mainAuto && (
           <button onClick={() => void keep()} className="press absolute inset-x-0 bottom-0 bg-black/80 py-1.5 text-[12px] font-semibold text-ink hover:bg-accent hover:text-accentink">Keep this one</button>)}
       </div>
@@ -215,6 +237,8 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
           {c && <button onClick={() => { useCosplays.setState({ open: false }); void import("./SiteLink").then((m) => m.openSiteLink(c.id)); }} title="Open her profile and chat test in Your site"
             className="press chip-raised h-7 px-2 text-[11.5px] text-muted hover:text-ink">Open</button>}
           {c && <MakeOne g={g} redo />}
+          {!working && <button onClick={() => void dropChar()} title="Delete this character and all her cosplay pictures"
+            className="press chip-raised h-7 px-2 text-[11.5px] text-dim hover:border-bad hover:text-bad">×</button>}
           <span className="font-mono text-[11px] text-dim">{g.pics.length} pic{g.pics.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -235,11 +259,15 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
         {/* the rest of her pictures */}
         <div className="mt-auto flex gap-1.5 overflow-x-auto pb-1 pt-2">
           {rest.map((p) => (
-            <button key={`${p.subfolder}/${p.filename}`} onClick={() => void pick(p)} onDoubleClick={() => view(p)} title="Make this her main picture · double-click to see it big"
-              className="press group relative h-[104px] w-[78px] shrink-0 overflow-hidden border border-line bg-black hover:border-accent">
-              <Thumb f={p} w={192} className="h-full w-full object-cover transition-opacity group-hover:opacity-80" />
-              <span className="micro absolute inset-x-0 bottom-0 translate-y-full bg-accent py-0.5 text-center text-accentink transition-transform group-hover:translate-y-0">Main</span>
-            </button>))}
+            <div key={`${p.subfolder}/${p.filename}`} className="group relative h-[104px] w-[78px] shrink-0 overflow-hidden border border-line bg-black hover:border-accent">
+              <button onClick={() => void pick(p)} onDoubleClick={() => view(p)} title="Make this her main picture · double-click to see it big" className="press block h-full w-full">
+                <Thumb f={p} w={192} className="h-full w-full object-cover transition-opacity group-hover:opacity-80" />
+                <span className="micro absolute inset-x-0 bottom-0 translate-y-full bg-accent py-0.5 text-center text-accentink transition-transform group-hover:translate-y-0">Main</span>
+              </button>
+              {!working && (
+                <button onClick={(e) => void dropPic(p, e)} title="Delete this picture"
+                  className="press absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center bg-black/80 text-[12px] text-muted opacity-0 transition-opacity hover:bg-bad hover:text-white group-hover:opacity-100">×</button>)}
+            </div>))}
           {!rest.length && <span className="self-center text-[12px] text-dim">Her only picture</span>}
         </div>
       </div>
