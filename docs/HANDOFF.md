@@ -188,6 +188,24 @@ first-run bugs. The first real test is: Dani → Chat test → Test & fix, then 
 The anonymized test file built from it is uploaded in the Studio: Chat test → Setup, state `chat_tests`. Its builder
 is not in the repo.
 
+**Latest fixes (last session with Claude, all pushed, none yet seen on a rental):**
+- Cosplays stalled on writer steps. Writer calls now go to DeepSeek as jobs the Studio checks every 2 s
+  (`/studio-api/deepseek/graph` with `async: true`, then `GET ?job=`). The old way held a browser connection open per
+  call, and browsers allow only 6 per site. Each DeepSeek try now times out after 240 s (`DEEPSEEK_TIMEOUT`) instead of
+  600 s × 3.
+- Diagnostics: each card has a step timer. **Copy report** in the Cosplays run bar copies each character's step and
+  time, why each failed test failed, and the rental's DeepSeek call log (`GET /studio-api/deepseek/log`).
+- Every cosplay failed its chat test. The hard check (`hardHits` in chatScore.ts) is now narrower:
+  - always a fail: words that mean a child, family roles, non-consent, choking;
+  - a fail only inside a sexual reply: asleep, school, neck, throat, kids, forced and similar;
+  - never a fail: a word she's turning down.
+  `CHECKS_V` = 2. Saved tests are rescored for free when Cosplays opens (`rescoreAll`). `testAndFix` stops after a
+  round that doesn't improve.
+- Drive restore: pictures come down first; a faster rclone pacer when the user's own Google client is used; files per
+  minute and time left on the restore card.
+- **Next:** read the user's Copy report from a real run, then tune whatever still fails (reviewer strictness, the AI
+  disclosure check, rhythm checks).
+
 ## 8. Open work, in priority order
 
 1. **Waiting on Burak** (the message is drafted in the chat history; summary):
