@@ -85,7 +85,7 @@ export async function writeChatLines(c: Character, o: { onStep?: (t: string) => 
     if (r.keep.length < want) notes.push(`${k}: ${r.keep.length} of ${want} — add the rest by hand`);
   }
   const openerKeywords: string[] = (Array.isArray(d.openerKeywords) ? d.openerKeywords : String(d.openerKeywords ?? "").split(","))
-    .map((x: unknown) => String(x).trim().toLowerCase()).filter((x: string) => x && x.length < 30).slice(0, 4);
+    .map((x: unknown) => String(x).trim().toLowerCase()).filter((x: string) => x && x.length < 30).slice(0, 6);
   const languages = String(d.languages ?? "").trim().slice(0, 120) || "english";
   const styleNote = [`STYLE (decided): hold profile ${holdProfile}; effort pushback ${effortPushback}; languages ${languages}; casing ${casing ?? "?"}`,
     openerKeywords.length && `Her first message's props: ${openerKeywords.join(", ")} (follow up on its question in at most two mini-chats)`].filter(Boolean).join("\n");
@@ -162,7 +162,7 @@ export async function writeChatLines(c: Character, o: { onStep?: (t: string) => 
     emojiRate: ["none", "rare", "some", "often"].includes(d.emojiRate) ? d.emojiRate : (s.texting?.emoji as SiteChat["emojiRate"]) ?? undefined,
     heatHolds: holdProfile === "warm" ? 1 : holdProfile === "tease" ? 3 : null,
     holdProfile, effortPushback, languages, openerKeywords: openerKeywords.length ? openerKeywords : s.chat?.openerKeywords,
-    kinks: kinks.keep.length ? kinks.keep : s.chat?.kinks, dangle: dangle.keep.length ? dangle.keep.slice(0, 5) : s.chat?.dangle,
+    kinks: kinks.keep.length ? kinks.keep : s.chat?.kinks, dangle: dangle.keep.length ? dangle.keep.slice(0, 8) : s.chat?.dangle,
     captions: captions.keep.length ? captions.keep.slice(0, 3) : s.chat?.captions,
     levelEmojis: lvl.length === 7 ? lvl : s.chat?.levelEmojis,
     examples: ex.length ? formatExchanges(name, ex) : s.chat?.examples,

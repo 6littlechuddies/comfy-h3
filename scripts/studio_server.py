@@ -6142,15 +6142,41 @@ _TEXTING = {"texts": {"one", "one_or_two", "two", "two_or_three"}, "length": {"s
 _VOICES = {"matilda", "jessica", "lily", "sarah", "laura", "bella", "alice"}
 
 
+# Child-associated emojis refused by the site (studio-api.md)
+_CHILD_EMOJI = {0x1F476, 0x1F467, 0x1F466, 0x1F9D2, 0x1F37C, 0x1F9F8, 0x1F36D, 0x1F392, 0x1F3EB, 0x1F6B8, 0x1F47C, 0x1F6BC, 0x1FA80, 0x1FA81, 0x1F9C3}
+
+
+def _is_emoji_base(cp: int) -> bool:
+    return (
+        0x1F000 <= cp <= 0x1FAFF
+        or 0x2600 <= cp <= 0x27BF
+        or 0x2300 <= cp <= 0x23FF
+        or 0x2B00 <= cp <= 0x2BFF
+        or 0x2194 <= cp <= 0x21AA
+        or 0x25AA <= cp <= 0x25FE
+        or cp in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x3030, 0x303D, 0x3297, 0x3299)
+    )
+
+
 def _site_emoji(e: str) -> bool:
-    """one emoji the site's texting.signatureEmoji accepts: a face, a heart or a sexting one (conservative: when in doubt, no)"""
-    cps = [ord(ch) for ch in e if ord(ch) not in (0xFE0F, 0x200D) and not 0x1F3FB <= ord(ch) <= 0x1F3FF]
-    if len(cps) != 1 and not (len(cps) == 2 and cps[0] == 0x2764): return False  # ❤️‍🔥 / ❤️‍🩹 are two code points
-    c = cps[0]
-    faces = 0x1F600 <= c <= 0x1F64F or 0x1F910 <= c <= 0x1F92F or 0x1F970 <= c <= 0x1F97A or 0x1FAE0 <= c <= 0x1FAE8 or c in (0x263A, 0x2639, 0x1F9D0, 0x1F975, 0x1F976, 0x1F608, 0x1F47F)
-    hearts = c in (0x2764, 0x2763, 0x1F5A4, 0x1F90D, 0x1F90E, 0x1F9E1, 0x1F48B) or 0x1F493 <= c <= 0x1F49F or 0x1FA75 <= c <= 0x1FA77
-    sexting = c in (0x1F351, 0x1F346, 0x1F445, 0x1F440, 0x1F525, 0x1F4A6, 0x1F352)
-    return faces or hearts or sexting
+    """one valid emoji accepted by the site (any single emoji, including skin tones / VS16 / ZWJ sequences such as ❤️‍🔥,
+    excluding child-associated emojis refused by the site)"""
+    if not e or any(ch.isspace() for ch in e): return False
+    cps = [ord(ch) for ch in e]
+    if any(cp in _CHILD_EMOJI for cp in cps): return False
+    # Keycap sequence: [0-9#*] + optional VS16 + U+20E3
+    if cps[-1] == 0x20E3 and len(cps) in (2, 3) and cps[0] in (*range(0x30, 0x3A), 0x23, 0x2A) and (len(cps) == 2 or cps[1] == 0xFE0F):
+        return True
+    # Regional indicator flag pair
+    if len(cps) == 2 and all(0x1F1E6 <= cp <= 0x1F1FF for cp in cps):
+        return True
+    # Single emoji or ZWJ-joined sequence (each segment has one base emoji + optional VS15/VS16/skin-tone/tag modifiers)
+    segs = e.split("\u200d")
+    if not segs or len(segs) > 4 or any(not seg for seg in segs): return False
+    for seg in segs:
+        base = [ord(ch) for ch in seg if ord(ch) not in (0xFE0F, 0xFE0E) and not (0x1F3FB <= ord(ch) <= 0x1F3FF) and not (0xE0020 <= ord(ch) <= 0xE007F)]
+        if len(base) != 1 or not _is_emoji_base(base[0]): return False
+    return True
 
 
 def _site_block(site: dict, cosplay: bool) -> dict:
@@ -6161,12 +6187,11 @@ def _site_block(site: dict, cosplay: bool) -> dict:
         v = str(site.get(k) or "").strip()
         return v[:n].rsplit(" ", 1)[0] if n and len(v) > n else v
     out: dict = {}
-    for key, src, n in (("tagline", "tagline", 140), ("occupation", "occupation", 40), ("status_line", "statusLine", 40), ("voice_line", "voiceLine", None),
-                        ("ethnicity", "ethnicity", 40), ("language", "language", 40), ("hobbies", "hobbies", 80)):
+    for key, src, n in (("tagline", "tagline", 120), ("occupation", "occupation", 40), ("status_line", "statusLine", 40), ("voice_line", "voiceLine", None),
+                        ("ethnicity", "ethnicity", 40), ("language", "language", 40), ("hobbies", "hobbies", 160)):
         if cell(src): out[key] = cell(src, n)
     if cosplay: out["category"] = "cosplay"
     tx = {k: str(v) for k, v in (site.get("texting") or {}).items() if str(v) in _TEXTING.get(k, set())}
-    # the site takes only faces, hearts and the sexting ones (a 🧋 or 🎮 is refused, and the whole send with it)
     emo = [e for e in (str(x).strip() for x in (site.get("signatureEmojis") or [])) if e and _site_emoji(e)][:5]
     if emo: tx["signatureEmoji"] = emo
     if tx: out["texting"] = tx
@@ -6176,54 +6201,129 @@ def _site_block(site: dict, cosplay: bool) -> dict:
     if ppl: sheet["people"] = ppl
     if sheet: out["sheet"] = sheet
     lv = [str(x).strip()[:24] for x in (site.get("levels") or []) if str(x).strip()]
-    if len(lv) == 7: out["levels"] = lv
+    has_levels = len(lv) == 7
+    if has_levels: out["levels"] = lv
     if str(site.get("speechVoice") or "").lower() in _VOICES: out["speech_voice"] = str(site["speechVoice"]).lower()
-    ch = _chat_block(site)
+    ch = _chat_block(site, has_levels=has_levels)
     if ch: out["chat"] = ch
     return out
 
 
-def _chat_block(site: dict) -> dict:
-    """urgf.ai Chat v4.1's boxes (signature words and emoji, emoji rate, casing, facts, heat holds, level emojis, the voice
-    examples, the examples and the hot lines bank). The site's JSON paths for these aren't published yet: this is the
-    proposed shape under site.chat — when the site refuses it, the character is sent again without it (the note says so)."""
+# Chat v4.1+ fields added in UrGF PR #1 — stripped gracefully on 422 if targeting a pre-PR #1 server
+_CHAT_EXT_KEYS = ("opener_keywords", "hold_profile", "effort_pushback", "dangle")
+
+
+def _chat_block(site: dict, has_levels: bool = False) -> dict:
+    """urgf.ai Chat v4.1's site.chat block (matches UrGF docs/studio-api.md). Unknown keys in site.chat are refused
+    with 422 by name, so only documented keys are emitted here; newer PR #1 keys are stripped gracefully on 422 if
+    the target server hasn't deployed them yet."""
     ch = site.get("chat") or {}
-    # every character from the Studio is written for Chat v4.1 (the House prompt is what made the "earn it" walls): ask the
-    # site to run her on it. Until the site takes the flag, the send note says so and the toggle in admin does the same job
-    out: dict = {"chat_v41": True}
+    out: dict = {"enabled": True}
     sw = [str(w).strip()[:30] for w in (site.get("signatureWords") or []) if str(w).strip()][:6]
     if sw: out["signature_words"] = sw
-    se = [e for e in (str(x).strip() for x in (site.get("signatureEmojis") or [])) if e and _site_emoji(e)][:3]
+    se = [e for e in (str(x).strip() for x in (site.get("signatureEmojis") or [])) if e and _site_emoji(e)][:4]
     if se: out["signature_emojis"] = se
     if ch.get("emojiRate") in ("none", "rare", "some", "often"): out["emoji_rate"] = ch["emojiRate"]
     if ch.get("casing") in ("lower", "proper", "custom"):
         out["casing"] = ch["casing"]
-        if ch["casing"] == "custom" and str(ch.get("casingCustom") or "").strip(): out["casing_custom"] = str(ch["casingCustom"]).strip()[:120]
-    fx = {k: str((site.get("facts") or {}).get(k) or "").strip() for k in ("job", "city", "home", "wearing")}
+    fx = {k: str((site.get("facts") or {}).get(k) or "").strip()[:300] for k in ("job", "city", "home", "wearing")}
     fx = {k: v for k, v in fx.items() if v}
     if fx: out["facts"] = fx
-    if ch.get("heatHolds") in (1, 2): out["heat_holds"] = ch["heatHolds"]
-    lv = [str(x).strip() for x in (ch.get("levelEmojis") or []) if str(x).strip()]
-    if len(lv) == 7: out["level_emojis"] = lv
-    for k, src in (("voice_example_paid", "voicePaid"), ("voice_example_free", "voiceFree"), ("examples", "examples")):
-        if str(ch.get(src) or "").strip(): out[k] = str(ch[src]).strip()
+    hh = ch.get("heatHolds")
+    if isinstance(hh, int) and not isinstance(hh, bool) and 0 <= hh <= 3: out["heat_holds"] = hh
+    if has_levels:
+        lv = [e for e in (str(x).strip() for x in (ch.get("levelEmojis") or [])) if e and _site_emoji(e)]
+        if len(lv) == 7: out["level_emojis"] = lv
+    ve = {k: str(ch.get(src) or "").strip()[:600] for k, src in (("paid", "voicePaid"), ("free", "voiceFree")) if str(ch.get(src) or "").strip()}
+    if ve: out["voice_examples"] = ve
+    if str(ch.get("examples") or "").strip(): out["examples"] = str(ch["examples"]).strip()
     hot = ch.get("hot") or {}
     hl = {k: [str(x).strip() for x in (hot.get(k) or []) if str(x).strip()][:15] for k in ("tease", "explicit", "after", "cold")}
-    if not hl["cold"]: hl.pop("cold")
-    if any(hl.values()): out["hot_lines"] = hl
-    # fix pack v4.2 (the dev adds these to the schema; until then a refused one is dropped on its own)
+    hl = {k: v for k, v in hl.items() if v}
+    if hl: out["hot_lines"] = hl
     if ch.get("holdProfile") in ("warm", "tease", "dom"): out["hold_profile"] = ch["holdProfile"]
     if ch.get("effortPushback") in ("sweet", "sassy"): out["effort_pushback"] = ch["effortPushback"]
-    if str(ch.get("languages") or "").strip(): out["languages"] = str(ch["languages"]).strip()[:120]
-    ok = [str(x).strip() for x in (ch.get("openerKeywords") or []) if str(x).strip()][:4]
-    if ok: out["opener_topic_keywords"] = ok
-    ks = [{"term": str(k.get("term") or "").strip(), "stance": k.get("stance"), "line": str(k.get("line") or "").strip()}
-          for k in (ch.get("kinks") or []) if isinstance(k, dict) and k.get("stance") in ("go", "tease", "soft_no") and str(k.get("term") or "").strip()][:10]
-    if ks: out["kink_stance"] = ks
-    for k, src, n in (("dangle_lines", "dangle", 5), ("caption_lines", "captions", 3)):
-        v = [str(x).strip() for x in (ch.get(src) or []) if str(x).strip()][:n]
-        if v: out[k] = v
+    ok = [str(x).strip()[:40] for x in (ch.get("openerKeywords") or []) if str(x).strip()][:6]
+    if ok: out["opener_keywords"] = ok
+    dg = [str(x).strip() for x in (ch.get("dangle") or []) if str(x).strip()][:8]
+    if dg: out["dangle"] = dg
     return out
+
+
+def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
+    """Given a 422 response from PUT /characters/{ext}, strip any rejected site.chat keys (including nested subkeys
+    like hot_lines.cold) in place and return the labels of what was dropped. Returns [] when the 422 is not about
+    site.chat (so real profile/bio errors surface immediately)."""
+    site_obj = manifest.get("site")
+    chat = site_obj.get("chat") if isinstance(site_obj, dict) else None
+    if not isinstance(chat, dict) or not chat: return []
+    err = _site_err(res)
+    probs: list[tuple[str, str]] = []
+    if isinstance(res, dict):
+        e = res.get("error", res)
+        if isinstance(e, dict):
+            raw_probs = e.get("problems") or e.get("details") or e.get("errors")
+            if isinstance(raw_probs, list):
+                for p in raw_probs:
+                    if isinstance(p, dict):
+                        probs.append((str(p.get("field") or p.get("path") or ""), str(p.get("message") or p.get("msg") or "")))
+    chat_probs = [(f, m) for f, m in probs if re.match(r"^(?:site\.)?chat(?:\.|$)", f)]
+    has_chat_err = bool(chat_probs) or (not probs and bool(re.search(r"\bchat\b", err, re.I)))
+    if not has_chat_err: return []
+    dropped: list[str] = []
+
+    def drop_sub(parent: str, sub: str) -> bool:
+        obj = chat.get(parent)
+        if isinstance(obj, dict) and sub in obj:
+            obj.pop(sub)
+            dropped.append(f"{parent}.{sub}")
+            if not obj: chat.pop(parent, None)
+            return True
+        return False
+
+    def drop_key(k: str) -> bool:
+        if k in chat:
+            chat.pop(k)
+            dropped.append(k)
+            return True
+        return False
+
+    for field, msg in chat_probs:
+        rel = re.sub(r"^(?:site\.)?chat\.?", "", field)
+        if not rel:
+            for k in list(chat.keys()):
+                if re.search(rf"\b{re.escape(k)}\b", msg): drop_key(k)
+            if isinstance(chat.get("hot_lines"), dict) and "cold" in chat["hot_lines"] and re.search(r"\bcold\b", msg):
+                drop_sub("hot_lines", "cold")
+            continue
+        parts = rel.split(".")
+        key, sub = parts[0], (parts[1] if len(parts) > 1 else None)
+        if sub and drop_sub(key, sub): continue
+        if key == "hot_lines" and isinstance(chat.get("hot_lines"), dict):
+            hit_sub = [sk for sk in list(chat["hot_lines"].keys()) if re.search(rf"\b{re.escape(sk)}\b", msg)]
+            if hit_sub:
+                for sk in hit_sub: drop_sub("hot_lines", sk)
+                continue
+        drop_key(key)
+
+    if not dropped:
+        for m in re.finditer(r"chat\.(\w+)(?:\.(\w+))?", err):
+            k, sub = m.group(1), m.group(2)
+            if sub and drop_sub(k, sub): continue
+            drop_key(k)
+
+    if not dropped:
+        # Backwards compatibility: if a pre-PR #1 server complains generically about site.chat, drop the newer PR #1 keys first
+        for k in _CHAT_EXT_KEYS: drop_key(k)
+        drop_sub("hot_lines", "cold")
+
+    if not dropped:
+        site_obj.pop("chat", None)
+        dropped.append("all chat lines")
+    elif not chat:
+        site_obj.pop("chat", None)
+    if not site_obj: manifest.pop("site", None)
+    return dropped
 
 
 _ASTERISK = re.compile(r"asterisk|\*|\b(narrat\w*|stage directions?|roleplay actions?)\b|\breal girl\b|\bnot a bot\b|\bflesh and blood\b", re.I)
@@ -6431,10 +6531,24 @@ async def _site_push(job: dict, d: dict):
         # BANNER: the explore page's wide hero (factory role "cover"), only when one was picked — else the site keeps its own
         bp = own_path(site.get("bannerFile"))
         if bp: files.append(("banner", bp))
-        # PROFILE CAROUSEL (factory role "gallery"): her picked pictures, in order, up to 12 — pictures only
-        for g in (site.get("galleryFiles") or [])[:12]:
+        # Never reuse a picture from a premium set or rated explicit in the public profile carousel (studio-api.md)
+        private_paths: set[str] = set()
+        for st_ in (site.get("sets") or []):
+            if not isinstance(st_, dict): continue
+            is_priv_set = st_.get("tier") == "premium" or st_.get("rating") == "explicit"
+            for it in (st_.get("items") or []):
+                if not isinstance(it, dict): continue
+                if is_priv_set or it.get("rating") == "explicit":
+                    pp = own_path(it)
+                    if pp: private_paths.add(pp)
+        # PROFILE CAROUSEL (factory role "gallery"): her picked pictures, in order, up to 12 — pictures only, never private/explicit
+        gallery_paths: list[str] = []
+        for g in (site.get("galleryFiles") or []):
             gp = own_path(g)
-            if gp and not re.search(r"\.(mp4|webm|mov|gif)$", gp, re.I): files.append(("gallery", gp))
+            if gp and gp not in private_paths and gp not in gallery_paths and not re.search(r"\.(mp4|webm|mov|gif)$", gp, re.I):
+                gallery_paths.append(gp)
+                if len(gallery_paths) >= 12: break
+        for gp in gallery_paths: files.append(("gallery", gp))
         # her hover loop (Your site → Hover loop): made to the card's shape before it's uploaded
         loop_src = None
         lf = site.get("loopFile")
@@ -6443,7 +6557,7 @@ async def _site_push(job: dict, d: dict):
             except web.HTTPException: loop_src = None
             if loop_src and not os.path.isfile(loop_src): loop_src = None
             if not loop_src: job["note"] = "her hover loop file is gone from this rental — pick it again (Your site → Hover loop)"
-        card = next((p for r, p in files if r == "card"), None)
+        card = next((p for r, p in files if r == "card"), None) or next((p for r, p in files if r == "avatar"), None)
         if loop_src and card:
             job["step"] = "making the hover loop"
             cw, ch = _card_size(card)
@@ -6489,33 +6603,40 @@ async def _site_push(job: dict, d: dict):
             if not manifest["site"]: manifest.pop("site")
             sig = [str(w).strip() for w in (site.get("signatureWords") or []) if str(w).strip()]
             if sig: manifest["voice_notes"] = (manifest["voice_notes"] + f" Words she reaches for: {', '.join(sig)}.").strip()
+            ch_cfg = site.get("chat") or {}
+            casing_custom = str(ch_cfg.get("casingCustom") or "").strip()[:120]
+            if ch_cfg.get("casing") == "custom" and casing_custom and casing_custom.lower() not in manifest["voice_notes"].lower():
+                manifest["voice_notes"] = (manifest["voice_notes"] + f" Casing style: {casing_custom}.").strip()
             job["step"] = "character"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
-            # a chat box the site doesn't take (yet) is dropped on its own and the rest sent again; if it can't tell which,
-            # the whole chat block goes. The note says what was left out
-            left: list = []
+            # a chat box key the site doesn't accept (e.g. PR #1 keys on an older server) is dropped on its own
+            # and the rest sent again; if the site can't name which, newer keys go first, then the whole chat block.
+            left: list[str] = []
             for _ in range(6):
-                chat = (manifest.get("site") or {}).get("chat")
-                if code != 422 or not chat or not re.search(r"\bchat\b", _site_err(res), re.I): break
-                err = _site_err(res)
-                m = re.search(r"chat\.(\w+)", err)
-                key = m.group(1) if m and m.group(1) in chat else None
-                if key: chat.pop(key); left.append(key)
-                else: manifest["site"].pop("chat"); left.append("all chat lines"); break
-                if not chat: manifest["site"].pop("chat")
+                if code != 422: break
+                dropped = _strip_rejected_chat_keys(manifest, res)
+                if not dropped: break
+                left.extend(dropped)
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
             if left:
-                if "all chat lines" in left: code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}", _plain(manifest))
-                job["chat_note"] = "the site didn't take: " + ", ".join(left) + (" — turn Chat v4.1 on for her in admin" if "chat_v41" in left or "all chat lines" in left else "")
+                job["chat_note"] = "the site didn't take: " + ", ".join(left) + (" — turn Chat v4.1 on for her in admin" if "enabled" in left or "all chat lines" in left else "")
             elif "chat" in (manifest.get("site") or {}): job["chat_note"] = "chat lines sent"
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
             job["character"] = res
-            media = {"avatar": next((mids[p] for r, p in files if r == "avatar"), None), "card": next((mids[p] for r, p in files if r == "card"), None),
-                     **({"cover": mids[p]} if (p := next((p for r, p in files if r == "banner"), None)) else {}),
-                     **({"gallery": list(dict.fromkeys(mids[p] for r, p in files if r == "gallery"))} if any(r == "gallery" for r, _ in files) else {}),
-                     "reference": [mids[p] for r, p in files if r == "reference"]}
+            media: dict = {}
+            if (p := next((p for r, p in files if r == "avatar"), None)): media["avatar"] = mids[p]
+            if (p := next((p for r, p in files if r == "card"), None)): media["card"] = mids[p]
+            if (p := next((p for r, p in files if r == "banner"), None)): media["cover"] = mids[p]
+            gallery_mids = list(dict.fromkeys(mids[p] for r, p in files if r == "gallery" and p in mids))
+            if gallery_mids:
+                media["gallery"] = gallery_mids
+            elif "galleryFiles" in site and isinstance(site.get("galleryFiles"), list) and len(site["galleryFiles"]) == 0:
+                media["gallery"] = []
+            ref_mids = [mids[p] for r, p in files if r == "reference" and p in mids]
+            if site.get("send_reference", True) and ref_mids:
+                media["reference"] = ref_mids
             loop_p = next((p for r, p in files if r == "loop"), None)
-            if loop_p: media["loop"] = mids[loop_p]
+            if loop_p and loop_p in mids: media["loop"] = mids[loop_p]
             job["step"] = "media"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
             want = _loop_wanted(res) if code == 422 and loop_p else None

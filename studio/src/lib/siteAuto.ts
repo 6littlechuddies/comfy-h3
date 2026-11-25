@@ -99,7 +99,7 @@ const json = (raw: string) => looseJson<any>(raw);
 const FIELDS = ["bio", "greeting", "backstory", "personality", "persona", "voice", "quirks", "opinions", "flaw", "summary",
   "tagline", "occupation", "statusLine", "voiceLine", "hobbies", "ethnicity", "language", "likes", "setting", "relationship", "scenario", "inBed"] as const;
 /** the site's limits on its short cells (longer is refused or cut) */
-const CAP: Partial<Record<(typeof FIELDS)[number], number>> = { tagline: 140, occupation: 40, statusLine: 40, hobbies: 80, ethnicity: 40, language: 40 };
+const CAP: Partial<Record<(typeof FIELDS)[number], number>> = { tagline: 120, occupation: 40, statusLine: 40, hobbies: 160, ethnicity: 40, language: 40 };
 const TEXTING: Record<string, string[]> = { texts: ["one", "one_or_two", "two", "two_or_three"], length: ["short", "medium", "long"], emoji: ["none", "rare", "some", "often"],
   casing: ["lowercase", "lowercase_names", "sentence"], slang: ["none", "some", "lots"], swearing: ["none", "light", "heavy"], exclaim: ["rare", "bubbly"],
   questions: ["rarely", "sometimes", "most"], tone: ["sweet", "playful", "bratty"], forward: ["waits", "steers"], goodbye: ["lets_go", "resists_once"], useName: ["never", "sometimes"] };
@@ -325,7 +325,7 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   const lv = strs(d.levels, 7, 24);
   next.levels = keep(s0.levels, lv.length === 7 && !lv.some((x) => AGE.test(x)) ? lv : undefined, (x) => x.length === 7);
   next.signatureWords = keep(s0.signatureWords, strs(d.signatureWords, 6, 30), (x) => x.length > 0);
-  next.signatureEmojis = keep(s0.signatureEmojis, strs(d.signatureEmojis, 3, 8), (x) => x.length > 0);
+  next.signatureEmojis = keep(s0.signatureEmojis, strs(d.signatureEmojis, 4, 16), (x) => x.length > 0);
   const tx = d.texting && typeof d.texting === "object" ? Object.fromEntries(Object.entries(d.texting as Record<string, unknown>).map(([k, v]) => [k, String(v).trim()]).filter(([k, v]) => TEXTING[k]?.includes(v))) : {};
   next.texting = keep(s0.texting, Object.keys(tx).length ? tx : undefined, (x) => Object.keys(x).length > 0);
   const sv = String(d.speechVoice ?? "").trim().toLowerCase();

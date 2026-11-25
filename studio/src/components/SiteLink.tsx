@@ -30,7 +30,7 @@ type Cfg = { url: string; set: boolean; source: string | null };
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || `set-${Date.now().toString(36)}`;
 const RATINGS = [["sfw", "SFW", "safe for everyone"], ["suggestive", "Suggestive", "teasing, covered"], ["explicit", "Explicit", "age-gated"]] as const;
 /** what the site last got, as a fingerprint — "changed since sent" when this no longer matches */
-const fp = (c: Character) => JSON.stringify([c.name, c.site?.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.quirks, c.site?.tags, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.loopFile]);
+const fp = (c: Character) => JSON.stringify([c.name, c.site?.name, c.age, c.site?.bio, c.site?.greeting, c.site?.backstory, c.site?.personality, c.site?.persona, c.site?.voice, c.site?.quirks, c.site?.tags, c.site?.tagline, c.site?.hobbies, c.site?.facts, c.site?.levels, c.site?.signatureWords, c.site?.signatureEmojis, c.site?.texting, c.site?.speechVoice, c.site?.chat, c.site?.sets, c.site?.avatar, c.site?.cover, c.site?.avatarFile, c.site?.coverFile, c.cover?.v ?? c.cover?.filename, c.site?.bannerFile, c.site?.galleryFiles, c.site?.loopFile]);
 const status = (c: Character) => !c.site?.sent ? "new" : !c.site.sent.ok ? "failed" : c.site.sent.hash && c.site.sent.hash !== fp(c) ? "changed" : "sent";
 const STATUS: Record<string, [string, string]> = { new: ["Not sent", "text-dim"], sent: ["Draft on the site", "text-good"], changed: ["Changed since sent", "text-hot"], failed: ["Last send failed", "text-bad"] };
 const hasProfile = (c: Character) => !!(c.site?.bio && c.site?.persona);
@@ -120,7 +120,7 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
             <DropSelect className="h-8 border border-line bg-panel px-2 text-ink" value={ch.effortPushback ?? ""} onChange={(e) => set({ effortPushback: (e.target.value || undefined) as never })}>
               <option value="">—</option><option value="sweet">sweet</option><option value="sassy">sassy</option></DropSelect></label>
           <TextIn className="min-w-[160px] flex-1" label="Languages · she texts in English" value={ch.languages ?? ""} onChange={(v) => set({ languages: v })} placeholder="english; some spanish" />
-          <TextIn className="min-w-[160px] flex-1" label="Opener topic keywords" value={(ch.openerKeywords ?? []).join(", ")} onChange={(v) => set({ openerKeywords: v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="headband, apron" />
+          <TextIn className="min-w-[160px] flex-1" label="Opener topic keywords" value={(ch.openerKeywords ?? []).join(", ")} onChange={(v) => set({ openerKeywords: v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 6) })} placeholder="headband, apron" />
           <TextIn className="min-w-[160px] flex-1" label="Level emojis · 7, lowest first" value={(ch.levelEmojis ?? []).join(" ")} onChange={(v) => set({ levelEmojis: v.split(/\s+/).filter(Boolean).slice(0, 7) })} />
           <Btn small disabled={busy || !c.site?.persona} onClick={write} title="Sample chats for the 11 core situations, the paid and free voice examples and her hot lines — from her profile; checked against the site's rules and other characters' lines (about a minute)">
             <Icon name="script" size={13} /> {ch.at ? "Write them again" : "Write chat lines"}</Btn>
@@ -137,7 +137,7 @@ function ChatPanel({ c, up, busy }: { c: Character; up: (p: Partial<SiteInfo>) =
         </div>
         <div className="grid grid-cols-3 gap-2">
           <TextArea label={`Cold-push teases (${hot.cold?.length ?? 0} of 3) · his first message is a sex ask`} rows={4} value={(hot.cold ?? []).join("\n")} onChange={(v) => set({ hot: { ...hot, cold: lines(v).slice(0, 3) } })} />
-          <TextArea label={`Dangle lines (${ch.dangle?.length ?? 0} of 5) · what she could show him`} rows={4} value={(ch.dangle ?? []).join("\n")} onChange={(v) => set({ dangle: lines(v).slice(0, 5) })} />
+          <TextArea label={`Dangle lines (${ch.dangle?.length ?? 0} of 8) · what she could show him`} rows={4} value={(ch.dangle ?? []).join("\n")} onChange={(v) => set({ dangle: lines(v).slice(0, 8) })} />
           <TextArea label={`Caption lines (${ch.captions?.length ?? 0} of 3) · sending something unprompted`} rows={4} value={(ch.captions ?? []).join("\n")} onChange={(v) => set({ captions: lines(v).slice(0, 3) })} />
         </div>
         <KinkBox value={ch.kinks ?? []} onChange={(kinks) => set({ kinks })} />
@@ -504,6 +504,10 @@ function Characters({ connected }: { connected: boolean }) {
   const chosen = list.filter((c) => sel.has(c.id));
   const [loops, setLoops] = useState(false);
   const [naming, setNaming] = useState(false);
+  const [concurrency, setConcurrency] = useState<number>(() => {
+    try { const n = Number(localStorage.getItem("h3.site.concurrency")); return [4, 6, 8, 12].includes(n) ? n : 8; } catch { return 8; }
+  });
+  const pickConcurrency = (n: number) => { setConcurrency(n); try { localStorage.setItem("h3.site.concurrency", String(n)); } catch { /* */ } };
   const runPool = async <T,>(items: T[], limit: number, fn: (x: T) => Promise<void>) => {
     let i = 0;
     const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -514,7 +518,7 @@ function Characters({ connected }: { connected: boolean }) {
   const writeAll = async (all = false) => {
     if (all && !window.confirm(`Rewrite every field of ${chosen.length} character${chosen.length > 1 ? "s" : ""}? What you wrote yourself in their profiles is replaced (their names, pictures and sets stay).`)) return;
     chosen.forEach((c) => mark(c.id, "Waiting…"));
-    await runPool(chosen, 6, async (c) => {
+    await runPool(chosen, concurrency, async (c) => {
       mark(c.id, all ? "Rewriting profile…" : "Writing profile…");
       try { await writeProfile(c, all, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
@@ -525,7 +529,7 @@ function Characters({ connected }: { connected: boolean }) {
     if (!window.confirm(`Rewrite every profile field and run the chat test (with auto-fix) on ${chosen.length} character${chosen.length > 1 ? "s" : ""}? Nothing is sent to your site.`)) return;
     let passed = 0, failed = 0;
     chosen.forEach((c) => mark(c.id, "Waiting…"));
-    await runPool(chosen, 6, async (c) => {
+    await runPool(chosen, concurrency, async (c) => {
       try {
         mark(c.id, "Rewriting profile…");
         await writeProfile(c, true, (t) => mark(c.id, t));
@@ -624,15 +628,21 @@ function Characters({ connected }: { connected: boolean }) {
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
         {list.some((c) => c.style === "realistic" && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every realistic (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).map((c) => c.id)))}>Select realistic ({list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).length})</button>}
         {list.some((c) => c.style === "anime" && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every anime (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "anime" && !c.site?.mainFrom).map((c) => c.id)))}>Select anime ({list.filter((c) => c.style === "anime" && !c.site?.mainFrom).length})</button>}
+        {list.some((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every non-cosplay character that failed or hasn't passed the chat test yet" onClick={() => setSel(new Set(list.filter((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom).map((c) => c.id)))}>Select failed/untested ({list.filter((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom).length})</button>}
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then click each one's main picture and send"><Icon name="sparkle" size={13} /> Cosplays</Btn>
         <Btn onClick={() => setLoops(true)} disabled={Object.keys(busy).length > 0} title="Animated covers: the video her card plays when someone hovers it on your site. See who has one, who's pinned for one, make the pinned ones (best on a multi-GPU rental) and pick each one's video — for the ticked ones, or everyone"><Icon name="play" size={14} /> Animated covers{(() => { const n = (chosen.length ? chosen : list).filter((c) => c.site?.coverVideoPin).length; return n ? ` · ${n} pinned` : ""; })()}</Btn>
         <DeepToggle />
+        <label className="flex items-center gap-1.5 text-[12.5px] text-muted" title="How many characters to write or rewrite & test in parallel">At once
+          <DropSelect value={String(concurrency)} onChange={(e) => pickConcurrency(Number(e.target.value))} aria-label="Characters at once" className="h-8 border border-line bg-panel px-2 text-[12.5px] text-ink">
+            {[4, 6, 8, 12].map((n) => <option key={n} value={n}>{n}</option>)}
+          </DropSelect>
+        </label>
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>
         <Btn onClick={() => writeAll(false)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Write only the empty fields; what's there stays"><Icon name="script" size={14} /> Fill profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => writeAll(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Rewrite every profile field with the current writer (greeting, persona, tagline, levels, texting…) — names, pictures and sets stay"><Icon name="script" size={14} /> Rewrite profiles{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
-        <Btn onClick={rewriteAndTestAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="Rewrite every profile field and run the chat test (with auto-fix) on the ticked characters, 6 at once — nothing is sent to your site"><Icon name="sparkle" size={14} /> Rewrite &amp; test{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
+        <Btn onClick={rewriteAndTestAll} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title={`Rewrite every profile field and run the chat test (with auto-fix) on the ticked characters, ${concurrency} at once — nothing is sent to your site`}><Icon name="sparkle" size={14} /> Rewrite &amp; test{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={allInOne} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="All of it, in order: a name for the ones still named after their look, an age (21+) for the ones still on the default, their profile written (bio, persona, greeting…), their newest loop as the hover loop, then sent as drafts"><Icon name="sparkle" size={14} /> Name, write &amp; send{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn kind="primary" onClick={sendAll} disabled={!chosen.length || !connected || Object.keys(busy).length > 0} why={!connected ? "Connect your site first (top right)" : "Tick characters first"}><Icon name="up" size={14} /> Send as drafts{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
       </div>
@@ -775,7 +785,7 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
         }} title="Checks the character is an adult in the source, reads what the source says about her personality, gives her a name of her own, then rewrites her whole profile">Make her this cosplay · name + rewrite</Btn>}
         <TextIn label="Who is she? · a few words, optional — the writer builds on them" value={site.direction ?? ""} onChange={(v) => up({ direction: v })} placeholder="e.g. goth night owl, tattoo apprentice, dry humor, secretly soft" />
         <p className="text-[12px] leading-relaxed text-dim">The writer looks at a few of their pictures (with Grok: when “Grok also looks at pictures” is on), reads the prompts of everything made of them, your words above and their set titles — and makes them clearly different from your other characters. Fill the blanks keeps what you wrote; Rewrite all starts over.</p>
-        <TextIn label="Tagline · under her name: one complete sentence — who she is to him, her situation, a challenge (140 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 140) })} />
+        <TextIn label="Tagline · under her name: one complete sentence — who she is to him, her situation, a challenge (120 max)" value={site.tagline ?? ""} onChange={(v) => up({ tagline: v.slice(0, 120) })} />
         <TextIn label="Bio · on their profile" value={site.bio ?? ""} onChange={(v) => up({ bio: v })} />
         <TextIn label="First message" value={site.greeting ?? ""} onChange={(v) => up({ greeting: v })} />
         <TextIn label="Personality traits" value={site.personality ?? ""} onChange={(v) => up({ personality: v })} placeholder="teasing, upbeat, competitive" />
@@ -789,12 +799,12 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
             <div className="grid grid-cols-2 gap-2">
               <TextIn label="Job (40 max)" value={site.occupation ?? ""} onChange={(v) => up({ occupation: v.slice(0, 40) })} />
               <TextIn label="Status line · what she's doing now, no clock times" value={site.statusLine ?? ""} onChange={(v) => up({ statusLine: v.slice(0, 40) })} />
-              <TextIn label="Hobbies (80 max)" value={site.hobbies ?? ""} onChange={(v) => up({ hobbies: v.slice(0, 80) })} />
+              <TextIn label="Hobbies (160 max)" value={site.hobbies ?? ""} onChange={(v) => up({ hobbies: v.slice(0, 160) })} />
               <TextIn label="Language" value={site.language ?? ""} onChange={(v) => up({ language: v.slice(0, 40) })} />
             </div>
             <TextIn label="A line in her voice · sets her tone, never sent" value={site.voiceLine ?? ""} onChange={(v) => up({ voiceLine: v })} />
             <TextIn label="Signature words · only she uses them" value={(site.signatureWords ?? []).join(", ")} onChange={(v) => up({ signatureWords: v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 6) })} />
-            <TextIn label="Signature emoji" value={(site.signatureEmojis ?? []).join(" ")} onChange={(v) => up({ signatureEmojis: v.split(/\s+/).filter(Boolean).slice(0, 3) })} />
+            <TextIn label="Signature emoji" value={(site.signatureEmojis ?? []).join(" ")} onChange={(v) => up({ signatureEmojis: v.split(/\s+/).filter(Boolean).slice(0, 4) })} />
             <TextArea label="How you know each other · her role in his life first" rows={2} value={site.relationship ?? ""} onChange={(v) => up({ relationship: v })} />
             <TextArea label="Right now · where she is, what she's wearing, what's going on" rows={2} value={site.scenario ?? ""} onChange={(v) => up({ scenario: v })} />
             <TextArea label="Her world · the city and places she goes" rows={2} value={site.setting ?? ""} onChange={(v) => up({ setting: v })} />
