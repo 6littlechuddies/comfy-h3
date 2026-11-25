@@ -6,7 +6,7 @@ PROFILE: who they are (bio, personality, backstory, tags) — may be empty.
 SETS: how many sets to plan.
 PICTURES PER SET: how many pictures in each set.
 MIX: how bold the sets are —
-  progression = a creator's full photo-pack arc across SETS: Set 1 is free and sfw (Shot 1 is her welcoming intro picture for when he opens her chat), middle set(s) are premium suggestive (lingerie, teasing, slipping off clothes, implied), and the final set(s) are premium explicit (fully nude/explicit, consensual adults only; at most 2 two-person adult shots with a man whose face is mostly out of frame);
+  progression = a creator's full photo-pack arc across SETS: Set 1 is free and sfw (Shot 1 is her welcoming intro picture for when he opens her chat, matching her opening scene/prop; Shot 2 is a fast, casual, candid "just took this right now" handheld in-world SFW selfie meant to be sent FREE in the first few messages to prove she sends real photos before spicy packs are locked behind tokens), middle set(s) are premium suggestive (lingerie, teasing, slipping off clothes, implied), and the final set(s) are premium explicit (fully nude/explicit, consensual adults only; at most 2 two-person adult shots with a man whose face is mostly out of frame);
   sfw = every set free and fully clothed (swimwear and gym wear are fine);
   mixed = about half free sfw sets, half premium sets that are suggestive (lingerie, teasing, implied);
   bold = mostly premium; premium sets may be explicit.
