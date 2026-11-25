@@ -14,13 +14,43 @@ export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: R
   /** the run's progress: how many characters are through, of how many, and which one is being worked on */ done: number; total: number; now: string | null;
   /** every character being worked on right now (several run at once) */ working: string[];
   /** how many characters run at once (the writing and testing is DeepSeek calls, so several at a time is fine) */ atOnce: number;
-  /** when the current step started (shown as a timer, so a long step visibly isn't frozen) */ since: number }>(() => ({
-  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0, working: [],
+  /** when the current step started (shown as a timer, so a long step visibly isn't frozen) */ since: number;
+  /** when each character's current step started (per card timer, and the debug report) */ statusAt: Record<string, number> }>(() => ({
+  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0, working: [], statusAt: {},
   atOnce: (() => { try { return Math.max(1, Math.min(24, Number(localStorage.getItem("h3.cos.atOnce")) || 8)); } catch { return 8; } })(),
 }));
 export function setAtOnce(n: number) { useCosplays.setState({ atOnce: n }); try { localStorage.setItem("h3.cos.atOnce", String(n)); } catch { /* */ } }
 export const openCosplays = () => useCosplays.setState({ open: true });
-const say = (key: string, t: string | null) => useCosplays.setState((s) => { const st = { ...s.status }; if (t) st[key] = t; else delete st[key]; return { status: st, since: t && t !== s.status[key] ? Date.now() : s.since }; });
+const say = (key: string, t: string | null) => useCosplays.setState((s) => {
+  const st = { ...s.status }, at = { ...s.statusAt };
+  if (t) { if (t !== s.status[key]) at[key] = Date.now(); st[key] = t; } else { delete st[key]; delete at[key]; }
+  return { status: st, statusAt: at, since: t && t !== s.status[key] ? Date.now() : s.since };
+});
+
+/** everything needed to see why a run is slow: each character's step and how long it's been on it, the writer jobs the
+ *  browser is waiting on, and the rental's own log of DeepSeek calls (in flight, timings, failures). Copied as text. */
+export async function debugReport(): Promise<string> {
+  const s = useCosplays.getState();
+  const now = Date.now();
+  const { useJobs } = await import("./jobs");
+  const name = (k: string) => s.groups.find((g) => g.key === k)?.name ?? k;
+  const jobs = useJobs.getState().jobs.filter((j) => j.status === "running" || j.status === "queued");
+  const server = await fetch("/studio-api/deepseek/log").then((r) => (r.ok ? r.json() : { error: `rental answered ${r.status} (older code?)` })).catch((e) => ({ error: String(e) }));
+  let deep = "?"; try { deep = (await import("./siteAuto")).deepOn() ? "full" : "quick"; } catch { /* */ }
+  return [
+    `H3 Studio cosplay debug report · ${new Date().toISOString()}`,
+    `running: ${s.running} · ${s.done}/${s.total} done · at once: ${s.atOnce} · working now: ${s.working.length} · profiles: ${deep}`,
+    "",
+    "WORKING NOW (character · step · how long on it)",
+    ...s.working.map((k) => `- ${name(k)} · ${s.status[k] ?? "?"} · ${Math.round((now - (s.statusAt[k] ?? now)) / 1000)} s`),
+    "",
+    `WRITER JOBS THE BROWSER IS WAITING ON (${jobs.length})`,
+    ...jobs.slice(0, 40).map((j) => `- ${j.label} · ${j.status} · ${Math.round((now - (j.startedAt ?? j.queuedAt)) / 1000)} s`),
+    "",
+    "RENTAL: DEEPSEEK CALLS",
+    JSON.stringify(server, null, 1),
+  ].join("\n");
+}
 /** waits for a step, but gives up the moment Stop is pressed (the step itself may still finish in the background) */
 function untilStop<T>(p: Promise<T>): Promise<T> {
   return new Promise<T>((ok, no) => {

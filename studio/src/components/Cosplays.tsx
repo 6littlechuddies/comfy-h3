@@ -130,6 +130,7 @@ function CosplaysPanel() {
             <span className="min-w-0 flex-1 truncate text-ink">{current ? <><b>{charFor(current, chars)?.site?.name || current.name}</b> <span className="text-muted">· {status[current.key]}</span></> : status._ || "Starting…"}</span>
             {working.length > 1 && <span className="font-mono text-[12px] text-dim" title={working.map((k) => groups.find((g) => g.key === k)?.name).join(", ")}>{working.length} at once</span>}
             <Elapsed />
+            <ReportButton />
             <span className="font-mono text-[12px] text-muted">{total ? `${done} / ${total}` : scanned ? `${scanned.toLocaleString()} looked at` : ""}</span>
           </div>
           <div className="mt-2 h-[2px] bg-line"><div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${total ? (done / total) * 100 : 4}%` }} /></div>
@@ -216,7 +217,8 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
         </div>
 
         <p className={cx("mt-1.5 min-h-[18px] truncate text-[12.5px]", bad(status) ? "text-bad" : working ? "text-accent" : "text-muted")} title={status}>
-          {status ?? (st === "pick" ? "Showing her newest picture — click another, or keep it" : st === "ready" ? "Ready to send" : st === "sent" ? "On your site as a draft" : st === "test" ? (c?.site?.chatTest ? `Failed the chat test (${c.site.chatTest.score}/100) — open her page to see why` : "Not chat-tested yet") : !c ? "Not made yet" : "")}</p>
+          {status ?? (st === "pick" ? "Showing her newest picture — click another, or keep it" : st === "ready" ? "Ready to send" : st === "sent" ? "On your site as a draft" : st === "test" ? (c?.site?.chatTest ? `Failed the chat test (${c.site.chatTest.score}/100) — open her page to see why` : "Not chat-tested yet") : !c ? "Not made yet" : "")}
+          {working && <StepTime k={g.key} />}</p>
 
         {/* the rest of her pictures */}
         <div className="mt-auto flex gap-1.5 overflow-x-auto pb-1 pt-2">
@@ -231,6 +233,33 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
       </div>
     </article>
   );
+}
+
+/** copies the debug report (each character's step and time on it, the rental's DeepSeek log) to paste into a chat */
+function ReportButton() {
+  const toast = useJobs((s) => s.toast);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const { debugReport } = await import("../lib/cosplayRun");
+      const text = await debugReport();
+      try { await navigator.clipboard.writeText(text); toast("Debug report copied — paste it to Claude", "good"); }
+      catch { const b = new Blob([text], { type: "text/plain" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "cosplay-report.txt"; a.click(); toast("Debug report downloaded (couldn't copy)", "info"); }
+    } finally { setBusy(false); }
+  };
+  return <button onClick={() => void go()} disabled={busy} title="Why is it slow? Copies what each character is on, for how long, and the rental's log of DeepSeek calls"
+    className="press chip-raised h-7 px-2.5 text-[12px] text-muted hover:text-ink disabled:opacity-40">{busy ? "Copying…" : "Copy report"}</button>;
+}
+
+/** how long one character has been on her current step */
+function StepTime({ k }: { k: string }) {
+  const at = useCosplays((s) => s.statusAt[k]);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const sec = at ? Math.round((now - at) / 1000) : 0;
+  if (sec < 10) return null;
+  return <span className={cx("ml-2 font-mono text-[11.5px]", sec > 240 ? "text-bad" : "text-dim")}>{Math.floor(sec / 60)}:{String(sec % 60).padStart(2, "0")}</span>;
 }
 
 /** how long the current step has been going: a long step visibly isn't frozen */

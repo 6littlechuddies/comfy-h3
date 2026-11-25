@@ -183,8 +183,24 @@ async function runOnDeepseek(tab: Tab, label: string, graph: ApiGraph, etaKey: s
   const job: Job = { id, tab, label: label.replace(/ · (27B|9B)$/, "") + (/ · (DeepSeek|Grok)$/.test(label) ? "" : " · DeepSeek"), etaKey, status: "running", value: 0, max: 0, outputs: [], texts: {}, queuedAt: now, startedAt: now,
     etaMs: useJobs.getState().eta(`ds:${etaKey}`), meta: { ...meta, deepseek: true }, titles, classes, doneNodes: 0, totalNodes: Object.keys(graph).length };
   collected.add(id);
-  const go = fetch("/studio-api/deepseek/graph", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ graph }) })
-    .then(async (r) => ({ status: r.status, d: await r.json().catch(() => ({})) as DsAnswer }))
+  // asked for as a job and then checked every 2 s: a request held open for the whole answer took one of the browser's
+  // 6 connections to the rental, so with 8+ characters at once every other call (and the thumbnails) queued behind them
+  const go = fetch("/studio-api/deepseek/graph", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ graph, async: true, label }) })
+    .then(async (r) => ({ status: r.status, d: await r.json().catch(() => ({})) as DsAnswer & { job?: string } }))
+    .then(async (first) => {
+      if (first.status !== 200 || !first.d.job) return first; // an old rental answers in one go; 422 / errors as before
+      for (let miss = 0; ;) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (find(id)?.status === "cancelled") return { status: 499, d: { error: "cancelled" } as DsAnswer };
+        const r = await fetch(`/studio-api/deepseek/graph?job=${first.d.job}`).catch(() => null);
+        if (!r) { if (++miss > 30) return { status: 0, d: { error: "Lost the rental while DeepSeek was writing" } as DsAnswer }; continue; }
+        miss = 0;
+        const d = await r.json().catch(() => ({})) as DsAnswer & { state?: string };
+        if (d.state === "running") continue;
+        if (d.state === "gone") return { status: 0, d: { error: "The rental restarted while DeepSeek was writing — run it again" } as DsAnswer };
+        return { status: r.status, d };
+      }
+    })
     .catch((e) => ({ status: 0, d: { error: `Couldn't reach the rental: ${(e as Error).message}` } as DsAnswer }));
   // a graph with a part DeepSeek can't do answers at once (422): that one goes to ComfyUI after all
   const first = await Promise.race([go, new Promise<null>((r) => setTimeout(() => r(null), 1500))]);

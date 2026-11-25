@@ -3026,25 +3026,52 @@ def _api_key(name: str) -> str:
     return (os.environ.get(name) or "").strip()
 
 
-async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "", extra: dict | None = None, model: str = "") -> tuple[str, str]:
+DS_LOG = None  # the last 300 DeepSeek calls (for the debug report)
+DS_NOW: dict = {}  # calls in flight: id -> {tag, started, attempt}
+DS_TIMEOUT = int(os.environ.get("DEEPSEEK_TIMEOUT") or 240)  # one attempt; it was 600 s × 3 tries = up to 30 min on one stuck call
+
+
+def _ds_log(entry: dict) -> None:
+    global DS_LOG
+    import collections
+    if DS_LOG is None: DS_LOG = collections.deque(maxlen=300)
+    DS_LOG.append(entry)
+
+
+async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float = 0.7, top_p: float = 0.9, thinking: bool = False, key: str = "", extra: dict | None = None, model: str = "", tag: str = "") -> tuple[str, str]:
     body = {"model": model or DEEPSEEK_MODEL, "messages": messages, "max_tokens": max(64, min(32000, int(max_tokens))), "temperature": temperature, "top_p": top_p,
             "thinking": {"type": "enabled" if thinking else "disabled"}, "stream": False, **(extra or {})}
     if thinking: body["reasoning_effort"] = "low"  # a lot of thinking makes the writing worse, not better
     last = ""
-    async with aiohttp.ClientSession() as s:
-        for attempt in range(3):
-            try:
-                async with s.post(f"{DEEPSEEK_URL}/chat/completions", json=body, headers={"Authorization": f"Bearer {key or _api_key('DEEPSEEK_API_KEY')}"},
-                                  timeout=aiohttp.ClientTimeout(total=600)) as r:
-                    txt = await r.text()
-                    if r.status == 200:
-                        m = (json.loads(txt).get("choices") or [{}])[0].get("message") or {}
-                        return str(m.get("content") or ""), str(m.get("reasoning_content") or "")
-                    last = f"DeepSeek answered {r.status}: " + _redact(txt)[:300]
-                    if r.status in (400, 401, 402, 403, 422): break  # bad key, no balance, a request it won't take: no point retrying
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                last = f"Couldn't reach DeepSeek: {type(e).__name__}"
-            await asyncio.sleep(2 + attempt * 3)
+    cid = f"{time.time():.3f}-{id(body)}"
+    t0 = time.time()
+    chars_in = sum(len(m["content"]) if isinstance(m.get("content"), str) else sum(len(x.get("text", "")) for x in m.get("content") or []) for m in messages)
+    DS_NOW[cid] = {"tag": tag or "?", "started": t0, "attempt": 1, "max_tokens": body["max_tokens"], "thinking": thinking}
+    try:
+        async with aiohttp.ClientSession() as s:
+            for attempt in range(3):
+                DS_NOW[cid]["attempt"] = attempt + 1
+                ta = time.time()
+                try:
+                    async with s.post(f"{DEEPSEEK_URL}/chat/completions", json=body, headers={"Authorization": f"Bearer {key or _api_key('DEEPSEEK_API_KEY')}"},
+                                      timeout=aiohttp.ClientTimeout(total=DS_TIMEOUT, sock_connect=20)) as r:
+                        txt = await r.text()
+                        if r.status == 200:
+                            js = json.loads(txt)
+                            m = (js.get("choices") or [{}])[0].get("message") or {}
+                            u = js.get("usage") or {}
+                            _ds_log({"tag": tag or "?", "ok": True, "secs": round(time.time() - t0, 1), "try_secs": round(time.time() - ta, 1), "attempts": attempt + 1,
+                                     "chars_in": chars_in, "tok_in": u.get("prompt_tokens"), "tok_out": u.get("completion_tokens"), "max_tokens": body["max_tokens"],
+                                     "thinking": thinking, "finish": (js.get("choices") or [{}])[0].get("finish_reason"), "at": round(t0)})
+                            return str(m.get("content") or ""), str(m.get("reasoning_content") or "")
+                        last = f"DeepSeek answered {r.status}: " + _redact(txt)[:300]
+                        if r.status in (400, 401, 402, 403, 422): break  # bad key, no balance, a request it won't take: no point retrying
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    last = f"Couldn't reach DeepSeek: {type(e).__name__}" + (f" (no answer in {DS_TIMEOUT} s)" if isinstance(e, asyncio.TimeoutError) else "")
+                _ds_log({"tag": tag or "?", "ok": False, "try_secs": round(time.time() - ta, 1), "attempt": attempt + 1, "error": last[:200], "at": round(ta)})
+                if attempt < 2: await asyncio.sleep(2 + attempt * 3)
+    finally:
+        DS_NOW.pop(cid, None)
     if " 401" in last: last = "DeepSeek refused the key (401) — check DEEPSEEK_API_KEY. " + last
     if " 402" in last: last = "DeepSeek: no balance left on the account (402) — top up at platform.deepseek.com. " + last
     raise RuntimeError(last)
@@ -3175,10 +3202,56 @@ class _Unsupported(Exception):
     pass
 
 
+DS_JOBS: dict = {}  # async writer jobs: id -> {state, status, answer, at}
+_DS_OK = {"StringConcatenate", "PrimitiveString", "PrimitiveStringMultiline", "String", "StringMultiline", "LLMTextProcessor", "LoadImage",
+          "BatchImagesNode", "VHS_LoadVideo", "PreviewAny", "ShowText|pysssss"}
+
+
+def _ds_unsupported(g: dict) -> str:
+    """the first node a DeepSeek run would need that it can't do ("" = all fine), walking back from the text outputs"""
+    seen, todo = set(), [n["inputs"]["source"][0] for n in g.values() if n.get("class_type") in ("PreviewAny", "ShowText|pysssss")
+                          and isinstance((n.get("inputs") or {}).get("source"), list)]
+    while todo:
+        nid = str(todo.pop())
+        if nid in seen: continue
+        seen.add(nid)
+        n = g.get(nid) or {}
+        if n.get("class_type") not in _DS_OK: return str(n.get("class_type"))
+        todo += [v[0] for v in (n.get("inputs") or {}).values() if isinstance(v, list) and len(v) == 2 and isinstance(v[0], str)]
+    return ""
+
+
 async def deepseek_graph(request: web.Request) -> web.Response:
-    """run a writer graph (LLMTextProcessor + its pictures/words) on DeepSeek: {graph} → {texts: {title: text}}"""
+    """run a writer graph (LLMTextProcessor + its pictures/words) on DeepSeek: {graph} → {texts: {title: text}}.
+    With {async: true} it answers at once with {job} and the result is fetched with GET ?job=… — a browser only keeps
+    6 connections open to one site, so 8+ characters at once each holding a request open for a minute queued every
+    other call (and the thumbnails) behind them in the browser."""
+    if request.method == "GET":
+        jid = request.query.get("job", "")
+        j = DS_JOBS.get(jid)
+        if not j: return web.json_response({"state": "gone"}, status=404)
+        if j["state"] != "done": return web.json_response({"state": j["state"], "secs": round(time.time() - j["at"])})
+        DS_JOBS.pop(jid, None)
+        return web.json_response({"state": "done", **j["answer"]}, status=j["status"])
     if not _api_key("DEEPSEEK_API_KEY"): return web.json_response({"error": "no DeepSeek key"}, status=400)
-    g = (await request.json()).get("graph") or {}
+    b = await request.json()
+    g = b.get("graph") or {}
+    if b.get("async"):
+        bad = _ds_unsupported(g)
+        if bad: return web.json_response({"error": "unsupported", "node": bad}, status=422)
+        jid = f"dsj-{int(time.time() * 1000)}-{len(DS_JOBS)}-{os.urandom(3).hex()}"
+        DS_JOBS[jid] = {"state": "running", "at": time.time()}
+        for k in [k for k, v in DS_JOBS.items() if time.time() - v["at"] > 3600]: DS_JOBS.pop(k, None)  # never collected
+
+        async def go():
+            r = await _deepseek_graph_run(g, str(b.get("label") or ""))
+            DS_JOBS[jid].update(state="done", status=r.status, answer=json.loads(r.text))
+        asyncio.get_running_loop().create_task(go())
+        return web.json_response({"job": jid})
+    return await _deepseek_graph_run(g, str(b.get("label") or ""))
+
+
+async def _deepseek_graph_run(g: dict, tag: str = "") -> web.Response:
     cache: dict = {}
 
     async def val(x):
@@ -3220,7 +3293,7 @@ async def deepseek_graph(request: web.Request) -> web.Response:
             user = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": u}} for u in pics] if pics else prompt
             msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}]
             content, reasoning = await _deepseek(msgs, max_tokens=int(i.get("max_tokens") or 4000), temperature=float(i["temperature"]) if i.get("temperature") is not None else 0.6,
-                                                 top_p=float(i.get("top_p") or 0.9), thinking=str(i.get("reasoning") or "off") == "on")
+                                                 top_p=float(i.get("top_p") or 0.9), thinking=str(i.get("reasoning") or "off") == "on", tag=tag or os.path.basename(sysf))
             cache[(nid, 0)], cache[(nid, 1)] = content, reasoning
             v = content if idx == 0 else reasoning
         else:
@@ -3239,6 +3312,23 @@ async def deepseek_graph(request: web.Request) -> web.Response:
     except Exception as e:  # noqa: BLE001
         return web.json_response({"error": _redact(str(e))[:500]}, status=502)
     return web.json_response({"texts": texts})
+
+
+async def deepseek_log(request: web.Request) -> web.Response:
+    """the debug report: DeepSeek calls in flight right now and the last 300 finished, with timings and token counts"""
+    now = time.time()
+    done = list(DS_LOG or [])
+    ok = [x for x in done if x.get("ok")]
+    by: dict = {}
+    for x in ok: by.setdefault(x["tag"], []).append(x["secs"])
+    return web.json_response({
+        "now": [{**v, "secs": round(now - v["started"])} for v in sorted(DS_NOW.values(), key=lambda v: v["started"])],
+        "jobs_waiting": sum(1 for j in DS_JOBS.values() if j["state"] != "done"),
+        "timeout": DS_TIMEOUT, "model": DEEPSEEK_MODEL,
+        "by_step": {k: {"calls": len(v), "avg_s": round(sum(v) / len(v), 1), "max_s": max(v)} for k, v in by.items()},
+        "failures": [x for x in done if not x.get("ok")][-30:],
+        "recent": done[-60:],
+    })
 
 
 async def deepseek_status(request: web.Request) -> web.Response:
@@ -6898,7 +6988,7 @@ def main():
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status), web.post("/studio-api/chatsim", chatsim), web.route("*", "/studio-api/judge", judge_ai), web.post("/studio-api/judge/key", judge_key),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),
-        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.post("/studio-api/deepseek/graph", deepseek_graph), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear-test", posewear_test), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
+        web.post("/studio-api/upload", upload), web.post("/studio-api/to-input", to_input), web.post("/studio-api/inputs/ensure", inputs_ensure), web.post("/studio-api/fetch-image", fetch_image), web.route("*", "/studio-api/proton", proton_status), web.route("*", "/studio-api/save-end", save_end), web.route("*", "/studio-api/migrate", migrate_route), web.post("/studio-api/drive/keys", drive_keys), web.route("*", "/studio-api/deepseek", deepseek_status), web.route("*", "/studio-api/deepseek/graph", deepseek_graph), web.get("/studio-api/deepseek/log", deepseek_log), web.post("/studio-api/board", make_board), web.get("/studio-api/cosplay/lookup", cosplay_lookup), web.get("/studio-api/posewear-test", posewear_test), web.get("/studio-api/posewear/{lib}", posewear_list), web.post("/studio-api/trainset/zip", trainset_zip), web.post("/studio-api/files/zip", files_zip),
         web.post("/studio-api/train", train_start), web.get("/studio-api/train/{id}", train_status), web.post("/studio-api/train/{id}/cancel", train_cancel),
         web.get("/studio-api/recent", recent),
         web.post("/studio-api/finish", finish), web.get("/studio-api/finish/{id}", finish_status),
