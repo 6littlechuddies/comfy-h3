@@ -8,7 +8,7 @@
   GET     /studio-api/finish/<id>    job progress + result
   GET     /studio-api/cost           what this rental has cost so far (via the Vast API)
 """
-import asyncio, hashlib, html, json, os, re, shutil, subprocess, time, uuid
+import asyncio, hashlib, html, json, os, re, shutil, subprocess, tarfile, time, uuid
 import aiohttp
 from urllib.parse import urlparse, quote, unquote
 from aiohttp import web
@@ -3432,6 +3432,9 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
         if err: raise RuntimeError(err)
         await _proton_prune(folder)
         PROTON.update(state="ok", last_ok=time.time(), error="")
+        # keep a single results.tar bundle on the drive so fresh rentals restore in ~20 s instead of one file per API call
+        if force: await _update_results_bundle(folder, force=True)
+        else: _spawn(_update_results_bundle(folder, force=full))
     except Exception as e:  # noqa: BLE001
         PROTON.update(state="error", error=str(e)[:800])
         print(f"!! {_cloud()}:", PROTON["error"], flush=True)
@@ -3741,6 +3744,120 @@ async def migrate_route(req):
     return web.json_response(MIGRATE)
 
 
+RESULTS_BUNDLE = {"count": 0, "at": 0.0, "running": False}
+_PIC_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".json", ".txt")
+
+
+def _pack_results_tar(src: str, tar_path: str) -> int:
+    """pack studio results into one uncompressed .tar (pictures first, newest first) so a fresh rental can pull
+    thousands of files in a single Drive request instead of hitting Google's per-file rate limit"""
+    items: list[tuple[int, float, str, str]] = []
+    for root, _, files in os.walk(src):
+        for fn in files:
+            if fn.startswith(".") or fn.endswith((".tmp", ".part")): continue
+            full = os.path.join(root, fn)
+            try: mt = os.path.getmtime(full)
+            except OSError: continue
+            rel = os.path.relpath(full, src).replace("\\", "/")
+            is_pic = 0 if fn.lower().endswith(_PIC_EXTS) else 1
+            items.append((is_pic, -mt, rel, full))
+    items.sort()
+    n = 0
+    with tarfile.open(tar_path, "w") as tf:
+        for _, _, rel, full in items:
+            try:
+                tf.add(full, arcname=rel, recursive=False)
+                n += 1
+            except OSError:
+                continue
+    return n
+
+
+def _unpack_results_tar(tar_path: str, dest: str, on_file=None) -> int:
+    """safely unpack results.tar into dest without overwriting existing files; preserves mtimes"""
+    os.makedirs(dest, exist_ok=True)
+    root = os.path.realpath(dest)
+    n = 0
+    with tarfile.open(tar_path, "r:*") as tf:
+        for m in tf:
+            if not m.isfile(): continue
+            rel = os.path.normpath(m.name.lstrip("/\\"))
+            if rel in ("", ".") or rel.startswith("..") or os.path.isabs(rel): continue
+            target = os.path.realpath(os.path.join(root, rel))
+            if target != root and not target.startswith(root + os.sep): continue
+            n += 1
+            if os.path.exists(target):
+                if on_file and n % 25 == 0: on_file(n)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            fsrc = tf.extractfile(m)
+            if fsrc is None: continue
+            tmp = target + ".h3part"
+            try:
+                with fsrc, open(tmp, "wb") as fdst:
+                    shutil.copyfileobj(fsrc, fdst, 1024 * 1024)
+                if m.mtime:
+                    try: os.utime(tmp, (m.mtime, m.mtime))
+                    except OSError: pass
+                os.replace(tmp, target)
+            except OSError:
+                try: os.remove(tmp)
+                except OSError: pass
+            if on_file and n % 25 == 0: on_file(n)
+    if on_file: on_file(n)
+    return n
+
+
+async def _update_results_bundle(folder: str, force: bool = False) -> None:
+    """build and upload proton:<folder>/results.tar when enough new results exist. Never fails a sync if Drive is full."""
+    if RESULTS_BUNDLE["running"] or not _proton_on() or os.environ.get("PROTON_BUNDLE", "1") == "0": return
+    if any(v.get("source") == "proton" and v.get("results") in ("copying", "failed") for v in IMPORTS.values()): return
+    src = os.path.join(OUTPUT, "studio")
+    if not os.path.isdir(src): return
+    RESULTS_BUNDLE["running"] = True
+    tmp_tar = os.path.join(WORK, f"results-bundle-{uuid.uuid4().hex[:8]}.tar")
+    try:
+        def scan():
+            cnt, total_b = 0, 0
+            for r, _, fs in os.walk(src):
+                for fn in fs:
+                    if fn.startswith(".") or fn.endswith((".tmp", ".part")): continue
+                    try: total_b += os.path.getsize(os.path.join(r, fn)); cnt += 1
+                    except OSError: pass
+            return cnt, total_b
+        local_n, local_b = await asyncio.to_thread(scan)
+        if local_n < 30: return
+        # check whether a bundle already exists on Drive if we haven't seen one yet on this rental
+        has_remote = RESULTS_BUNDLE["count"] > 0
+        if not has_remote:
+            rc, out = await _rclone("lsjson", f"proton:{folder}", "--files-only", "--include", "results.tar", timeout=60)
+            try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 and "[" in out else []
+            except ValueError: files = []
+            has_remote = any((f.get("Size") or 0) > 0 for f in files)
+        gap = local_n - RESULTS_BUNDLE["count"]
+        need = (not has_remote) or (gap >= (20 if force else 50))
+        if not need: return
+        free_b = shutil.disk_usage(WORK).free
+        if free_b < local_b + 3_000_000_000:
+            print(f"results bundle: skipped (need {local_b // (1<<20)} MB + 3 GB free, have {free_b // (1<<20)} MB)", flush=True)
+            return
+        os.makedirs(WORK, exist_ok=True)
+        packed = await asyncio.to_thread(_pack_results_tar, src, tmp_tar)
+        if packed < 30: return
+        rc, out = await _rclone("copyto", tmp_tar, f"proton:{folder}/results.tar", "--retries", "2", timeout=3600)
+        if rc == 0:
+            RESULTS_BUNDLE.update(count=packed, at=time.time())
+            print(f"results bundle: uploaded {packed} files ({os.path.getsize(tmp_tar) // (1<<20)} MB)", flush=True)
+        else:
+            print("!! results bundle upload failed (loose files are still safe):", _redact(out)[-200:], flush=True)
+    except Exception as e:  # noqa: BLE001
+        print("!! results bundle:", _redact(str(e))[:200], flush=True)
+    finally:
+        RESULTS_BUNDLE["running"] = False
+        try: os.remove(tmp_tar)
+        except OSError: pass
+
+
 async def _proton_restore(force: bool = False):
     """a fresh rental (no characters yet) brings back your newest export from Proton Drive by itself — characters, chats,
     presets, settings — then your results in the background. PROTON_RESTORE=0 turns it off. Shown on the startup screen and
@@ -3818,6 +3935,38 @@ async def _proton_restore(force: bool = False):
             ticker = asyncio.get_running_loop().create_task(tick())
             it["res_start"] = await asyncio.to_thread(count); it["res_at"] = time.time()
             it["res_own"] = bool(DRIVE_HOW.get("own")) if _gdrive_token() else None
+            # fast path: pull proton:<folder>/results.tar in ONE request and unpack it, then let rclone copy only the
+            # handful of newer loose files added since the bundle was made
+            bundle_n = 0
+            if os.environ.get("PROTON_BUNDLE", "1") != "0":
+                rc_b, ls_b = await _rclone("lsjson", f"proton:{folder}", "--files-only", "--include", "results.tar", timeout=60)
+                try: bfiles = json.loads(ls_b[ls_b.index("["): ls_b.rindex("]") + 1]) if rc_b == 0 and "[" in ls_b else []
+                except ValueError: bfiles = []
+                bsize = int((bfiles[0].get("Size") or 0)) if bfiles else 0
+                os.makedirs(dest, exist_ok=True)
+                if bsize > 0 and shutil.disk_usage(IMPORT_DIR).free > bsize + 2_000_000_000:
+                    tmp_tar = os.path.join(IMPORT_DIR, f"results-{iid}.tar")
+                    try:
+                        it.update(res_bundle="downloading", res_bundle_size=bsize, res_bundle_got=0)
+                        bjob = asyncio.create_task(_rclone("copyto", f"proton:{folder}/results.tar", tmp_tar,
+                                                           "--multi-thread-streams", "4", "--retries", "3", timeout=3600))
+                        while not bjob.done():
+                            await asyncio.sleep(1.0)
+                            bsizes = [os.path.getsize(f) for f in _glob.glob(tmp_tar + "*") if os.path.isfile(f)]
+                            if bsizes: it["res_bundle_got"] = max(bsizes)
+                        rc_dl, _ = bjob.result()
+                        if rc_dl == 0 and os.path.isfile(tmp_tar):
+                            it.update(res_bundle="unpacking", res_bundle_got=bsize)
+                            bundle_n = await asyncio.to_thread(_unpack_results_tar, tmp_tar, dest, lambda n: it.update(res_have=min(it.get("res_total") or 10**9, n)))
+                            RESULTS_BUNDLE.update(count=bundle_n, at=time.time())
+                    except Exception as e:  # noqa: BLE001
+                        print("!! results bundle restore (falling back to per-file copy):", _redact(str(e))[:200], flush=True)
+                    finally:
+                        it["res_bundle"] = ""
+                        try: os.remove(tmp_tar)
+                        except OSError: pass
+                    it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
+                    it["res_start"] = it["res_have"]; it["res_at"] = time.time()
             # Google hands out files one request each, so the speed is requests per second, not bandwidth. rclone waits 100 ms
             # between requests by default; with your own Google client that wait can drop to 10 ms (its quota is yours
             # alone). rclone's shared client is throttled by Google for everyone, so it keeps the default (faster only
@@ -3832,6 +3981,9 @@ async def _proton_restore(force: bool = False):
             it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
             it["results"] = "done" if rc == 0 or "not found" in out.lower() else "failed"  # no results folder yet is fine
             ticker.cancel()
+            # if there was no bundle on Drive yet (or it was far behind), pack one now so the next rental restores in seconds
+            if it["results"] == "done" and (bundle_n == 0 or it["res_have"] - bundle_n >= 50):
+                _spawn(_update_results_bundle(folder, force=False))
     except Exception as e:  # noqa: BLE001
         print("!! Proton restore:", _redact(str(e)), flush=True)
         try:
@@ -5600,7 +5752,7 @@ async def import_latest(req):
     """the import running (or just finished) on this rental — the startup screen and the Studio both show it"""
     if not IMPORTS: return web.json_response(None)
     iid, it = max(IMPORTS.items(), key=lambda kv: kv[1]["at"])
-    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results", "res_total", "res_have", "res_start", "res_at", "res_own")}, "cloud": _cloud()})
+    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results", "res_total", "res_have", "res_start", "res_at", "res_own", "res_bundle", "res_bundle_got", "res_bundle_size")}, "cloud": _cloud()})
 
 
 # ------------------------------------------------------------------ download switches ("later" / "Download now")

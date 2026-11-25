@@ -35,8 +35,16 @@ function line(r: ImportRun): string {
     case "uploading": case "fetching":
       return [`${from} · ${mb(r.got)} of ${mb(r.size)}`, r.mbps && `${r.mbps} MB/s`, left(r.leftS)].filter(Boolean).join(" · ");
     case "unpacking": return r.total ? `Unpacking pictures · ${r.done} of ${r.total}` : "Unpacking…";
-    case "done":
-      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}${r.res_total ? ` (pictures first, newest first) · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}${resPace(r)}` : ""}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
+    case "done": {
+      const resNote = r.results === "copying"
+        ? r.res_bundle === "downloading"
+          ? ` · downloading your results bundle from ${cloud}${r.res_bundle_size ? ` · ${mb(r.res_bundle_got ?? 0)} of ${mb(r.res_bundle_size)}` : ""}`
+          : r.res_bundle === "unpacking"
+            ? ` · unpacking your results bundle${r.res_total ? ` · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}` : "…"}`
+            : ` · your results are still coming from ${cloud}${r.res_total ? ` (pictures first, newest first) · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}${resPace(r)}` : ""}`
+        : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "";
+      return (r.result ? importNote(r.result) : "Done") + resNote;
+    }
     case "error": return r.error || "Couldn't import that file";
     default: return "";
   }

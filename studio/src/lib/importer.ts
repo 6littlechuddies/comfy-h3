@@ -16,6 +16,7 @@ export type ImportRun = {
   error?: string;
   /** results coming back from the drive: how many there are, how many are here */
   res_total?: number; res_have?: number; res_start?: number; res_at?: number; res_own?: boolean | null;
+  res_bundle?: "downloading" | "unpacking" | ""; res_bundle_got?: number; res_bundle_size?: number;
   result?: ImportResult;
   /** which drive the backups use: "Google Drive" or "Proton Drive" */
   cloud?: string;
