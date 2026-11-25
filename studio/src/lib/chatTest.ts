@@ -205,7 +205,8 @@ export async function testAndFix(c0: Character, o: { onStep?: (t: string) => voi
     const fb = feedbackOf(best);
     const flags = [...best.turns, ...best.cold, ...(best.extras ?? []).flatMap((x) => x.turns)].filter((t) => t.flag);
     const personaToo = !!best.fixes?.persona || (best.judge && (best.judge.realism < 3 || best.judge.consistency < 3)) || best.checks.some((k) => !k.ok && ["facts", "ai", "name"].includes(k.key))
-      || flags.filter((t) => ["out_of_character", "weird"].includes(t.flag!.label)).length >= 3;
+      || flags.filter((t) => ["out_of_character", "weird"].includes(t.flag!.label)).length >= 3
+      || !before.site?.deepAt; // a quick profile that failed gets its deep persona now
     try {
       if (personaToo) { o.onStep?.(`Fix ${r + 1}: rewriting her persona from the test…`); const { deepProfile } = await import("./siteAuto"); await deepProfile(before, { onStep: o.onStep, feedback: fb }); }
       o.onStep?.(`Fix ${r + 1}: rewriting her chat lines from the test…`);

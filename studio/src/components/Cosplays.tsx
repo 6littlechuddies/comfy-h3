@@ -93,6 +93,7 @@ function CosplaysPanel() {
             {looking ? "Looking through your results…" : groups.length ? `${groups.length} characters in ${groups.reduce((a, g) => a + g.pics.length, 0).toLocaleString()} pictures` : "Every cosplay in your results, made into characters for your site"}
           </p>
         </div>
+        <DeepToggle />
         <label className="flex items-center gap-1.5 text-[12px] text-muted" title="How many characters are made at the same time — change it while it runs. The writing and chat tests are DeepSeek calls, so 8–16 is fine; if DeepSeek starts answering 429 (too many requests) or the timer goes red on writer steps, lower it. On the local writer (no DeepSeek key) keep it at 1">At once
           <DropSelect value={String(atOnce)} onChange={(e) => setAtOnce(Number(e.target.value))} className="inset h-10 border px-2 text-ink">{[1, 2, 4, 6, 8, 12, 16, 24].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
         {running
@@ -245,4 +246,18 @@ function MakeOne({ g }: { g: CosGroup }) {
   const running = useCosplays((s) => s.running);
   return <button disabled={running} onClick={() => void runCosplays({ only: g.key })} title="Make, name, write and chat-test just this one"
     className="press chip-raised h-7 px-2.5 text-[12px] disabled:opacity-40">Make her</button>;
+}
+
+/** quick profiles skip the deep persona (5–7 long writer passes, ~10 min each character): her chat lines and chat test still
+ *  run, and a character the test fails gets the deep persona written then, by Test & fix */
+function DeepToggle() {
+  const [on, setOn] = useState(true);
+  useEffect(() => { void import("../lib/siteAuto").then((m) => setOn(m.deepOn())); }, []);
+  const flip = () => void import("../lib/siteAuto").then((m) => { m.setDeepOn(!on); setOn(!on); });
+  return (
+    <button onClick={flip} title={on ? "Full profiles: the deep persona is written for each (her life between chats, how she reacts, a critic) — best chats, about 10 minutes more per character. Click for quick profiles" : "Quick profiles: no deep persona up front — chat lines and the chat test still run, and Test & fix writes the deep persona for anyone who fails. Click for full profiles"}
+      className={cx("press flex h-10 items-center gap-2 border px-3 text-[12.5px]", on ? "border-line text-muted hover:text-ink" : "border-accent/60 text-accent")}>
+      <span className={cx("h-2.5 w-2.5 border", on ? "border-good bg-good" : "border-accent")} /> {on ? "Full profiles" : "Quick profiles"}
+    </button>
+  );
 }

@@ -333,14 +333,16 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
     // (the deep profile waits until the retry has filled the rest)
     const r = await fillProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { ...o, all: false, again: true, deep: false });
     if (wrotePersona && (o.deep ?? deepOn())) await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }).catch((e) => o.onStep?.(`Deep profile skipped: ${(e as Error).message}`));
-    if (wrotePersona && (o.deep ?? deepOn())) await import("./chatLines").then((m) => m.writeChatLines(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep })).catch((e) => o.onStep?.(`Chat lines skipped: ${(e as Error).message}`));
+    if (wrotePersona) await import("./chatLines").then((m) => m.writeChatLines(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep })).catch((e) => o.onStep?.(`Chat lines skipped: ${(e as Error).message}`));
     return r;
   }
-  // the deep profile (on by default): when this pass wrote her persona
-  if (wrotePersona && (o.deep ?? deepOn())) {
-    try { await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
-    catch (e) { o.onStep?.(`Deep profile skipped: ${(e as Error).message}`); }
-    // Chat v4.1: sample chats, voice examples and her hot lines, from the finished profile
+  // the deep profile (on by default; off = quick profiles, several minutes faster each): when this pass wrote her persona
+  if (wrotePersona) {
+    if (o.deep ?? deepOn()) {
+      try { await deepProfile(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
+      catch (e) { o.onStep?.(`Deep profile skipped: ${(e as Error).message}`); }
+    }
+    // Chat v4.1: sample chats, voice examples and her hot lines, from the finished profile (quick or deep)
     try { const { writeChatLines } = await import("./chatLines"); await writeChatLines(useCharacters.getState().list.find((x) => x.id === c.id) ?? c, { onStep: o.onStep }); }
     catch (e) { o.onStep?.(`Chat lines skipped: ${(e as Error).message}`); }
   }
