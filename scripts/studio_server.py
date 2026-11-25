@@ -3131,7 +3131,7 @@ async def judge_ai(req):
         return web.json_response({"deepseek": bool(_api_key("DEEPSEEK_API_KEY")), "openrouter": bool(_api_key("OPENROUTER_API_KEY"))})
     b = await req.json()
     msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or []) if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
-    prov = str(b.get("provider") or "deepseek-pro")
+    prov = str(b.get("provider") or "deepseek")
     try:
         if prov == "openrouter": text = await _openrouter(msgs, str(b.get("model") or "").strip() or "deepseek/deepseek-chat", max_tokens=int(b.get("max_tokens") or 3000))
         else: text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 3000), temperature=0.3, top_p=0.9, model="deepseek-v4-pro" if prov == "deepseek-pro" else "")

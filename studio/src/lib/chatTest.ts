@@ -15,7 +15,7 @@ import type { TestChat } from "./testChats";
  *  Candy reference, and how many fix rounds. Kept on the rental (and in backups) as state "chat_tests". */
 export type JudgeProvider = "deepseek-pro" | "deepseek" | "openrouter";
 type Setup = { chats: TestChat[]; perTest: number; judge: JudgeProvider; orModel: string; reference: string; rounds: number };
-const DEFAULT_SETUP: Setup = { chats: [], perTest: 3, judge: "deepseek-pro", orModel: "", reference: "", rounds: 2 };
+const DEFAULT_SETUP: Setup = { chats: [], perTest: 3, judge: "deepseek", orModel: "", reference: "", rounds: 2 };
 export const useChatTests = create<Setup & { loaded: boolean }>(() => ({ ...DEFAULT_SETUP, loaded: false }));
 export async function loadChatTests() {
   if (useChatTests.getState().loaded) return;
