@@ -242,8 +242,18 @@ export async function fillProfile(c: Character, o: { all?: boolean; onStep?: (t:
   // a cosplay: what the source says about the character (AniList, as Batch → Cosplay reads it) — and its adult check
   const canon = /^Cosplay of /.test(c.source ?? "") ? await (await import("./cosplay")).canonFacts(c.source!).catch((e: Error) => { if (/^Stopped:/.test(e.message)) throw e; return ""; }) : "";
   const isCos = /^Cosplay of /.test(c.source ?? "");
+  const existingIdentity = o.all && !isCos
+    ? [
+        site.tagline && `Tagline: ${stripAges(site.tagline)}`,
+        site.bio && `Bio: ${stripAges(site.bio)}`,
+        site.personality && `Personality: ${stripAges(site.personality)}`,
+        site.backstory && `Backstory: ${stripAges(site.backstory).slice(0, 400)}`,
+        site.tags?.length && `Tags: ${site.tags.join(", ")}`,
+      ].filter(Boolean).join("\n")
+    : "";
   const notes = [
     site.direction?.trim() && `OWNER'S DIRECTION (build the whole profile on this; it wins over guesses): ${site.direction.trim()}`,
+    existingIdentity && `EXISTING CHARACTER IDENTITY TO PRESERVE (keep her core archetype, personality, vibe, and background from this existing profile — e.g. nerdy girl, girl-next-door, goth, barista — while upgrading her opener hook, texting voice, and chat quality):\n${existingIdentity}`,
     stripAges(describe(c)), canonNote(c.source) || (c.source && `Where she comes from: ${c.source} (inspired by it — never named after it or claiming to be that character)`),
     canon && `WHAT THE SOURCE SAYS ABOUT THE CHARACTER SHE IS INSPIRED BY (match her exact personality, dominance, intensity, status and genre atmosphere — none of its copyrighted names, places, people or events go into her profile):\n${stripAges(canon).split(/(?<=[.!?])\s+/).filter((x) => !minorWords(x).length).join(" ").slice(0, 1500)}`, c.block && `Full look: ${stripAges(c.block)}`, c.frame?.prompt && !minorWords(c.frame.prompt).length && `The prompt their look was made from: ${stripAges(c.frame.prompt).slice(0, 600)}`, c.personality && `Personality notes: ${c.personality}`, c.details && `Details: ${c.details}`, `Style: ${c.style}`,
     uniq.length && `PICTURES MADE OF THEM (${uniq.length}):\n${uniq.map((p) => `- ${stripAges(p)}`).join("\n")}`,
