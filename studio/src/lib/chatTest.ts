@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import { loadState, saveState } from "./api";
 import { describe, useCharacters, type Character } from "./characters";
-import { analyze, autoTag, COLD, guardHits, SCRIPT, scoreOf, serverNotes, splitReply, type Card, type Check, type JudgeScores, type SimState, type Turn } from "./chatScore";
+import { analyze, autoTag, CHECKS_V, COLD, guardHits, SCRIPT, scoreOf, serverNotes, splitReply, type Card, type Check, type JudgeScores, type SimState, type Turn } from "./chatScore";
 import { looseJson } from "./looseJson";
 import { activePack, fillTemplate, packText, usePacks } from "./packs";
 import type { TestChat } from "./testChats";
@@ -50,7 +50,28 @@ export type ChatTestResult = {
   /** real users' chats she was tested with */ extras?: { title: string; tags: string[]; turns: Turn[] }[];
   /** the share of her replies the reviewer found realistic and in context */ realism?: number; reviewer?: string;
   /** what her card was when she was tested (cardSig): a card that hasn't changed isn't tested again */ sig?: string;
+  /** which version of the checks scored it (CHECKS_V) */ v?: number;
 };
+
+/** a saved test scored again with today's checks — no calls: the same replies, the same reviewer scores and flags.
+ *  null when it's already scored with them */
+export function rescore(c: Character): ChatTestResult | null {
+  const r = c.site?.chatTest;
+  if (!r || (r.v ?? 1) >= CHECKS_V || !r.turns?.length) return null;
+  const { checks, stats } = analyze(r.turns, r.cold ?? [], cardOf(c), (r.extras ?? []).map((x) => x.turns));
+  const { score, pass, hardFails } = scoreOf(checks, r.judge, r.realism);
+  return { ...r, checks, stats, score, pass, hardFails, v: CHECKS_V };
+}
+/** every character's saved test scored again with today's checks; returns how many now pass */
+export function rescoreAll(): number {
+  let passed = 0;
+  for (const c of useCharacters.getState().list) {
+    const r = rescore(c); if (!r) continue;
+    if (r.pass && !c.site?.chatTest?.pass) passed++;
+    useCharacters.getState().save({ ...c, site: { ...c.site, chatTest: r } });
+  }
+  return passed;
+}
 
 const HIS_NAME = "Ezra";
 
@@ -190,7 +211,7 @@ export async function testChat(c0: Character, o: { onStep?: (t: string) => void;
   const res: ChatTestResult = { at: Date.now(), score, pass, hardFails, checks, stats, judge: sc,
     worst: Array.isArray(j.worst) ? j.worst.slice(0, 4).map((w: any) => ({ turn: w.turn, quote: String(w.quote ?? ""), why: String(w.why ?? "") })) : undefined,
     fixes: j.fixes && typeof j.fixes === "object" ? Object.fromEntries(Object.entries(j.fixes).filter(([, v]) => typeof v === "string" && v.trim())) as ChatTestResult["fixes"] : undefined,
-    verdict: typeof j.verdict === "string" ? j.verdict : undefined, turns, cold, extras, realism, reviewer, prompt: sys.site ? "site" : "stand-in", note: note || undefined, sig: cardSig(c) };
+    verdict: typeof j.verdict === "string" ? j.verdict : undefined, turns, cold, extras, realism, reviewer, prompt: sys.site ? "site" : "stand-in", note: note || undefined, sig: cardSig(c), v: CHECKS_V };
   if (o.save !== false) { const now = cur(c.id); if (now) useCharacters.getState().save({ ...now, site: { ...now.site, chatTest: { ...res, rounds: now.site?.chatTest?.rounds } } }); }
   return res;
 }
@@ -227,7 +248,7 @@ export async function testAndFix(c0: Character, o: { onStep?: (t: string) => voi
     const better = next.score > best.score || (next.pass && !best.pass);
     rounds.push({ score: next.score, kept: better });
     if (better) { best = next; rounds.forEach((x, i) => (x.kept = i === rounds.length - 1)); }
-    else { const now = cur(c0.id)!; useCharacters.getState().save({ ...now, site: { ...now.site, ...snap } }); } // worse: her previous card back
+    else { const now = cur(c0.id)!; useCharacters.getState().save({ ...now, site: { ...now.site, ...snap } }); break; } // worse: her previous card back, and no more rounds (another rewrite of the same card rarely does better — it was costing a full test each time)
   }
   const now = cur(c0.id);
   if (now) useCharacters.getState().save({ ...now, site: { ...now.site, chatTest: { ...best, rounds } } });

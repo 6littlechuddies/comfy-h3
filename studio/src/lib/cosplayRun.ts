@@ -20,7 +20,11 @@ export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: R
   atOnce: (() => { try { return Math.max(1, Math.min(24, Number(localStorage.getItem("h3.cos.atOnce")) || 8)); } catch { return 8; } })(),
 }));
 export function setAtOnce(n: number) { useCosplays.setState({ atOnce: n }); try { localStorage.setItem("h3.cos.atOnce", String(n)); } catch { /* */ } }
-export const openCosplays = () => useCosplays.setState({ open: true });
+export const openCosplays = () => {
+  useCosplays.setState({ open: true });
+  // saved chat tests scored with older checks: scored again with today's (free — no calls)
+  void import("./chatTest").then(({ rescoreAll }) => { const n = rescoreAll(); if (n) say("_", `${n} that had failed pass with the fixed checks (scored again, no new calls)`); });
+};
 const say = (key: string, t: string | null) => useCosplays.setState((s) => {
   const st = { ...s.status }, at = { ...s.statusAt };
   if (t) { if (t !== s.status[key]) at[key] = Date.now(); st[key] = t; } else { delete st[key]; delete at[key]; }
@@ -46,6 +50,16 @@ export async function debugReport(): Promise<string> {
     "",
     `WRITER JOBS THE BROWSER IS WAITING ON (${jobs.length})`,
     ...jobs.slice(0, 40).map((j) => `- ${j.label} · ${j.status} · ${Math.round((now - (j.startedAt ?? j.queuedAt)) / 1000)} s`),
+    "",
+    "WHY THEY FAILED THE CHAT TEST",
+    ...s.groups.flatMap((g) => {
+      const t = charFor(g)?.site?.chatTest;
+      if (!t || t.pass) return [];
+      const flags: Record<string, number> = {};
+      for (const x of [...t.turns, ...(t.cold ?? []), ...(t.extras ?? []).flatMap((e) => e.turns)]) if (x.flag) flags[x.flag.label] = (flags[x.flag.label] ?? 0) + 1;
+      return [`- ${g.name}: ${t.score}/100 · hard fails: ${t.hardFails.join(", ") || "none"} · reviewer ${t.judge ? Object.entries(t.judge).map(([k, v]) => `${k} ${v}`).join(" ") : "didn't run"} · realistic ${t.realism != null ? Math.round(t.realism * 100) + "%" : "?"} · flags ${JSON.stringify(flags)} · rounds ${(t.rounds ?? []).map((r) => r.score).join("→")}${t.note ? ` · ${t.note}` : ""}`,
+        ...t.checks.filter((k) => !k.ok).map((k) => `    failed: ${k.label}${k.detail ? ` — ${k.detail.slice(0, 220)}` : ""}`)];
+    }),
     "",
     "RENTAL: DEEPSEEK CALLS",
     JSON.stringify(server, null, 1),
@@ -173,8 +187,10 @@ async function doGroup(g: CosGroup, o: { again?: boolean; fix?: boolean }, alias
     else {
       if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await untilStop(writeChatLines(now, { onStep: (t) => say(g.key, t) })); }
       const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-      const { cardSig, testAndFix } = await import("./chatTest");
-      const last = fresh.site?.chatTest;
+      const { cardSig, rescore, testAndFix } = await import("./chatTest");
+      const again = rescore(fresh); // scored with older checks: score it again first (free)
+      if (again) useCharacters.getState().save({ ...fresh, site: { ...fresh.site, chatTest: again } });
+      const last = again ?? fresh.site?.chatTest;
       // already failed with this exact card: testing again would spend the same calls on the same answer (Fix her forces it)
       const same = !!last && !last.pass && last.sig === cardSig(fresh) && !o.fix;
       if (!last?.pass && !same) await untilStop(testAndFix(fresh, { onStep: (t) => say(g.key, t) }));
