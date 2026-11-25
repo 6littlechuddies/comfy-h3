@@ -3033,9 +3033,9 @@ _HTTP: list[aiohttp.ClientSession] = []
 
 
 def _http() -> aiohttp.ClientSession:
-    """one shared connection pool for DeepSeek / OpenRouter so 50+ calls per character reuse TLS sockets"""
+    """one shared connection pool for DeepSeek / OpenRouter so 100+ concurrent calls reuse TLS sockets"""
     if not _HTTP or _HTTP[0].closed:
-        _HTTP[:] = [aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=64))]
+        _HTTP[:] = [aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=128))]
     return _HTTP[0]
 
 
@@ -3085,19 +3085,25 @@ async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float =
     raise RuntimeError(last)
 
 
+async def _chatsim_run(b: dict) -> dict:
+    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or [])
+            if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
+    if not msgs: raise ValueError("no messages")
+    text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 400), temperature=float(b.get("temperature", 1.0)),
+                              top_p=float(b.get("top_p", 0.95)), extra={"frequency_penalty": float(b.get("frequency_penalty", 0.3)), "presence_penalty": float(b.get("presence_penalty", 0.2))})
+    return {"text": text}
+
+
 async def chatsim(req):
     """/studio-api/chatsim — one reply in a test chat, the way the site makes it (DEV-PROMPT §1: deepseek-flash, temperature 1.0,
     top_p 0.95, frequency 0.3, presence 0.2, 400 tokens, no thinking). Body: {messages: [{role, content}…]}."""
     b = await req.json()
-    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or [])
-            if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
-    if not msgs: raise web.HTTPBadRequest(text="no messages")
     try:
-        text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 400), temperature=float(b.get("temperature", 1.0)),
-                                  top_p=float(b.get("top_p", 0.95)), extra={"frequency_penalty": float(b.get("frequency_penalty", 0.3)), "presence_penalty": float(b.get("presence_penalty", 0.2))})
+        return web.json_response(await _chatsim_run(b))
+    except ValueError as e:
+        raise web.HTTPBadRequest(text=str(e))
     except RuntimeError as e:
         return web.json_response({"error": str(e)}, status=502)
-    return web.json_response({"text": text})
 
 
 async def _openrouter(messages: list, model: str, max_tokens: int = 3000, temperature: float = 0.3, key: str = "") -> str:
@@ -3124,20 +3130,27 @@ async def _openrouter(messages: list, model: str, max_tokens: int = 3000, temper
     raise RuntimeError(last.replace(k, "‹hidden›"))
 
 
+async def _judge_run(b: dict) -> dict:
+    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or []) if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
+    if not msgs: raise ValueError("no messages")
+    prov = str(b.get("provider") or "deepseek")
+    if prov == "openrouter": text = await _openrouter(msgs, str(b.get("model") or "").strip() or "deepseek/deepseek-chat", max_tokens=int(b.get("max_tokens") or 3000))
+    else: text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 3000), temperature=0.3, top_p=0.9, model="deepseek-v4-pro" if prov == "deepseek-pro" else "")
+    return {"text": text}
+
+
 async def judge_ai(req):
     """/studio-api/judge — the chat test's reviewer on a stronger cloud model. POST {messages, provider: "deepseek-pro" |
     "deepseek" | "openrouter", model}. GET: what's set up. POST {key} to /studio-api/judge/key keeps an OpenRouter key."""
     if req.method == "GET":
         return web.json_response({"deepseek": bool(_api_key("DEEPSEEK_API_KEY")), "openrouter": bool(_api_key("OPENROUTER_API_KEY"))})
     b = await req.json()
-    msgs = [{"role": m.get("role"), "content": str(m.get("content") or "")} for m in (b.get("messages") or []) if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")]
-    prov = str(b.get("provider") or "deepseek")
     try:
-        if prov == "openrouter": text = await _openrouter(msgs, str(b.get("model") or "").strip() or "deepseek/deepseek-chat", max_tokens=int(b.get("max_tokens") or 3000))
-        else: text, _ = await _deepseek(msgs, max_tokens=int(b.get("max_tokens") or 3000), temperature=0.3, top_p=0.9, model="deepseek-v4-pro" if prov == "deepseek-pro" else "")
+        return web.json_response(await _judge_run(b))
+    except ValueError as e:
+        raise web.HTTPBadRequest(text=str(e))
     except RuntimeError as e:
         return web.json_response({"error": str(e)}, status=502)
-    return web.json_response({"text": text})
 
 
 async def judge_key(req):
@@ -3259,7 +3272,7 @@ async def deepseek_graph(request: web.Request) -> web.Response:
     return await _deepseek_graph_run(g, str(b.get("label") or ""))
 
 
-async def _deepseek_graph_run(g: dict, tag: str = "") -> web.Response:
+async def _deepseek_graph_exec(g: dict, tag: str = "") -> tuple[int, dict]:
     cache: dict = {}
 
     async def val(x):
@@ -3316,10 +3329,101 @@ async def _deepseek_graph_run(g: dict, tag: str = "") -> web.Response:
                 title = (n.get("_meta") or {}).get("title") or nid
                 texts[title] = str(await val(n["inputs"]["source"]))
     except _Unsupported as e:
-        return web.json_response({"error": "unsupported", "node": str(e)}, status=422)
+        return 422, {"error": "unsupported", "node": str(e)}
     except Exception as e:  # noqa: BLE001
-        return web.json_response({"error": _redact(str(e))[:500]}, status=502)
-    return web.json_response({"texts": texts})
+        return 502, {"error": _redact(str(e))[:500]}
+    return 200, {"texts": texts}
+
+
+async def _deepseek_graph_run(g: dict, tag: str = "") -> web.Response:
+    st, data = await _deepseek_graph_exec(g, tag)
+    return web.json_response(data, status=st)
+
+
+async def deepseek_ws(req: web.Request) -> web.WebSocketResponse:
+    """/studio-api/ds-ws — WebSocket multiplexer for concurrent DeepSeek writer/chat/judge calls,
+    bypassing the browser's 6-connection HTTP/1.1 limit. Request frames: {id, kind: "chat"|"writer"|"cancel", payload}.
+    Response frames: {id, ok: true, data} or {id, ok: false, error, status}."""
+    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=0)
+    await ws.prepare(req)
+    tasks: dict[str, asyncio.Task] = {}
+    send_lock = asyncio.Lock()
+
+    async def send_frame(frame: dict):
+        if ws.closed: return
+        async with send_lock:
+            if not ws.closed:
+                try: await ws.send_json(frame)
+                except Exception: pass  # noqa: BLE001 — disconnect handled in receive loop
+
+    async def handle_one(rid: str, kind: str, payload: dict):
+        try:
+            if kind == "chat":
+                if payload.get("mode") == "judge" or "provider" in payload:
+                    data = await _judge_run(payload)
+                else:
+                    data = await _chatsim_run(payload)
+                await send_frame({"id": rid, "ok": True, "data": data})
+            elif kind == "judge":
+                data = await _judge_run(payload)
+                await send_frame({"id": rid, "ok": True, "data": data})
+            elif kind == "writer":
+                if not _api_key("DEEPSEEK_API_KEY"):
+                    await send_frame({"id": rid, "ok": False, "error": "no DeepSeek key", "status": 400})
+                    return
+                g = payload.get("graph") or {}
+                if not isinstance(g, dict):
+                    await send_frame({"id": rid, "ok": False, "error": "bad graph", "status": 400})
+                    return
+                bad = _ds_unsupported(g)
+                if bad:
+                    await send_frame({"id": rid, "ok": False, "error": "unsupported", "status": 422, "data": {"error": "unsupported", "node": bad}})
+                    return
+                st, data = await _deepseek_graph_exec(g, str(payload.get("label") or ""))
+                if st == 200:
+                    await send_frame({"id": rid, "ok": True, "data": data})
+                else:
+                    await send_frame({"id": rid, "ok": False, "error": str(data.get("error") or f"error {st}"), "status": st, "data": data})
+            else:
+                await send_frame({"id": rid, "ok": False, "error": f"unknown kind: {kind}", "status": 400})
+        except asyncio.CancelledError:
+            raise
+        except ValueError as e:
+            await send_frame({"id": rid, "ok": False, "error": str(e), "status": 400})
+        except RuntimeError as e:
+            await send_frame({"id": rid, "ok": False, "error": str(e), "status": 502})
+        except Exception as e:  # noqa: BLE001
+            await send_frame({"id": rid, "ok": False, "error": _redact(str(e))[:500], "status": 500})
+        finally:
+            if tasks.get(rid) is asyncio.current_task():
+                tasks.pop(rid, None)
+
+    try:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                try: req_msg = json.loads(msg.data)
+                except ValueError: continue
+                if not isinstance(req_msg, dict): continue
+                rid = str(req_msg.get("id") or "")
+                kind = str(req_msg.get("kind") or "")
+                payload = req_msg.get("payload") if isinstance(req_msg.get("payload"), dict) else {}
+                if kind == "cancel":
+                    t = tasks.pop(rid, None)
+                    if t and not t.done(): t.cancel()
+                    continue
+                if not rid: continue
+                prev = tasks.pop(rid, None)
+                if prev and not prev.done(): prev.cancel()
+                tasks[rid] = asyncio.create_task(handle_one(rid, kind, payload))
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                break
+    finally:
+        for t in list(tasks.values()):
+            if not t.done(): t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+        tasks.clear()
+    return ws
 
 
 async def deepseek_log(request: web.Request) -> web.Response:
@@ -7270,7 +7374,7 @@ def main():
     app.add_routes([
         web.get("/studio-api/grok/status", grok_status), web.post("/studio-api/grok/ask", grok_ask), web.get("/studio-api/grok/result/{id}", grok_result), web.delete("/studio-api/grok/result/{id}", grok_cancel),
         web.get("/grok-relay/next", relay_next), web.post("/grok-relay/answer", relay_answer), web.get("/grok-relay/h3-grok.user.js", relay_script), web.get("/grok-relay/img/{id}/{n}", relay_img),
-        web.get("/studio-api/health", health), web.get("/studio-api/debug-report", debug_report), web.get("/studio-api/ws", relay_ws),
+        web.get("/studio-api/health", health), web.get("/studio-api/debug-report", debug_report), web.get("/studio-api/ws", relay_ws), web.get("/studio-api/ds-ws", deepseek_ws),
         web.route("*", "/studio-api/site/config", site_config), web.get("/studio-api/site/test", site_test), web.get("/studio-api/site/pull", site_pull),
         web.post("/studio-api/site/push", site_push), web.get("/studio-api/site/push/{id}", site_push_status), web.post("/studio-api/chatsim", chatsim), web.route("*", "/studio-api/judge", judge_ai), web.post("/studio-api/judge/key", judge_key),
         web.get("/studio-api/state/{name}", get_state), web.put("/studio-api/state/{name}", put_state),

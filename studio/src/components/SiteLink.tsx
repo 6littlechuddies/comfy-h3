@@ -505,7 +505,7 @@ function Characters({ connected }: { connected: boolean }) {
   const [loops, setLoops] = useState(false);
   const [naming, setNaming] = useState(false);
   const [concurrency, setConcurrency] = useState<number>(() => {
-    try { const n = Number(localStorage.getItem("h3.site.concurrency")); return [4, 6, 8, 12].includes(n) ? n : 8; } catch { return 8; }
+    try { const n = Number(localStorage.getItem("h3.site.concurrency")); return [4, 6, 8, 12, 16, 24].includes(n) ? n : 8; } catch { return 8; }
   });
   const pickConcurrency = (n: number) => { setConcurrency(n); try { localStorage.setItem("h3.site.concurrency", String(n)); } catch { /* */ } };
   const runPool = async <T,>(items: T[], limit: number, fn: (x: T) => Promise<void>) => {
@@ -636,7 +636,7 @@ function Characters({ connected }: { connected: boolean }) {
         <DeepToggle />
         <label className="flex items-center gap-1.5 text-[12.5px] text-muted" title="How many characters to write or rewrite & test in parallel">At once
           <DropSelect value={String(concurrency)} onChange={(e) => pickConcurrency(Number(e.target.value))} aria-label="Characters at once" className="h-8 border border-line bg-panel px-2 text-[12.5px] text-ink">
-            {[4, 6, 8, 12].map((n) => <option key={n} value={n}>{n}</option>)}
+            {[4, 6, 8, 12, 16, 24].map((n) => <option key={n} value={n}>{n}</option>)}
           </DropSelect>
         </label>
         <Btn onClick={pullAll} disabled={Object.keys(busy).length > 0} why="Wait for the current work to finish" title="Take the names, ages and profiles your site has back into the Studio (ticked ones, or all you've sent) — for when the Studio lost changes it made"><Icon name="down" size={14} /> Pull from site</Btn>

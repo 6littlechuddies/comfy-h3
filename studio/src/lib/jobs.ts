@@ -148,7 +148,7 @@ export const useJobs = create<JobState>((set, get) => ({
   cancel: (id) => {
     const job = get().jobs.find((j) => j.id === id);
     if (!job) return;
-    if (id.startsWith("ds-")) { /* DeepSeek's answer is ignored when it comes */ }
+    if (id.startsWith("ds-")) { void import("./deepseek").then((m) => m.dsCancel(id)); }
     else if (job.status === "running") interrupt(id);
     else deleteQueued([id]);
     patch(id, { status: "cancelled", endedAt: Date.now() });
@@ -173,7 +173,6 @@ export const useJobs = create<JobState>((set, get) => ({
 
 /** each job's graph, so a waiting one can be moved to the front */
 const GRAPHS = new Map<string, ApiGraph>();
-type DsAnswer = { texts?: Record<string, string>; error?: string; node?: string };
 /** a writer job answered by DeepSeek: shows in the queue like any job, done when DeepSeek answers (null = not one it can do) */
 async function runOnDeepseek(tab: Tab, label: string, graph: ApiGraph, etaKey: string, meta: Record<string, unknown>): Promise<Job | null> {
   const id = `ds-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -183,25 +182,10 @@ async function runOnDeepseek(tab: Tab, label: string, graph: ApiGraph, etaKey: s
   const job: Job = { id, tab, label: label.replace(/ · (27B|9B)$/, "") + (/ · (DeepSeek|Grok)$/.test(label) ? "" : " · DeepSeek"), etaKey, status: "running", value: 0, max: 0, outputs: [], texts: {}, queuedAt: now, startedAt: now,
     etaMs: useJobs.getState().eta(`ds:${etaKey}`), meta: { ...meta, deepseek: true }, titles, classes, doneNodes: 0, totalNodes: Object.keys(graph).length };
   collected.add(id);
-  // asked for as a job and then checked every 2 s: a request held open for the whole answer took one of the browser's
-  // 6 connections to the rental, so with 8+ characters at once every other call (and the thumbnails) queued behind them
-  const go = fetch("/studio-api/deepseek/graph", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ graph, async: true, label }) })
-    .then(async (r) => ({ status: r.status, d: await r.json().catch(() => ({})) as DsAnswer & { job?: string } }))
-    .then(async (first) => {
-      if (first.status !== 200 || !first.d.job) return first; // an old rental answers in one go; 422 / errors as before
-      for (let miss = 0; ;) {
-        await new Promise((r) => setTimeout(r, 2000));
-        if (find(id)?.status === "cancelled") return { status: 499, d: { error: "cancelled" } as DsAnswer };
-        const r = await fetch(`/studio-api/deepseek/graph?job=${first.d.job}`).catch(() => null);
-        if (!r) { if (++miss > 30) return { status: 0, d: { error: "Lost the rental while DeepSeek was writing" } as DsAnswer }; continue; }
-        miss = 0;
-        const d = await r.json().catch(() => ({})) as DsAnswer & { state?: string };
-        if (d.state === "running") continue;
-        if (d.state === "gone") return { status: 0, d: { error: "The rental restarted while DeepSeek was writing — run it again" } as DsAnswer };
-        return { status: r.status, d };
-      }
-    })
-    .catch((e) => ({ status: 0, d: { error: `Couldn't reach the rental: ${(e as Error).message}` } as DsAnswer }));
+  // Multiplexed over the /studio-api/ds-ws WebSocket (falls back silently to HTTP async+poll if WS is unavailable)
+  const go = import("./deepseek").then(({ dsWriterGraph }) =>
+    dsWriterGraph({ graph, label }, { id, isCancelled: () => find(id)?.status === "cancelled" })
+  );
   // a graph with a part DeepSeek can't do answers at once (422): that one goes to ComfyUI after all
   const first = await Promise.race([go, new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
   if (first && first.status === 422) { collected.delete(id); return null; }

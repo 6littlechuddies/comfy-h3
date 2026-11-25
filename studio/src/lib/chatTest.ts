@@ -111,10 +111,8 @@ async function systemFor(c: Character): Promise<{ text: string; site: boolean }>
 }
 
 async function reply(messages: { role: string; content: string }[]): Promise<string> {
-  const r = await fetch("/studio-api/chatsim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages }) });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok || d.error) throw new Error(d.error || `The rental answered ${r.status}`);
-  return String(d.text ?? "");
+  const { dsChatSim } = await import("./deepseek");
+  return dsChatSim({ messages });
 }
 
 /** one scripted chat, turn by turn, with the site's notes and repeat guard (regenerated up to twice, fewest hits kept) */
@@ -194,10 +192,9 @@ export async function testChat(c0: Character, o: { onStep?: (t: string) => void;
     if (!pack) throw new Error("No “Chat test · reviewer” prompt file");
     const system = await packText(pack.id);
     const user = fillTemplate(pack.template || usePacks.getState().templates.chatjudge || "", { card: cardText, reference: setup.reference.trim() || "(none given)", transcript, checks: checksText });
-    const r = await fetch("/studio-api/judge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: setup.judge, model: setup.orModel, max_tokens: 4000, messages: [{ role: "system", content: system }, { role: "user", content: user }] }) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.error) throw new Error(d.error || `The rental answered ${r.status}`);
-    j = looseJson<any>(String(d.text ?? "")) ?? {};
+    const { dsJudge } = await import("./deepseek");
+    const text = await dsJudge({ provider: setup.judge, model: setup.orModel, max_tokens: 4000, messages: [{ role: "system", content: system }, { role: "user", content: user }] });
+    j = looseJson<any>(text) ?? {};
     if (!j.scores) throw new Error("its answer had no scores");
   } catch (e) { note = `The reviewer (${reviewer}) didn't run: ${(e as Error).message.slice(0, 160)} — scored on the checks alone`; }
   const sc = j.scores && typeof j.scores === "object" ? Object.fromEntries(["realism", "voice", "hooks", "heat", "consistency"].map((k) => [k, Math.max(1, Math.min(5, Number(j.scores[k]) || 0))])) as JudgeScores : undefined;
