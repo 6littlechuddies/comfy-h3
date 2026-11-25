@@ -248,3 +248,62 @@ is not in the repo.
   and picture prompts. Filter inputs before calling `runWriter`.
 - The Factory hover loop has to be H.264, faststart, 540 wide, and the card's exact shape (see `FACTORY-API.md`).
 - Rentals have no Node. TypeScript is only checked by GitHub's build there, so check locally before pushing.
+
+## 10. What the owner wants, and what keeps going wrong
+
+The previous agent's read after weeks of work. It is not in the specs, and it matters as much as they do.
+
+**What they're trying to get done (in their order):**
+1. **NSFW chat that feels like a real woman**, on par with Candy.ai: no walls, no "tell me your name", no loops. This is
+   the product. Everything else feeds it.
+2. **Many more characters, fast.** Cosplays in bulk from results they already have, then photo packs and intro pictures
+   for each, all with as little hand work as possible.
+3. **Mass site testing.** Send dozens of drafts at once and trust that what goes up is good.
+
+**How they like tools to work:**
+- **One button, then a bulk review screen.** The Cosplays screen is the model: click a picture to make it her main,
+  filter by "failed test", Fix her / Redo per card.
+- **Speed and no waste.** They want things uncapped ("as much as possible"), and they hate paying for calls that redo
+  finished work. Persist progress. Redo something only when it's explicitly wrong (for example a cosplay name that
+  doesn't match the series). Skip unchanged work: `cardSig`, `CHECKS_V`, `rescore`.
+- **Visible progress, always.** Every long step needs a live label, a timer and a Stop that stops at once (`untilStop`).
+  Most of their bug reports are "it's stuck on this": a screenshot of a step that gave no sign of life.
+
+**Recurring failure patterns (check these first when they report something):**
+- **A step that hangs with no timeout,** or a Stop that only acts between items.
+- **Concurrency limits nobody intended:**
+  - the browser's 6 connections per site (now avoided for DeepSeek writer jobs, but not for other long requests);
+  - a picker hidden while running;
+  - a hard-coded "4 at a time".
+- **Checks that fail everything for the wrong reason,** then expensive fix rounds that can't help. The hard check was
+  one, and it's now fixed.
+  - `lineProblem` in `chatCheck.ts` still uses the broad `HARD` regex. That drops writer examples and triggers chat-test
+    regenerations for words like "asleep" or "neck". Narrow it the same way as `hardHits` if writers keep losing
+    examples.
+  - Next suspects if tests still fail:
+    - the `ai` hard fail on real-chat lines that `autoTag` reads as "are you real" but that aren't sincere ("are you
+      real?? you're so hot");
+    - the reviewer's realism bar (75%);
+    - the rhythm checks: words per text, the share of replies ending on a question.
+- **Cost:** one chat test is about 22 scripted turns plus 3 real chats. Each turn can be regenerated up to 2 more times
+  (up to 3 calls), and the reviewer is one more. Fix rounds rewrite the persona and chat lines, then test again.
+  - Count calls before adding anything.
+  - The Copy report shows the real timings per step.
+- **Restore:** results come back from Google Drive one request per file, about 1,100 files. The real fix is bundling
+  results into archives in the backup (not built).
+
+**What to keep in mind:**
+- **The chat test isn't the site.** It runs a stand-in prompt (`prompts/studio_chatsim.txt`) until Burak sends
+  `system-prompt-v4.1.md`. A pass means the card is good, not that the site behaves.
+  - Most bad behaviour in the real export is site-side (§7) and on Burak's list.
+  - Burak has been away. Work that doesn't need him: the Studio side, photo packs, import from the site.
+- **Pushback the owner has given before:** the owner has argued with the honest-AI line. Once they asked that the AI
+  disclosure finding be left out of a message to Burak. The line stands (§2). Say so briefly and kindly; don't lecture.
+- **How code reaches a rental:** a push to `main` builds `code-latest` in about 30 s. A rental gets it when it starts, so
+  the owner usually restarts the instance. Tell them that after every push.
+- **Only one agent pushes at a time.** The owner may still use Claude in the cloud on the same repo. `git pull` before
+  starting work, and keep pushes small.
+- **Their machine:** Windows. **Connect Google Drive.bat** makes the Drive sign-in. Restores are slow unless the
+  rental's sign-in uses their own `GDRIVE_CLIENT_ID` / `GDRIVE_CLIENT_SECRET`. The restore card now says when it isn't.
+- **Their data:** the anonymized test-chat file (77 chats) is in the Studio's chat-test setup. The raw export stays on
+  their PC.
