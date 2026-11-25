@@ -47,7 +47,10 @@ export async function nameCosplays(onStep?: (t: string) => void): Promise<{ rena
   const { exact, siteAlias } = await import("./newChar");
   const list = useCharacters.getState().list.filter((c) => /^Cosplay of /.test(c.source ?? ""));
   const canon = (c: Character) => c.source!.replace(/^Cosplay of /, "").replace(/\s*\(.*$/, "").trim();
-  const todo = list.filter((c) => !c.site?.name?.trim() || exact(canon(c), c.site.name) || exact(canon(c), shownName(c)));
+  // her own character's name, or another cosplay's (an Ahri named "Ade" after Ada Wong): renamed
+  const others = (c: Character) => list.filter((x) => x.id !== c.id && canon(x).toLowerCase() !== canon(c).toLowerCase()).map(canon);
+  const todo = list.filter((c) => !c.site?.name?.trim() || exact(canon(c), c.site.name) || exact(canon(c), shownName(c))
+    || others(c).some((o) => o.length >= 3 && exact(o, c.site!.name!)));
   if (!todo.length) return { renamed: [] };
   onStep?.(`Thinking of site names for ${todo.length} cosplay${todo.length === 1 ? "" : "s"}…`);
   const names = await siteAlias(todo.map(canon));
@@ -122,7 +125,7 @@ export async function setMain(id: string, pic: FileRef, auto = false) {
 
 /** the one button: find → make → write → main picture, for every cosplay (skipping what's already done unless `again`) */
 /** one cosplay, start to finish: made (if she isn't yet), main picture, written, chat-tested and fixed */
-async function doGroup(g: CosGroup, o: { again?: boolean }, aliases: Record<string, string>) {
+async function doGroup(g: CosGroup, o: { again?: boolean; fix?: boolean }, aliases: Record<string, string>) {
   const { charactersFromResults } = await import("./newChar");
   const { doItAll } = await import("../components/SiteLink");
   useCosplays.setState((s) => ({ now: g.key, working: [...s.working.filter((k) => k !== g.key), g.key] }));
@@ -140,10 +143,14 @@ async function doGroup(g: CosGroup, o: { again?: boolean }, aliases: Record<stri
     else {
       if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await untilStop(writeChatLines(now, { onStep: (t) => say(g.key, t) })); }
       const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-      if (!fresh.site?.chatTest?.pass) { const { testAndFix } = await import("./chatTest"); await untilStop(testAndFix(fresh, { onStep: (t) => say(g.key, t) })); }
+      const { cardSig, testAndFix } = await import("./chatTest");
+      const last = fresh.site?.chatTest;
+      // already failed with this exact card: testing again would spend the same calls on the same answer (Fix her forces it)
+      const same = !!last && !last.pass && last.sig === cardSig(fresh) && !o.fix;
+      if (!last?.pass && !same) await untilStop(testAndFix(fresh, { onStep: (t) => say(g.key, t) }));
     }
     const t = useCharacters.getState().list.find((x) => x.id === c!.id)?.site?.chatTest;
-    say(g.key, t && !t.pass ? `Failed the chat test (${t.score}/100) — open her to see why, or Write all again` : null);
+    say(g.key, t && !t.pass ? `Failed the chat test (${t.score}/100) — Fix her tries again, or open her to see why` : null);
   } catch (e) { say(g.key, (e as Error).message === "Stopped" ? "Stopped" : `Didn't go: ${(e as Error).message}`); }
   finally { useCosplays.setState((s) => ({ working: s.working.filter((k) => k !== g.key) })); }
 }
@@ -159,7 +166,7 @@ async function aliasesFor(groups: CosGroup[]): Promise<Record<string, string>> {
 }
 
 /** the one button: find → name → make → write → test, for every cosplay (skipping what's already done unless `again`) */
-export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
+export async function runCosplays(o: { again?: boolean; only?: string; fix?: boolean } = {}) {
   if (useCosplays.getState().running) return;
   useCosplays.setState({ running: true, stop: false, done: 0, total: 0, now: null, since: Date.now(), working: [] });
   try {
@@ -172,6 +179,8 @@ export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
       groups = await untilStop(scanCosplays());
       useCosplays.setState({ groups });
     }
+    // Redo of one: her site name is checked again too (her own character's name, or another cosplay's)
+    if (o.only && o.again) await untilStop(nameCosplays((t) => say("_", t))).catch((e) => { if ((e as Error).message === "Stopped") throw e; });
     const todo = o.only ? groups.filter((g) => g.key === o.only) : groups;
     if (!todo.length) { say("_", "No cosplay pictures found"); return; }
     const aliases = await aliasesFor(todo);

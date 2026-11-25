@@ -199,7 +199,9 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
             <h3 className="truncate text-[17px] font-semibold leading-tight text-ink">{c?.site?.name || c?.name || g.name}</h3>
             <p className="truncate text-[12.5px] text-muted">{c?.site?.name && c.site.name !== g.name ? <>as {g.name}<span className="text-dim"> · </span></> : null}<span className="text-dim">{g.series || "cosplay"}</span></p>
           </div>
-          {(st === "write" || st === "test" || st === "problem") && <MakeOne g={g} />}
+          {!c && <MakeOne g={g} />}
+          {c && (st === "test" || st === "problem") && <MakeOne g={g} fix />}
+          {c && <MakeOne g={g} redo />}
           <span className="font-mono text-[11px] text-dim">{g.pics.length} pic{g.pics.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -242,10 +244,17 @@ function Elapsed() {
 }
 
 /** just this one character, start to finish (to try a few before running all of them) */
-function MakeOne({ g }: { g: CosGroup }) {
+/** just this one character: Make her (not made yet), Fix her (failed her test: test and fix again, even with an unchanged
+ *  card), Redo (wrong character or name: her profile, chat lines and test written again from scratch) */
+function MakeOne({ g, fix, redo }: { g: CosGroup; fix?: boolean; redo?: boolean }) {
   const running = useCosplays((s) => s.running);
-  return <button disabled={running} onClick={() => void runCosplays({ only: g.key })} title="Make, name, write and chat-test just this one"
-    className="press chip-raised h-7 px-2.5 text-[12px] disabled:opacity-40">Make her</button>;
+  const go = () => {
+    if (redo && !window.confirm(`Write ${g.name}'s profile, chat lines and chat test again from scratch? Use this when she's wrong (the wrong character, series or name). Her pictures stay.`)) return;
+    void runCosplays({ only: g.key, fix, again: redo });
+  };
+  return <button disabled={running} onClick={go}
+    title={redo ? "Wrong character, series or name? Write her again from scratch (her pictures stay)" : fix ? "Test and fix her again (she failed; this rewrites her chat lines from what the test found)" : "Make, name, write and chat-test just this one"}
+    className={cx("press h-7 px-2.5 text-[12px] disabled:opacity-40", redo ? "text-dim hover:text-ink" : "chip-raised")}>{redo ? "Redo" : fix ? "Fix her" : "Make her"}</button>;
 }
 
 /** quick profiles skip the deep persona (5–7 long writer passes, ~10 min each character): her chat lines and chat test still

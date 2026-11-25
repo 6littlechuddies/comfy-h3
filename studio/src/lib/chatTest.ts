@@ -49,9 +49,19 @@ export type ChatTestResult = {
   turns: Turn[]; cold: Turn[]; prompt: "site" | "stand-in"; rounds?: { score: number; kept: boolean }[]; note?: string;
   /** real users' chats she was tested with */ extras?: { title: string; tags: string[]; turns: Turn[] }[];
   /** the share of her replies the reviewer found realistic and in context */ realism?: number; reviewer?: string;
+  /** what her card was when she was tested (cardSig): a card that hasn't changed isn't tested again */ sig?: string;
 };
 
 const HIS_NAME = "Ezra";
+
+/** a short fingerprint of everything the chat test reads from her card: when it's the same as at her last test, testing
+ *  her again would only spend calls on the same answer */
+export function cardSig(c: Character): string {
+  const s = c.site ?? {}, ch = s.chat ?? {};
+  const text = JSON.stringify([s.name, s.persona, s.greeting, s.facts, s.people, s.personality, s.tags, s.signatureWords, ch.examples, ch.hot, ch.holdProfile, ch.effortPushback, ch.casing, ch.voicePaid, ch.voiceFree]);
+  let h = 5381; for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+  return `${text.length.toString(36)}-${h.toString(36)}`;
+}
 const cur = (id: string) => useCharacters.getState().list.find((x) => x.id === id);
 
 /** her system prompt for the test: the active "Chat test · her chat" file with the site's {{placeholders}} filled from her card */
@@ -180,7 +190,7 @@ export async function testChat(c0: Character, o: { onStep?: (t: string) => void;
   const res: ChatTestResult = { at: Date.now(), score, pass, hardFails, checks, stats, judge: sc,
     worst: Array.isArray(j.worst) ? j.worst.slice(0, 4).map((w: any) => ({ turn: w.turn, quote: String(w.quote ?? ""), why: String(w.why ?? "") })) : undefined,
     fixes: j.fixes && typeof j.fixes === "object" ? Object.fromEntries(Object.entries(j.fixes).filter(([, v]) => typeof v === "string" && v.trim())) as ChatTestResult["fixes"] : undefined,
-    verdict: typeof j.verdict === "string" ? j.verdict : undefined, turns, cold, extras, realism, reviewer, prompt: sys.site ? "site" : "stand-in", note: note || undefined };
+    verdict: typeof j.verdict === "string" ? j.verdict : undefined, turns, cold, extras, realism, reviewer, prompt: sys.site ? "site" : "stand-in", note: note || undefined, sig: cardSig(c) };
   if (o.save !== false) { const now = cur(c.id); if (now) useCharacters.getState().save({ ...now, site: { ...now.site, chatTest: { ...res, rounds: now.site?.chatTest?.rounds } } }); }
   return res;
 }
