@@ -11,11 +11,19 @@ export type CosPic = FileRef & { label: string; mtime: number };
 export type CosGroup = { key: string; name: string; series: string; pics: CosPic[] };
 
 export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: Record<string, string>; running: boolean; scanned: number; stop: boolean;
-  /** the run's progress: how many characters are through, of how many, and which one is being worked on */ done: number; total: number; now: string | null }>(() => ({
-  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null,
+  /** the run's progress: how many characters are through, of how many, and which one is being worked on */ done: number; total: number; now: string | null;
+  /** when the current step started (shown as a timer, so a long step visibly isn't frozen) */ since: number }>(() => ({
+  open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0,
 }));
 export const openCosplays = () => useCosplays.setState({ open: true });
-const say = (key: string, t: string | null) => useCosplays.setState((s) => { const st = { ...s.status }; if (t) st[key] = t; else delete st[key]; return { status: st }; });
+const say = (key: string, t: string | null) => useCosplays.setState((s) => { const st = { ...s.status }; if (t) st[key] = t; else delete st[key]; return { status: st, since: t && t !== s.status[key] ? Date.now() : s.since }; });
+/** waits for a step, but gives up the moment Stop is pressed (the step itself may still finish in the background) */
+function untilStop<T>(p: Promise<T>): Promise<T> {
+  return new Promise<T>((ok, no) => {
+    const t = setInterval(() => { if (useCosplays.getState().stop) { clearInterval(t); no(new Error("Stopped")); } }, 300);
+    p.then((v) => { clearInterval(t); ok(v); }, (e) => { clearInterval(t); no(e); });
+  });
+}
 
 export const keyOf = (name: string, series: string) => `${name.toLowerCase()}|${series.toLowerCase()}`;
 /** the character already made for this cosplay: "Cosplay of Makima (Chainsaw Man)" on her, or her name */
@@ -109,48 +117,71 @@ export async function setMain(id: string, pic: FileRef, auto = false) {
 }
 
 /** the one button: find → make → write → main picture, for every cosplay (skipping what's already done unless `again`) */
-export async function runCosplays(o: { again?: boolean } = {}) {
-  if (useCosplays.getState().running) return;
-  useCosplays.setState({ running: true, stop: false, status: {}, done: 0, total: 0, now: null });
+/** one cosplay, start to finish: made (if she isn't yet), main picture, written, chat-tested and fixed */
+async function doGroup(g: CosGroup, o: { again?: boolean }, aliases: Record<string, string>) {
+  const { charactersFromResults } = await import("./newChar");
+  const { doItAll } = await import("../components/SiteLink");
+  useCosplays.setState({ now: g.key });
   try {
-    // cosplays still under the character's own name get their site names first (one writer call for all of them)
-    const nm = await nameCosplays((t) => say("_", t)).catch(() => ({ renamed: [] as { from: string; to: string }[] }));
-    if (nm.renamed.length) say("_", `Renamed ${nm.renamed.length}: ${nm.renamed.slice(0, 6).map((r) => `${r.from} → ${r.to}`).join(", ")}${nm.renamed.length > 6 ? "…" : ""}`);
-    say("_", "Looking through your results for cosplay pictures…");
-    const groups = await scanCosplays();
-    useCosplays.setState({ groups });
-    say("_", groups.length ? `${groups.length} cosplay characters found` : null);
-    if (!groups.length) return;
-    groups.forEach((g) => say(g.key, "Waiting…"));
-    useCosplays.setState({ total: groups.length });
-    const { charactersFromResults } = await import("./newChar");
-    const { doItAll } = await import("../components/SiteLink");
-    for (const g of groups) {
+    let c = charFor(g);
+    if (!c) {
+      say(g.key, "Making her from her newest picture (reading it, about half a minute)…");
+      const r = await untilStop(charactersFromResults([{ o: g.pics[0], label: g.pics[0].label }], { gallery: false, aliases, onStep: (m) => say(g.key, m) }));
+      if (!r.made[0]) throw new Error(r.failed[0]?.replace(/^[^:]*:\s*/, "") || "couldn't make her");
+      c = r.made[0];
+    }
+    if (!c.site?.mainFrom && !c.cover) { say(g.key, "Her main picture: the newest one (click another to change)…"); await untilStop(setMain(c.id, g.pics[0], true)); }
+    const now = useCharacters.getState().list.find((x) => x.id === c!.id)!;
+    if (o.again || !now.site?.persona) await untilStop(doItAll(now, false, (t) => say(g.key, t))); // writes, then chat-tests and fixes
+    else {
+      if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await untilStop(writeChatLines(now, { onStep: (t) => say(g.key, t) })); }
+      const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;
+      if (!fresh.site?.chatTest?.pass) { const { testAndFix } = await import("./chatTest"); await untilStop(testAndFix(fresh, { onStep: (t) => say(g.key, t) })); }
+    }
+    const t = useCharacters.getState().list.find((x) => x.id === c!.id)?.site?.chatTest;
+    say(g.key, t && !t.pass ? `Failed the chat test (${t.score}/100) — open her to see why, or Write all again` : null);
+  } catch (e) { say(g.key, (e as Error).message === "Stopped" ? "Stopped" : `Didn't go: ${(e as Error).message}`); }
+}
+
+/** site names for every cosplay that isn't made yet, in one writer call (90 s at most, then plain near-twins) */
+async function aliasesFor(groups: CosGroup[]): Promise<Record<string, string>> {
+  const missing = groups.filter((g) => !charFor(g));
+  if (!missing.length) return {};
+  say("_", `Thinking of site names for ${missing.length} new cosplay${missing.length === 1 ? "" : "s"} (one call)…`);
+  const { siteAlias } = await import("./newChar");
+  const names = await untilStop(siteAlias(missing.map((g) => g.name)));
+  return Object.fromEntries(missing.map((g, i) => [g.name.toLowerCase(), names[i]]).filter(([, v]) => v));
+}
+
+/** the one button: find → name → make → write → test, for every cosplay (skipping what's already done unless `again`) */
+export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
+  if (useCosplays.getState().running) return;
+  useCosplays.setState({ running: true, stop: false, done: 0, total: 0, now: null, since: Date.now() });
+  try {
+    let groups = useCosplays.getState().groups;
+    if (!o.only || !groups.length) {
+      // cosplays already made but still under the character's own name get their site names first (one writer call)
+      const nm = await untilStop(nameCosplays((t) => say("_", t))).catch((e) => { if ((e as Error).message === "Stopped") throw e; return { renamed: [] as { from: string; to: string }[] }; });
+      if (nm.renamed.length) say("_", `Renamed ${nm.renamed.length}: ${nm.renamed.slice(0, 6).map((r) => `${r.from} → ${r.to}`).join(", ")}${nm.renamed.length > 6 ? "…" : ""}`);
+      say("_", "Looking through your results for cosplay pictures…");
+      groups = await untilStop(scanCosplays());
+      useCosplays.setState({ groups });
+    }
+    const todo = o.only ? groups.filter((g) => g.key === o.only) : groups;
+    if (!todo.length) { say("_", "No cosplay pictures found"); return; }
+    const aliases = await aliasesFor(todo);
+    say("_", o.only ? null : `${todo.length} cosplay characters`);
+    if (!o.only) todo.forEach((g) => say(g.key, "Waiting…"));
+    useCosplays.setState({ total: todo.length });
+    for (const g of todo) {
       if (useCosplays.getState().stop) { say(g.key, "Stopped"); continue; }
-      useCosplays.setState({ now: g.key });
-      try {
-        let c = charFor(g);
-        if (!c) {
-          say(g.key, `Making her from her newest picture (reading it, about half a minute)…`);
-          const r = await charactersFromResults([{ o: g.pics[0], label: g.pics[0].label }], { gallery: false, onStep: (m) => say(g.key, m) });
-          if (!r.made[0]) throw new Error(r.failed[0]?.replace(/^[^:]*:\s*/, "") || "couldn't make her");
-          c = r.made[0];
-        }
-        if (!c.site?.mainFrom && !c.cover) { say(g.key, "Her main picture: the newest one (click another to change)…"); await setMain(c.id, g.pics[0], true); }
-        const now = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-        if (o.again || !now.site?.persona) await doItAll(now, false, (t) => say(g.key, t)); // writes, then chat-tests and fixes
-        else {
-          if (!now.site?.chat?.at) { const { writeChatLines } = await import("./chatLines"); await writeChatLines(now, { onStep: (t) => say(g.key, t) }); }
-          const fresh = useCharacters.getState().list.find((x) => x.id === c!.id)!;
-          if (!fresh.site?.chatTest?.pass) { const { testAndFix } = await import("./chatTest"); await testAndFix(fresh, { onStep: (t) => say(g.key, t) }); }
-        }
-        const t = useCharacters.getState().list.find((x) => x.id === c!.id)?.site?.chatTest;
-        if (t && !t.pass) { say(g.key, `Failed the chat test (${t.score}/100) — open her to see why, or Write all again`); useCosplays.setState((s) => ({ done: s.done + 1 })); continue; }
-        say(g.key, null);
-      } catch (e) { say(g.key, `Didn't go: ${(e as Error).message}`); }
+      await doGroup(g, o, aliases);
       useCosplays.setState((s) => ({ done: s.done + 1 }));
     }
-    say("_", useCosplays.getState().stop ? "Stopped — press the button again to carry on where it left off" : "Done — click each one's main picture, then Send");
-  } catch (e) { say("_", `Didn't go: ${(e as Error).message}`); }
-  finally { useCosplays.setState({ running: false, now: null }); }
+    say("_", useCosplays.getState().stop ? "Stopped — press Make them all again to carry on where it left off" : o.only ? null : "Done — click each one's main picture, then Send");
+  } catch (e) { say("_", (e as Error).message === "Stopped" ? "Stopped — press Make them all again to carry on where it left off" : `Didn't go: ${(e as Error).message}`); }
+  finally {
+    // anything still marked as waiting didn't start
+    useCosplays.setState((s) => ({ running: false, now: null, status: Object.fromEntries(Object.entries(s.status).filter(([, v]) => v !== "Waiting…")) }));
+  }
 }

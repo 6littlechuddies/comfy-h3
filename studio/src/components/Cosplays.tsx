@@ -94,7 +94,7 @@ function CosplaysPanel() {
           </p>
         </div>
         {running
-          ? <button onClick={() => useCosplays.setState({ stop: true })} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop after this one</button>
+          ? <button onClick={() => useCosplays.setState({ stop: true })} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop</button>
           : <>
             <button onClick={() => void runCosplays({ again: true })} disabled={!groups.length} title="Every profile and its chat lines written again — for when the writer has changed"
               className="press chip-raised flex h-10 items-center gap-2 px-3.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40"><Icon name="refresh" size={13} /> Write all again</button>
@@ -125,6 +125,7 @@ function CosplaysPanel() {
           <div className="flex items-center gap-3 text-[12.5px]">
             <span className="pulse h-2 w-2 shrink-0 bg-accent" />
             <span className="min-w-0 flex-1 truncate text-ink">{current ? <><b>{charFor(current, chars)?.site?.name || current.name}</b> <span className="text-muted">· {status[current.key]}</span></> : status._ || "Starting…"}</span>
+            <Elapsed />
             <span className="font-mono text-[12px] text-muted">{total ? `${done} / ${total}` : scanned ? `${scanned.toLocaleString()} looked at` : ""}</span>
           </div>
           <div className="mt-2 h-[2px] bg-line"><div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${total ? (done / total) * 100 : 4}%` }} /></div>
@@ -194,6 +195,7 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
             <h3 className="truncate text-[17px] font-semibold leading-tight text-ink">{c?.site?.name || c?.name || g.name}</h3>
             <p className="truncate text-[12.5px] text-muted">{c?.site?.name && c.site.name !== g.name ? <>as {g.name}<span className="text-dim"> · </span></> : null}<span className="text-dim">{g.series || "cosplay"}</span></p>
           </div>
+          {(st === "write" || st === "test" || st === "problem") && <MakeOne g={g} />}
           <span className="font-mono text-[11px] text-dim">{g.pics.length} pic{g.pics.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -223,4 +225,21 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
       </div>
     </article>
   );
+}
+
+/** how long the current step has been going: a long step visibly isn't frozen */
+function Elapsed() {
+  const since = useCosplays((s) => s.since);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const sec = Math.max(0, Math.round((now - since) / 1000));
+  if (!since || sec < 5) return null;
+  return <span className={cx("font-mono text-[12px]", sec > 180 ? "text-bad" : "text-dim")} title="How long this step has been going">{Math.floor(sec / 60)}:{String(sec % 60).padStart(2, "0")}</span>;
+}
+
+/** just this one character, start to finish (to try a few before running all of them) */
+function MakeOne({ g }: { g: CosGroup }) {
+  const running = useCosplays((s) => s.running);
+  return <button disabled={running} onClick={() => void runCosplays({ only: g.key })} title="Make, name, write and chat-test just this one"
+    className="press chip-raised h-7 px-2.5 text-[12px] disabled:opacity-40">Make her</button>;
 }

@@ -36,7 +36,9 @@ export async function siteAlias(names: string[]): Promise<string[]> {
   const pick = (n: string, a: string) => { const r = ok(n, a) ? a : twinFree(n, used); used.add(r.toLowerCase()); return r; };
   try {
     const { runWriter } = await import("./writer");
-    const out = await runWriter("alias", { names: names.join("\n"), taken: taken.join(", ") || "(none)" }, { tab: "characters", label: "Site names" });
+    // the writer can be stuck behind other work (or still starting): after 90 s a plain near-twin is used instead
+    const out = await Promise.race([runWriter("alias", { names: names.join("\n"), taken: taken.join(", ") || "(none)" }, { tab: "characters", label: "Site names" }),
+      new Promise<string>((_, no) => setTimeout(() => no(new Error("the writer didn't answer in 90 s")), 90_000))]);
     const lines = out.split(/\n+/).map((l) => l.split("=>")[1]?.trim()).filter((x): x is string => !!x);
     return names.map((n, i) => pick(n, (lines[i] || "").replace(/^["“]|["”]$/g, "").trim()));
   } catch { return names.map((n) => pick(n, "")); }
@@ -90,7 +92,7 @@ export async function createFromPicture(o: { pic: Media; gen: CivitGen | null; r
 }
 
 /** many results → characters: grouped by whose cosplay they are (the rest one each), read, named, recipe kept */
-export async function charactersFromResults(its: { o: FileRef & { type: string }; label: string; idea?: unknown; jobId?: string }[], opts: { gallery: boolean; onStep?: (m: string) => void }): Promise<{ made: Character[]; failed: string[] }> {
+export async function charactersFromResults(its: { o: FileRef & { type: string }; label: string; idea?: unknown; jobId?: string }[], opts: { gallery: boolean; onStep?: (m: string) => void; aliases?: Record<string, string> }): Promise<{ made: Character[]; failed: string[] }> {
   const [{ useTray }, { fileGen }] = await Promise.all([import("./tray"), import("./api")]);
   const groups = new Map<string, typeof its>();
   // whose cosplay each one is: from its job record, else from its label (results restored from a drive have no job record)
@@ -104,7 +106,9 @@ export async function charactersFromResults(its: { o: FileRef & { type: string }
   const keys = [...groups.keys()];
   const cosNames = keys.filter((k) => k.startsWith("cos:")).map((k) => cosOf.get(groups.get(k)![0])!.name);
   opts.onStep?.(cosNames.length ? "Thinking of site names…" : "Reading the pictures…");
-  const aliases = cosNames.length ? await siteAlias(cosNames) : [];
+  // site names given by the caller (Cosplays names them all in one call first), else asked for here
+  const given = opts.aliases ?? {};
+  const aliases = !cosNames.length ? [] : cosNames.every((n) => given[n.toLowerCase()]) ? cosNames.map((n) => given[n.toLowerCase()]) : await siteAlias(cosNames);
   const made: Character[] = [], failed: string[] = [];
   let ai = 0, n = 0;
   for (const k of keys) {
