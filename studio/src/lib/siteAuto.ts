@@ -489,20 +489,19 @@ export async function deepProfile(c: Character, o: { onStep?: (t: string) => voi
     o.feedback && `HER LAST CHAT TEST FOUND (write so this doesn't happen again):\n${o.feedback}`].filter(Boolean).join("\n");
   const call = (task: string, draft: string, label: string) => runWriter("deep", { task: task + TAIL, character: who, draft: draft || "(nothing yet)" }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } }).catch(() => "");
   const got: Record<string, string> = {};
-  const draftNow = () => [`WHO YOU ARE\n${core}`, got.life, [got.react1, got.react2].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
+  const baseDraft = `WHO YOU ARE\n${core}`;
   softNow = /^DYNAMIC: soft/.test(dynamicNote(site.direction, site.personality, site.tags));
   const passes = DEEP_PASSES.map((p) => p.key.startsWith("react") ? { ...p, task: reactTask(p.key === "react1" ? REACT_A : REACT_B, p.key === "react1") } : p);
-  for (const p of passes) {
-    o.onStep?.(p.label);
-    let out = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
+  o.onStep?.("Writing deep profile sections (4 in parallel)…");
+  await Promise.all(passes.map(async (p) => {
+    let out = (await call(p.task, baseDraft, p.label.replace(/…$/, "").toLowerCase())).trim();
     // a catchphrase in the samples, or age / money talk anywhere: written once more
     if (out && (AGE.test(out) || MONEY.test(out) || META.test(out) || (p.key === "samples" && repeats3(out)))) {
-      o.onStep?.(`${p.label.replace(/…$/, "")} again (fixing a repeat or a rule)…`);
-      const again = (await call(p.task, draftNow(), p.label.replace(/…$/, "").toLowerCase())).trim();
+      const again = (await call(p.task, baseDraft, p.label.replace(/…$/, "").toLowerCase())).trim();
       if (again && !AGE.test(again) && !MONEY.test(again) && !META.test(again)) out = again;
     }
     if (words(out) > 40) got[p.key] = out;
-  }
+  }));
   const react = [got.react1, got.react2].filter(Boolean).join("\n").replace(/\n(?=HOW YOU REACT)/g, "");
   const parts = [`WHO YOU ARE\n${core}`, got.life, react, got.samples].filter(Boolean) as string[];
   const joined = parts.join("\n\n");
