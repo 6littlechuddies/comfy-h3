@@ -133,7 +133,8 @@ async function runChat(sys: string, c: Character, script: typeof SCRIPT, card: C
     for (let a = 0; a < 3; a++) {
       const extra = a === 0 ? notes : [...notes, `(note: rewrite, and don't use any of these: ${bestHits.join("; ")})`];
       const out = splitReply(await reply(extra.length ? [...base, { role: "system", content: extra.join("\n") }] : base), name);
-      const hits = guardHits(out, prev, tag === "premium" ? msg : "");
+      const retired = i + 1 > 2 && !st.hookBit ? (card.openerKeywords ?? []).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 3) : [];
+      const hits = guardHits(out, prev, tag === "premium" ? msg : "", retired);
       if (a === 0) first = hits;
       if (a === 0 || hits.length < bestHits.length) { best = out; bestHits = hits; }
       if (!hits.length) break;
@@ -149,7 +150,7 @@ async function runChat(sys: string, c: Character, script: typeof SCRIPT, card: C
 const cardOf = (c: Character): Card => {
   const ch = c.site?.chat ?? {};
   const holds = ch.heatHolds ?? (ch.holdProfile === "warm" ? 1 : ch.holdProfile === "tease" ? 3 : ch.holdProfile === "dom" ? 2 : 1);
-  return { name: c.site?.name || c.name, city: c.site?.facts?.city, signature: [...(c.site?.signatureWords ?? [])].filter((w) => w.length > 2), holds };
+  return { name: c.site?.name || c.name, city: c.site?.facts?.city, signature: [...(c.site?.signatureWords ?? [])].filter((w) => w.length > 2), holds, openerKeywords: ch.openerKeywords };
 };
 
 /** test her once and save the result on her (site.chatTest) */
@@ -160,16 +161,17 @@ export async function testChat(c0: Character, o: { onStep?: (t: string) => void;
   const card = cardOf(c);
   await loadChatTests();
   const setup = useChatTests.getState();
-  const turns = await runChat(sys.text, c, SCRIPT, card, (n, of) => o.onStep?.(`Chat test: message ${n} of ${of}…`));
-  const cold = await runChat(sys.text, { ...c, site: { ...c.site, greeting: "" } }, COLD, card, (n, of) => o.onStep?.(`Chat test: cold open ${n} of ${of}…`), "c#");
-  // real users' chats: each a new chat from her first message
+  // run the scripted chat, cold open, and real-user chats in parallel (~4-5x faster, same API calls)
   const picked = extrasFor(c.id, setup.chats, setup.perTest);
-  const extras: NonNullable<ChatTestResult["extras"]> = [];
-  for (let i = 0; i < picked.length; i++) {
-    const x = picked[i];
-    const t = await runChat(sys.text, c, x.msgs.map((m) => ({ msg: m, tag: autoTag(m) })), { ...card, holds: card.holds }, (n, of) => o.onStep?.(`Chat test: real chat ${i + 1} of ${picked.length}, message ${n} of ${of}…`), `u${i + 1}#`);
-    extras.push({ title: x.title, tags: x.tags, turns: t });
-  }
+  const totalMsgs = SCRIPT.length + COLD.length + picked.reduce((a, x) => a + x.msgs.length, 0);
+  let sentMsgs = 0;
+  const bump = () => { sentMsgs++; o.onStep?.(`Chat test: ${sentMsgs} of ${totalMsgs} messages (${picked.length + 2} chats at once)…`); };
+  const [turns, cold, ...extraTurns] = await Promise.all([
+    runChat(sys.text, c, SCRIPT, card, bump),
+    runChat(sys.text, { ...c, site: { ...c.site, greeting: "" } }, COLD, card, bump, "c#"),
+    ...picked.map((x, i) => runChat(sys.text, c, x.msgs.map((m) => ({ msg: m, tag: autoTag(m) })), { ...card, holds: card.holds }, bump, `u${i + 1}#`)),
+  ]);
+  const extras: NonNullable<ChatTestResult["extras"]> = picked.map((x, i) => ({ title: x.title, tags: x.tags, turns: extraTurns[i] }));
   const { checks, stats } = analyze(turns, cold, card, extras.map((x) => x.turns));
   o.onStep?.("Chat test: the cloud reviewer is reading every reply…");
   const s = c.site ?? {}, ch = s.chat ?? {};

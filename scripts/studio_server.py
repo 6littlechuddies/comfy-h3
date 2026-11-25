@@ -6465,7 +6465,7 @@ async def _site_push(job: dict, d: dict):
             gen = ["Krea 2", "MiniMax H3"] if c.get("style") == "realistic" else ["Anima / Illustrious", "MiniMax H3"]
             appearance = {k: c.get(k, "") for k in ("hair", "eyes", "body", "outfit", "details")}
             manifest = {
-                "external_id": ext, "name": (str(site.get("name") or "").strip() or c.get("name")), "age": max(21, int(age)),  # the site's ages are 21+ "gender": c.get("gender"), "style": c.get("style"),
+                "external_id": ext, "name": (str(site.get("name") or "").strip() or c.get("name")), "age": max(21, int(age)), "gender": c.get("gender"), "style": c.get("style"),  # the site's ages are 21+
                 # a cosplay character carries the "cosplay" tag (the site's Cosplay section can pick them out)
                 "tags": list(dict.fromkeys((site.get("tags") or []) + (["cosplay"] if str(c.get("source") or "").startswith("Cosplay of ") else []))),
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
