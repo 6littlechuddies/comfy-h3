@@ -2917,7 +2917,7 @@ def _gdrive_tokens() -> list[str]:
     return out
 
 
-DRIVE_HOW = {"how": ""}  # which sign-in + client worked (for the debug report)
+DRIVE_HOW = {"how": "", "own": False}  # which sign-in + client worked (for the debug report)
 
 
 def _cloud() -> str:
@@ -2958,6 +2958,7 @@ async def _proton_setup() -> None:
             except OSError: pass
             rc, out = await _rclone("config", "create", "proton", "drive", "scope", "drive", *cl, "token", tok, "--non-interactive", timeout=120)
             if rc != 0: last = out.replace(tok, "•••"); continue
+            DRIVE_HOW["own"] = bool(cl)
             if len(tries) == 1: DRIVE_HOW["how"] = "sign-in 1, " + ("your client" if cl else "rclone's client"); return
             rc, out = await _rclone("lsd", "proton:", "--max-depth", "1", timeout=60)
             if rc == 0:
@@ -3725,8 +3726,19 @@ async def _proton_restore(force: bool = False):
                     it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
                     await asyncio.sleep(10)
             ticker = asyncio.get_running_loop().create_task(tick())
-            rc, out = await _rclone("copy", f"proton:{folder}/results", dest, "--ignore-existing", "--transfers", "32", "--checkers", "32",
-                                    "--fast-list", "--order-by", "modtime,descending", "--retries", "3", timeout=4 * 3600)
+            it["res_start"] = await asyncio.to_thread(count); it["res_at"] = time.time()
+            it["res_own"] = bool(DRIVE_HOW.get("own")) if _gdrive_token() else None
+            # Google hands out files one request each, so the speed is requests per second, not bandwidth. rclone waits 100 ms
+            # between requests by default; with your own Google client that wait can drop to 10 ms (its quota is yours
+            # alone). rclone's shared client is throttled by Google for everyone, so it keeps the default (faster only
+            # gets "rate limit" errors and retries). Pictures come first (the Catalog needs them), videos after.
+            fast = ["--drive-pacer-min-sleep", "10ms", "--drive-pacer-burst", "200"] if it["res_own"] else []
+            common = ["--ignore-existing", "--transfers", "48", "--checkers", "48", "--fast-list", "--order-by", "modtime,descending",
+                      "--retries", "3", "--low-level-retries", "20", *fast]
+            pics = [x for e in ("png", "jpg", "jpeg", "webp", "json", "txt") for x in ("--include", f"*.{e}")]
+            rc, out = await _rclone("copy", f"proton:{folder}/results", dest, *common, *pics, timeout=4 * 3600)
+            rc2, out2 = await _rclone("copy", f"proton:{folder}/results", dest, *common, timeout=4 * 3600)
+            if rc == 0: rc, out = rc2, out2
             it["res_have"] = min(it.get("res_total") or 10**9, await asyncio.to_thread(count))
             it["results"] = "done" if rc == 0 or "not found" in out.lower() else "failed"  # no results folder yet is fine
             ticker.cancel()
@@ -5498,7 +5510,7 @@ async def import_latest(req):
     """the import running (or just finished) on this rental — the startup screen and the Studio both show it"""
     if not IMPORTS: return web.json_response(None)
     iid, it = max(IMPORTS.items(), key=lambda kv: kv[1]["at"])
-    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results", "res_total", "res_have")}, "cloud": _cloud()})
+    return web.json_response({"id": iid, **{k: it.get(k) for k in ("state", "size", "got", "done", "total", "result", "error", "name", "source", "results", "res_total", "res_have", "res_start", "res_at", "res_own")}, "cloud": _cloud()})
 
 
 # ------------------------------------------------------------------ download switches ("later" / "Download now")

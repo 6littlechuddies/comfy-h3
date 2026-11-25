@@ -18,6 +18,15 @@ export function importPct(r: ImportRun): number | null {
   return null;
 }
 
+/** files a minute and time left for the results copy, plus a hint when rclone's shared (slow) Google client is in use */
+function resPace(r: ImportRun): string {
+  const got = (r.res_have ?? 0) - (r.res_start ?? 0), secs = r.res_at ? Date.now() / 1000 - r.res_at : 0;
+  const perMin = secs > 30 && got > 0 ? got / (secs / 60) : 0;
+  const out = perMin ? [`${Math.round(perMin)} a minute`, left(((r.res_total ?? 0) - (r.res_have ?? 0)) / (perMin / 60))] : [];
+  if (r.res_own === false) out.push("slow: using rclone's shared Google client (set GDRIVE_CLIENT_ID for your own)");
+  return out.length ? " · " + out.join(" · ") : "";
+}
+
 function line(r: ImportRun): string {
   const cloud = r.cloud || "your drive";
   const from = r.source === "proton" ? `Getting it from ${cloud}` : "Sending";
@@ -27,7 +36,7 @@ function line(r: ImportRun): string {
       return [`${from} · ${mb(r.got)} of ${mb(r.size)}`, r.mbps && `${r.mbps} MB/s`, left(r.leftS)].filter(Boolean).join(" · ");
     case "unpacking": return r.total ? `Unpacking pictures · ${r.done} of ${r.total}` : "Unpacking…";
     case "done":
-      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}${r.res_total ? ` (newest first) · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}` : ""}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
+      return (r.result ? importNote(r.result) : "Done") + (r.results === "copying" ? ` · your results are still coming from ${cloud}${r.res_total ? ` (pictures first, newest first) · ${(r.res_have ?? 0).toLocaleString()} of ${r.res_total.toLocaleString()}${resPace(r)}` : ""}` : r.results === "failed" ? ` · some results didn't come back from ${cloud}` : "");
     case "error": return r.error || "Couldn't import that file";
     default: return "";
   }
