@@ -68,12 +68,20 @@ export async function planAndQueue(chars: Character[], o: AutoPlan, step: (t: st
   const depthPool = o.usePoseWear ? await loadLib("depths").catch(() => [] as PwItem[]) : [];
   const usedTitles = useCharacters.getState().list.flatMap((x) => (x.site?.sets ?? []).map((s) => s.title)).filter(Boolean);
   const usedPoses = new Set<string>();
-  const all: Partial<Row>[] = [];
-  for (let i = 0; i < chars.length; i++) {
-    const c = chars[i];
-    step(`Planning ${c.site?.name || c.name}'s photo packs (${i + 1} of ${chars.length})…`);
-    all.push(...(await planFor(c, o, usedTitles, depthPool, usedPoses)));
-  }
+  const buckets: Partial<Row>[][] = new Array(chars.length);
+  let nextIdx = 0, done = 0;
+  const limit = Math.min(6, chars.length);
+  await Promise.all(Array.from({ length: limit }, async () => {
+    while (nextIdx < chars.length) {
+      const i = nextIdx++;
+      const c = chars[i];
+      step(`Planning photo packs (${done + 1}–${Math.min(done + limit, chars.length)} of ${chars.length})…`);
+      buckets[i] = await planFor(c, o, usedTitles, depthPool, usedPoses);
+      done++;
+      step(`Planned ${done} of ${chars.length} photo packs…`);
+    }
+  }));
+  const all: Partial<Row>[] = buckets.flat();
   const b = useBatch.getState();
   b.set({ target: "image" });
   const empty = b.rows.filter((r) => !r.imitate && !r.idea.trim() && !r.prompt.trim());

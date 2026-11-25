@@ -90,11 +90,14 @@ export async function writeChatLines(c: Character, o: { onStep?: (t: string) => 
   const styleNote = [`STYLE (decided): hold profile ${holdProfile}; effort pushback ${effortPushback}; languages ${languages}; casing ${casing ?? "?"}`,
     openerKeywords.length && `Her first message's props: ${openerKeywords.join(", ")} (follow up on its question in at most two mini-chats)`].filter(Boolean).join("\n");
 
-  // 2. the sample chats and the voice examples
-  o.onStep?.("Writing her sample chats and voice examples…");
+  // 2 & 3. sample chats + voice examples AND hot lines bank run in parallel (both depend only on styleNote)
+  o.onStep?.("Writing her sample chats, voice examples, and hot lines…");
   const callX = (task: string, avoid: string, label: string) => runWriter("lines", { task, character: `${who}\n${styleNote}`, avoid }, { tab: "characters", label: `${cur0.name}: ${label}`, meta: { charId: c.id } })
     .then((r) => looseJson<any>(r) ?? {}).catch((e) => { notes.push(`The writer failed (${(e as Error).message})`); return {}; });
-  const dx = await callX("examples", avoidOf(), "chat examples");
+  const [dx, h] = await Promise.all([
+    callX("examples", avoidOf(), "chat examples"),
+    callX("hot", avoidOf(), "hot lines"),
+  ]);
   const fixTurn = (t: Turn): Turn => ({ ...t, her: t.her.map((b) => inCasing(b, casing)) });
   const fixEx = (e: Exchange): Exchange => ({ ...fixTurn(e), scenario: e.scenario, ...(e.more ? { more: e.more.map(fixTurn) } : {}) });
   const good = new Map<string, Exchange>(), extra: Exchange[] = [];
@@ -129,9 +132,7 @@ export async function writeChatLines(c: Character, o: { onStep?: (t: string) => 
   if (loops.length > 2) notes.push(`${loops.length} sample chats come back to her opener's props (${openerKeywords.join(", ")}) — the pack allows 2; edit ${loops.slice(2).map((e) => `"${e.scenario}"`).join(", ")}`);
   for (const [k, v, p] of [["paid", paid, true], ["free", free, false]] as const) { const why = v ? voiceProblem(v, p) : "missing"; if (why) notes.push(`Voice example (${k}): ${why} — left blank`); }
 
-  // 3. the hot lines bank: each stage checked; under 8 good lines → asked for more (twice at most). 3 cold-push teases
-  o.onStep?.("Writing her hot lines…");
-  const h = await callX("hot", avoidOf(), "hot lines");
+  // 3. the hot lines bank (already fetched in parallel above): each stage checked; under 8 good lines → asked for more (twice at most). 3 cold-push teases
   const hot: NonNullable<SiteChat["hot"]> = { tease: [], explicit: [], after: [] };
   const bankTaken = new Set(taken);
   for (const st of STAGES) {

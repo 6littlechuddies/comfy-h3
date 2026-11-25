@@ -560,14 +560,14 @@ function Characters({ connected }: { connected: boolean }) {
     // 2. no animated cover yet: pinned for one (made later, in Animated covers — the video work waits for a GPU rental)
     const { pinCoverVideo } = await import("../lib/siteMedia");
     for (const id of ids) { const x = useCharacters.getState().list.find((y) => y.id === id); if (x && !x.site?.loopFile && !x.site?.coverVideoPin) pinCoverVideo(id); }
-    for (const id of ids) {
+    await runPool(ids, 6, async (id) => {
       const c = useCharacters.getState().list.find((x) => x.id === id);
-      if (!c) { mark(id, null); continue; }
+      if (!c) { mark(id, null); return; }
       mark(c.id, "Starting…");
       try { const note = await doItAll(useCharacters.getState().list.find((x) => x.id === c.id)!, connected, (t) => mark(c.id, t)); ok++; toast(`${c.name}: ${note}`, "good"); }
       catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); }
       mark(c.id, null);
-    }
+    });
     toast(`Done: ${ok} of ${chosen.length} — check them on the site before publishing`, ok === chosen.length ? "good" : "info");
   };
   // the site has newer names / profiles than this Studio (e.g. the drive was full and the Studio's copy wasn't saved): take them back
@@ -600,19 +600,20 @@ function Characters({ connected }: { connected: boolean }) {
   };
   const sendAll = async () => {
     let ok = 0, held = 0;
-    for (const c of chosen) {
+    chosen.forEach((c) => mark(c.id, "Waiting…"));
+    await runPool(chosen, 4, async (c) => {
       const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
-      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); continue; } }
+      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); return; } }
       // not chat-tested (or failed): tested and fixed first; still failing → not sent
       if (!useCharacters.getState().list.find((x) => x.id === c.id)?.site?.chatTest?.pass) {
         const t = await (await import("../lib/chatTest")).testAndFix(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: (m) => mark(c.id, m) }).catch((e) => { toast(`${c.name}: chat test didn't run (${(e as Error).message})`, "bad"); return null; });
-        if (!t || !t.pass) { if (t) toast(`${c.name}: failed the chat test (${t.score}/100) — not sent. Open her Chat test to see why`, "bad"); held++; mark(c.id, null); continue; }
+        if (!t || !t.pass) { if (t) toast(`${c.name}: failed the chat test (${t.score}/100) — not sent. Open her Chat test to see why`, "bad"); held++; mark(c.id, null); return; }
       }
       mark(c.id, "Sending…");
       const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, (t) => mark(c.id, t));
       if (r.ok) ok++; else toast(`${c.name}: ${r.note}`, "bad");
       mark(c.id, null);
-    }
+    });
     toast(`${ok} of ${chosen.length} sent as drafts${held ? ` · ${held} held back by the chat test` : ""}`, ok === chosen.length ? "good" : "info");
   };
   if (!list.length) return <p className="text-[13px] text-muted">No characters with an adult age and a front picture yet — make one in Characters first.</p>;
