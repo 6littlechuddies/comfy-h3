@@ -16,7 +16,7 @@ export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: R
   /** how many characters run at once (the writing and testing is DeepSeek calls, so several at a time is fine) */ atOnce: number;
   /** when the current step started (shown as a timer, so a long step visibly isn't frozen) */ since: number }>(() => ({
   open: false, groups: [], status: {}, running: false, scanned: 0, stop: false, done: 0, total: 0, now: null, since: 0, working: [],
-  atOnce: (() => { try { return Math.max(1, Math.min(8, Number(localStorage.getItem("h3.cos.atOnce")) || 4)); } catch { return 4; } })(),
+  atOnce: (() => { try { return Math.max(1, Math.min(24, Number(localStorage.getItem("h3.cos.atOnce")) || 8)); } catch { return 8; } })(),
 }));
 export function setAtOnce(n: number) { useCosplays.setState({ atOnce: n }); try { localStorage.setItem("h3.cos.atOnce", String(n)); } catch { /* */ } }
 export const openCosplays = () => useCosplays.setState({ open: true });
@@ -179,15 +179,27 @@ export async function runCosplays(o: { again?: boolean; only?: string } = {}) {
     if (!o.only) todo.forEach((g) => say(g.key, "Waiting…"));
     useCosplays.setState({ total: todo.length });
     // several at once: each worker takes the next character until none are left
+    // a pool of workers, each taking the next character until none are left. "At once" can be changed while it runs:
+    // raising it starts more workers straight away, lowering it lets the extra ones stop after their current character
     const queue = [...todo];
+    let active = 0;
+    const running: Promise<void>[] = [];
     const worker = async () => {
-      for (let g = queue.shift(); g; g = queue.shift()) {
-        if (useCosplays.getState().stop) { say(g.key, "Stopped"); continue; }
-        await doGroup(g, o, aliases);
-        useCosplays.setState((s) => ({ done: s.done + 1 }));
-      }
+      active++;
+      try {
+        for (let g = queue.shift(); g; g = queue.shift()) {
+          if (useCosplays.getState().stop) { say(g.key, "Stopped"); continue; }
+          await doGroup(g, o, aliases);
+          useCosplays.setState((s) => ({ done: s.done + 1 }));
+          if (active > useCosplays.getState().atOnce) break;
+        }
+      } finally { active--; }
     };
-    await Promise.all(Array.from({ length: Math.min(useCosplays.getState().atOnce, todo.length) }, worker));
+    const top = () => { while (queue.length && active < useCosplays.getState().atOnce) running.push(worker()); };
+    top();
+    const unsub = useCosplays.subscribe((s, p) => { if (s.atOnce > p.atOnce) top(); });
+    try { while (running.length) { await Promise.all([...running]); running.splice(0, running.length); top(); } }
+    finally { unsub(); }
     say("_", useCosplays.getState().stop ? "Stopped — press Make them all again to carry on where it left off" : o.only ? null : "Done — click each one's main picture, then Send");
   } catch (e) { say("_", (e as Error).message === "Stopped" ? "Stopped — press Make them all again to carry on where it left off" : `Didn't go: ${(e as Error).message}`); }
   finally {

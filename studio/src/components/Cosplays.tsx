@@ -93,11 +93,11 @@ function CosplaysPanel() {
             {looking ? "Looking through your results…" : groups.length ? `${groups.length} characters in ${groups.reduce((a, g) => a + g.pics.length, 0).toLocaleString()} pictures` : "Every cosplay in your results, made into characters for your site"}
           </p>
         </div>
+        <label className="flex items-center gap-1.5 text-[12px] text-muted" title="How many characters are made at the same time — change it while it runs. The writing and chat tests are DeepSeek calls, so 8–16 is fine; if DeepSeek starts answering 429 (too many requests) or the timer goes red on writer steps, lower it. On the local writer (no DeepSeek key) keep it at 1">At once
+          <DropSelect value={String(atOnce)} onChange={(e) => setAtOnce(Number(e.target.value))} className="inset h-10 border px-2 text-ink">{[1, 2, 4, 6, 8, 12, 16, 24].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
         {running
           ? <button onClick={() => useCosplays.setState({ stop: true })} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop</button>
           : <>
-            <label className="flex items-center gap-1.5 text-[12px] text-muted" title="How many characters are made at the same time. The writing and chat tests are DeepSeek calls, so 4–6 is fine; on the local writer (no DeepSeek key) keep it at 1">At once
-              <DropSelect value={String(atOnce)} onChange={(e) => setAtOnce(Number(e.target.value))} className="inset h-10 border px-2 text-ink">{[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
             <button onClick={() => void runCosplays({ again: true })} disabled={!groups.length} title="Every profile and its chat lines written again — for when the writer has changed"
               className="press chip-raised flex h-10 items-center gap-2 px-3.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40"><Icon name="refresh" size={13} /> Write all again</button>
             <button disabled={sending || !passed} onClick={() => void sendAll()} title="Every one that passed her chat test, to your site as a draft"
