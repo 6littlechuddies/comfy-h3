@@ -707,13 +707,15 @@ function CharacterPage({ c, connected }: { c: Character; connected: boolean }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-6">
       <section className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <img src={viewUrl(coverOf(c)!)} alt="" className="h-14 w-14 border border-line object-cover" />
-          <div className="min-w-0"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {/^Cosplay of /.test(c.source ?? "") ? <span className="text-accent" title={`Goes in your site's Cosplay section · ${c.source}`}>cosplay</span> : c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
-          <Btn className="ml-auto" onClick={() => write(false)} disabled={writing || !!step} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing || step ? "Writing…" : "Fill the blanks"}</Btn>
-          {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing || !!step} title="Rewrite every field">Rewrite all</Btn>}
-          <Btn onClick={() => import("./LivePack").then((m) => m.openLivePack(c.id))} title="Her Live Stream and Live Action clips: a still, idle loops and actions (tips / call buttons), made with H3 and checked join by join"><Icon name="play" size={14} /> Live pack</Btn>
-          {!!site.persona && <Btn onClick={deep} disabled={writing || !!step} title="Her life, how she reacts in 15 situations, sample texts in her style, then an editor pass — from her current profile, about 2–3 minutes"><Icon name="sparkle" size={14} /> {site.deepAt ? "Redo deep" : "Make it deep"}</Btn>}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <img src={viewUrl(coverOf(c)!)} alt="" className="h-14 w-14 shrink-0 border border-line object-cover" />
+          <div className="min-w-[160px] flex-1"><h3 className="display truncate text-[20px]">{c.name}</h3><p className="text-[12.5px] text-muted">{c.age} · {c.gender} · {/^Cosplay of /.test(c.source ?? "") ? <span className="text-accent" title={`Goes in your site's Cosplay section · ${c.source}`}>cosplay</span> : c.style} · <span className={STATUS[st][1]}>{STATUS[st][0]}</span></p></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn onClick={() => write(false)} disabled={writing || !!step} title="Write only the empty fields; what you wrote stays"><Icon name="script" size={14} /> {writing || step ? "Writing…" : "Fill the blanks"}</Btn>
+            {hasProfile(c) && <Btn onClick={() => write(true)} disabled={writing || !!step} title="Rewrite every field">Rewrite all</Btn>}
+            <Btn onClick={() => import("./LivePack").then((m) => m.openLivePack(c.id))} title="Her Live Stream and Live Action clips: a still, idle loops and actions (tips / call buttons), made with H3 and checked join by join"><Icon name="play" size={14} /> Live pack</Btn>
+            {!!site.persona && <Btn onClick={deep} disabled={writing || !!step} title="Her life, how she reacts in 15 situations, sample texts in her style, then an editor pass — from her current profile, about 2–3 minutes"><Icon name="sparkle" size={14} /> {site.deepAt ? "Redo deep" : "Make it deep"}</Btn>}
+          </div>
         </div>
         {step && <p className="border border-accent/40 bg-accent/5 px-3 py-2 text-[12.5px]"><span className="pulse text-accent">●</span> {step}</p>}
         <div className="flex items-end gap-2">

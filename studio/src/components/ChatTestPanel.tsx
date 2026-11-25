@@ -34,7 +34,7 @@ export function ChatTestPanel({ c, busy, setBusy }: { c: Character; busy: string
         <div className={cx("flex h-12 w-[72px] shrink-0 flex-col items-center justify-center border", state === "pass" ? "border-good/60 text-good" : state === "fail" ? "border-bad/60 text-bad" : "border-line text-dim")}>
           <b className="font-mono text-[17px] leading-none">{t ? t.score : "—"}</b><span className="micro mt-1 opacity-80">{state === "pass" ? "Pass" : state === "fail" ? "Fail" : "Untested"}</span>
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[160px] flex-1">
           <p className="text-[14px] font-semibold text-ink">Chat test</p>
           <p className="truncate text-[12.5px] text-muted">
             {busy ? <span className="text-accent">{busy}</span>
@@ -61,7 +61,7 @@ export function ChatTestPanel({ c, busy, setBusy }: { c: Character; busy: string
           {t.realism !== undefined && <p className="text-muted"><b className={cx("font-mono", t.realism >= 0.85 ? "text-good" : t.realism >= 0.75 ? "text-ink" : "text-bad")}>{Math.round(t.realism * 100)}%</b> of her {[...t.turns, ...t.cold, ...(t.extras ?? []).flatMap((x) => x.turns)].length} replies read as real and in context to {t.reviewer ?? "the reviewer"}{t.extras?.length ? ` · ${t.extras.length} real user chat${t.extras.length === 1 ? "" : "s"} included` : ""}</p>}
 
           {/* the reviewer's scores */}
-          {t.judge && <div className="grid grid-cols-5 gap-2">
+          {t.judge && <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {DIMS.map(([k, l]) => { const v = t.judge![k]; return (
               <div key={k}>
                 <div className="flex items-baseline justify-between"><span className="text-muted">{l}</span><b className={cx("font-mono", v >= 4 ? "text-good" : v >= 3 ? "text-ink" : "text-bad")}>{v}</b></div>

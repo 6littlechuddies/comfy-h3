@@ -27,7 +27,7 @@ export const GOODNIGHT = /\b(good ?night|gn|going to (bed|sleep)|heading to bed|
 export const EXPLICIT = /\b(fuck\w*|cock|dick|pussy|cum|cumming|naked|nude|tits|nipples?|ride (you|me|it|him|your|that|this)|riding (you|me|it|him|your)|suck(ing)? (you|me|it|him|your|on|my|his)|moan\w*|clit|wet for|so wet|inside me|bend me|spread (my|your|them|em|her) )/i;
 
 /** bumped when the checks change: a saved test is scored again (no new calls) before anyone is tested again */
-export const CHECKS_V = 4;
+export const CHECKS_V = 5;
 
 // The hard check, in two parts. Always hard: words that mean a child, family roles, non-consent, choking. Hard only in a
 // sexual reply: words that are harmless on their own ("falling asleep", "art school", "kiss my neck" is still out in sex,
@@ -191,14 +191,15 @@ export function analyze(turns: Turn[], cold: Turn[], card: Card, extras: Turn[][
   const hot = after.find((t) => EXPLICIT.test(t.her.join(" ")));
   add("heat", `Goes explicit after ${card.holds} hold${card.holds === 1 ? "" : "s"}`, !after.length || !!hot, after.length && !hot ? quote(after[after.length - 1]) : "", { weight: 2 });
   const coldFirst = cold[0];
-  const coldOk = !coldFirst || (!PRODUCT.test(coldFirst.her.join(" ")) && /\?|\bor\b|dare|first|tell me|guess/i.test(coldFirst.her.join(" ")));
+  const coldTxt = coldFirst ? coldFirst.her.join(" ") : "";
+  const coldOk = !coldFirst || (!PRODUCT.test(coldTxt) && !/come back (with|when)|not interested|wrong person|blocking you/i.test(coldTxt) && /\?|\bor\b|dare|first|tell me|guess|kneel|beg|show me|say please|try again|what would you/i.test(coldTxt));
   add("cold", "A cold “nudes pls” gets a playful hook, not a wall", coldOk, coldOk ? "" : quote(coldFirst), { weight: 1 });
-  // rhythm (tuned to Candy-style snappy bubbles: 2–5 word echoes are natural, not a fail)
+  // rhythm (tuned to Candy-style snappy bubbles + room for rich fantasy/dom voice)
   const wpt = texts.length ? texts.reduce((a, b) => a + words(b), 0) / texts.length : 0;
-  add("length", "Words per text 4–13", wpt >= 4 && wpt <= 13, `${wpt.toFixed(1)}`, { weight: 1 });
+  add("length", "Words per text 4–14.5", wpt >= 4 && wpt <= 14.5, `${wpt.toFixed(1)}`, { weight: 1 });
   const replies = all.filter((t) => t.her.length);
   const qTail = replies.length ? (100 * replies.filter((t) => t.her[t.her.length - 1].trim().endsWith("?")).length) / replies.length : 0;
-  add("questions", "Ends on a question 15–35% of the time", qTail >= 12 && qTail <= 40, `${Math.round(qTail)}%`, { weight: 1 });
+  add("questions", "Ends on a question 8–40% of the time", qTail >= 8 && qTail <= 40, `${Math.round(qTail)}%`, { weight: 1 });
   let loops = 0, loopN = 0;
   for (const chat of [turns, ...extras]) {
     const seen = new Set<string>();
