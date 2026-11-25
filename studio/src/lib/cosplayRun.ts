@@ -20,6 +20,14 @@ export const useCosplays = create<{ open: boolean; groups: CosGroup[]; status: R
   atOnce: (() => { try { return Math.max(1, Math.min(24, Number(localStorage.getItem("h3.cos.atOnce")) || 8)); } catch { return 8; } })(),
 }));
 export function setAtOnce(n: number) { useCosplays.setState({ atOnce: n }); try { localStorage.setItem("h3.cos.atOnce", String(n)); } catch { /* */ } }
+/** stops the Cosplays run and cancels any running DeepSeek writer jobs so they stop polling/burning work */
+export function stopCosplays() {
+  useCosplays.setState({ stop: true });
+  void import("./jobs").then(({ useJobs }) => {
+    const { jobs, cancel } = useJobs.getState();
+    for (const j of jobs) if (j.id.startsWith("ds-") && (j.status === "running" || j.status === "queued")) void cancel(j.id);
+  });
+}
 export const openCosplays = () => {
   useCosplays.setState({ open: true });
   // saved chat tests scored with older checks: scored again with today's (free — no calls)
@@ -213,7 +221,7 @@ async function aliasesFor(groups: CosGroup[]): Promise<Record<string, string>> {
 }
 
 /** the one button: find → name → make → write → test, for every cosplay (skipping what's already done unless `again`) */
-export async function runCosplays(o: { again?: boolean; only?: string; fix?: boolean } = {}) {
+export async function runCosplays(o: { again?: boolean; only?: string; fix?: boolean; onlyFailed?: boolean } = {}) {
   if (useCosplays.getState().running) return;
   useCosplays.setState({ running: true, stop: false, done: 0, total: 0, now: null, since: Date.now(), working: [] });
   try {
@@ -228,7 +236,9 @@ export async function runCosplays(o: { again?: boolean; only?: string; fix?: boo
     }
     // Redo of one: her site name is checked again too (her own character's name, or another cosplay's)
     if (o.only && o.again) await untilStop(nameCosplays((t) => say("_", t))).catch((e) => { if ((e as Error).message === "Stopped") throw e; });
-    const todo = o.only ? groups.filter((g) => g.key === o.only) : groups;
+    const todo = o.only ? groups.filter((g) => g.key === o.only)
+      : o.onlyFailed ? groups.filter((g) => { const c = charFor(g); return !!c?.site?.persona && !c.site.chatTest?.pass; })
+      : groups;
     if (!todo.length) { say("_", "No cosplay pictures found"); return; }
     const aliases = await aliasesFor(todo);
     say("_", o.only ? null : `${todo.length} cosplay characters`);

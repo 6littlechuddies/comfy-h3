@@ -3029,6 +3029,14 @@ def _api_key(name: str) -> str:
 DS_LOG = None  # the last 300 DeepSeek calls (for the debug report)
 DS_NOW: dict = {}  # calls in flight: id -> {tag, started, attempt}
 DS_TIMEOUT = int(os.environ.get("DEEPSEEK_TIMEOUT") or 240)  # one attempt; it was 600 s × 3 tries = up to 30 min on one stuck call
+_HTTP: list[aiohttp.ClientSession] = []
+
+
+def _http() -> aiohttp.ClientSession:
+    """one shared connection pool for DeepSeek / OpenRouter so 50+ calls per character reuse TLS sockets"""
+    if not _HTTP or _HTTP[0].closed:
+        _HTTP[:] = [aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=64))]
+    return _HTTP[0]
 
 
 def _ds_log(entry: dict) -> None:
@@ -3048,28 +3056,28 @@ async def _deepseek(messages: list, max_tokens: int = 4000, temperature: float =
     chars_in = sum(len(m["content"]) if isinstance(m.get("content"), str) else sum(len(x.get("text", "")) for x in m.get("content") or []) for m in messages)
     DS_NOW[cid] = {"tag": tag or "?", "started": t0, "attempt": 1, "max_tokens": body["max_tokens"], "thinking": thinking}
     try:
-        async with aiohttp.ClientSession() as s:
-            for attempt in range(3):
-                DS_NOW[cid]["attempt"] = attempt + 1
-                ta = time.time()
-                try:
-                    async with s.post(f"{DEEPSEEK_URL}/chat/completions", json=body, headers={"Authorization": f"Bearer {key or _api_key('DEEPSEEK_API_KEY')}"},
-                                      timeout=aiohttp.ClientTimeout(total=DS_TIMEOUT, sock_connect=20)) as r:
-                        txt = await r.text()
-                        if r.status == 200:
-                            js = json.loads(txt)
-                            m = (js.get("choices") or [{}])[0].get("message") or {}
-                            u = js.get("usage") or {}
-                            _ds_log({"tag": tag or "?", "ok": True, "secs": round(time.time() - t0, 1), "try_secs": round(time.time() - ta, 1), "attempts": attempt + 1,
-                                     "chars_in": chars_in, "tok_in": u.get("prompt_tokens"), "tok_out": u.get("completion_tokens"), "max_tokens": body["max_tokens"],
-                                     "thinking": thinking, "finish": (js.get("choices") or [{}])[0].get("finish_reason"), "at": round(t0)})
-                            return str(m.get("content") or ""), str(m.get("reasoning_content") or "")
-                        last = f"DeepSeek answered {r.status}: " + _redact(txt)[:300]
-                        if r.status in (400, 401, 402, 403, 422): break  # bad key, no balance, a request it won't take: no point retrying
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    last = f"Couldn't reach DeepSeek: {type(e).__name__}" + (f" (no answer in {DS_TIMEOUT} s)" if isinstance(e, asyncio.TimeoutError) else "")
-                _ds_log({"tag": tag or "?", "ok": False, "try_secs": round(time.time() - ta, 1), "attempt": attempt + 1, "error": last[:200], "at": round(ta)})
-                if attempt < 2: await asyncio.sleep(2 + attempt * 3)
+        s = _http()
+        for attempt in range(3):
+            DS_NOW[cid]["attempt"] = attempt + 1
+            ta = time.time()
+            try:
+                async with s.post(f"{DEEPSEEK_URL}/chat/completions", json=body, headers={"Authorization": f"Bearer {key or _api_key('DEEPSEEK_API_KEY')}"},
+                                  timeout=aiohttp.ClientTimeout(total=DS_TIMEOUT, sock_connect=20)) as r:
+                    txt = await r.text()
+                    if r.status == 200:
+                        js = json.loads(txt)
+                        m = (js.get("choices") or [{}])[0].get("message") or {}
+                        u = js.get("usage") or {}
+                        _ds_log({"tag": tag or "?", "ok": True, "secs": round(time.time() - t0, 1), "try_secs": round(time.time() - ta, 1), "attempts": attempt + 1,
+                                 "chars_in": chars_in, "tok_in": u.get("prompt_tokens"), "tok_out": u.get("completion_tokens"), "max_tokens": body["max_tokens"],
+                                 "thinking": thinking, "finish": (js.get("choices") or [{}])[0].get("finish_reason"), "at": round(t0)})
+                        return str(m.get("content") or ""), str(m.get("reasoning_content") or "")
+                    last = f"DeepSeek answered {r.status}: " + _redact(txt)[:300]
+                    if r.status in (400, 401, 402, 403, 422): break  # bad key, no balance, a request it won't take: no point retrying
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last = f"Couldn't reach DeepSeek: {type(e).__name__}" + (f" (no answer in {DS_TIMEOUT} s)" if isinstance(e, asyncio.TimeoutError) else "")
+            _ds_log({"tag": tag or "?", "ok": False, "try_secs": round(time.time() - ta, 1), "attempt": attempt + 1, "error": last[:200], "at": round(ta)})
+            if attempt < 2: await asyncio.sleep(2 + attempt * 3)
     finally:
         DS_NOW.pop(cid, None)
     if " 401" in last: last = "DeepSeek refused the key (401) — check DEEPSEEK_API_KEY. " + last
@@ -3098,21 +3106,21 @@ async def _openrouter(messages: list, model: str, max_tokens: int = 3000, temper
     if not k: raise RuntimeError("No OpenRouter key — paste one in Chat test → Test setup")
     body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
     last = ""
-    async with aiohttp.ClientSession() as s:
-        for attempt in range(3):
-            try:
-                async with s.post("https://openrouter.ai/api/v1/chat/completions", json=body, headers={"Authorization": f"Bearer {k}", "X-Title": "H3 Studio chat test"},
-                                  timeout=aiohttp.ClientTimeout(total=300)) as r:
-                    txt = await r.text()
-                    if r.status == 200:
-                        d = json.loads(txt)
-                        if d.get("error"): last = f"OpenRouter: {str(d['error'])[:300]}"
-                        else: return str(((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
-                    else: last = f"OpenRouter answered {r.status}: " + _redact(txt)[:300]
-                    if r.status in (400, 401, 402, 403, 404): break
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                last = f"Couldn't reach OpenRouter: {type(e).__name__}"
-            await asyncio.sleep(2 + attempt * 3)
+    s = _http()
+    for attempt in range(3):
+        try:
+            async with s.post("https://openrouter.ai/api/v1/chat/completions", json=body, headers={"Authorization": f"Bearer {k}", "X-Title": "H3 Studio chat test"},
+                              timeout=aiohttp.ClientTimeout(total=300)) as r:
+                txt = await r.text()
+                if r.status == 200:
+                    d = json.loads(txt)
+                    if d.get("error"): last = f"OpenRouter: {str(d['error'])[:300]}"
+                    else: return str(((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+                else: last = f"OpenRouter answered {r.status}: " + _redact(txt)[:300]
+                if r.status in (400, 401, 402, 403, 404): break
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            last = f"Couldn't reach OpenRouter: {type(e).__name__}"
+        await asyncio.sleep(2 + attempt * 3)
     raise RuntimeError(last.replace(k, "‹hidden›"))
 
 
@@ -3459,8 +3467,9 @@ async def _proton_keys():
             # any text file whose name mentions hf / hugging / token / key, in "H3 Studio" or at the top of the drive
             # (hf_tokens.txt, "HF keys (2).txt", tokens.md …) — renamed or re-uploaded copies are still found
             names_ok = re.compile(r"(hf|hugging|token|key|civit)", re.I)
-            for where in (folder, ""):
-                rc, out = await _rclone("lsjson", f"proton:{where}", "--files-only", timeout=120)
+            wheres = (folder, "")
+            listings = await asyncio.gather(*(_rclone("lsjson", f"proton:{w}", "--files-only", timeout=120) for w in wheres))
+            for where, (rc, out) in zip(wheres, listings):
                 try: files = json.loads(out[out.index("["): out.rindex("]") + 1]) if rc == 0 else []
                 except ValueError: files = []
                 for f in files:
@@ -3482,8 +3491,7 @@ async def _proton_keys():
             if civ: print(f"CivitAI: {len(civ)} key(s) from {_cloud()}", flush=True)
         except OSError as e:
             print("!! couldn't save the CivitAI keys:", e, flush=True)
-        await _hf_rest_get()  # before the keys file: the downloader picks its first key as soon as that appears
-        await _usage_start_get()  # and reads what you use, to choose what downloads first (smart start)
+        await asyncio.gather(_hf_rest_get(), _usage_start_get())  # in parallel before writing the keys file so downloads start faster
         try:
             os.makedirs(os.path.dirname(HF_KEYS_FILE), mode=0o700, exist_ok=True)
             fd = os.open(HF_KEYS_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -4011,6 +4019,8 @@ async def _save_and_end(end: bool):
     that worked and you asked, the rental is destroyed so billing stops. A phone alert says how it went."""
     END.update(state="saving", error="", at=time.time())
     try:
+        # if a periodic sync is already mid-flight, wait for it to finish instead of skipping our final save
+        while PROTON.get("running"): await asyncio.sleep(1)
         await proton_sync(full=True, force=True)
         if PROTON.get("state") == "error": raise RuntimeError(PROTON.get("error") or "the save failed")
         if not end:
@@ -5800,7 +5810,7 @@ async def downloads_later(req):
     os.makedirs(STATE, exist_ok=True)
     tmp = LATER_FILE + ".tmp"
     with open(tmp, "w") as f:
-        json.dump({"later": sorted(lat), "now": sorted(now), "next": nxt, **({"remove": sorted(set(cur.get("remove") or []) | touched)} if remove else {})}, f)
+        json.dump({**({"preset": cur["preset"]} if cur.get("preset") else {}), "later": sorted(lat), "now": sorted(now), "next": nxt, **({"remove": sorted(set(cur.get("remove") or []) | touched)} if remove else {})}, f)
     os.replace(tmp, LATER_FILE)
     # the downloader picks the change up within a few seconds; if it isn't running any more, start it again
     alive = False
@@ -7133,6 +7143,9 @@ async def comfy_proxy(req):
 def main():
     app = web.Application(client_max_size=2 * 1024 ** 3, middlewares=[show_errors])
     app.on_startup.append(on_start)
+    async def _close_http(_app):
+        if _HTTP and not _HTTP[0].closed: await _HTTP[0].close()
+    app.on_cleanup.append(_close_http)
     app.add_routes([
         web.get("/studio-api/grok/status", grok_status), web.post("/studio-api/grok/ask", grok_ask), web.get("/studio-api/grok/result/{id}", grok_result), web.delete("/studio-api/grok/result/{id}", grok_cancel),
         web.get("/grok-relay/next", relay_next), web.post("/grok-relay/answer", relay_answer), web.get("/grok-relay/h3-grok.user.js", relay_script), web.get("/grok-relay/img/{id}/{n}", relay_img),

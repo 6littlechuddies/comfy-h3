@@ -103,6 +103,7 @@ async function systemFor(c: Character): Promise<{ text: string; site: boolean }>
     emoji_line: ch.emojiRate ? `Emoji: ${ch.emojiRate === "none" ? "none" : ch.emojiRate === "rare" ? "rarely, at most one" : ch.emojiRate === "often" ? "often, one or two" : "sometimes, one"}.` : "",
     casing_line: ch.casing === "proper" ? "You type with normal capitals and punctuation." : ch.casing === "custom" ? `How you type: ${ch.casingCustom ?? "your own way"}.` : "You type in lowercase.",
     memory_him: `His name is ${HIS_NAME} (his account name). Nothing else yet.`, right_now: s.scenario || s.statusLine || "texting from home",
+    today: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
     people: (s.people ?? []).map((p) => `${p.name} (${p.relation}${p.note ? `, ${p.note}` : ""})`).join("; ") || "none named yet",
   };
   const text = tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "").replace(/\{\{user\}\}/g, HIS_NAME);

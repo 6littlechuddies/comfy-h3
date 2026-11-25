@@ -16,8 +16,10 @@ export const PUSHBACK = /\b(bot\b\??|broken|glitch\w*|npc)\b/i;
 export const NAME_ASK = /\b(what'?s|what is|whats) your (real |actual )?name\b|\bwhat (do|should|can) i call you\b|\btell me your (real )?name\b|\byour name\?/i;
 /** distress is the server's, never a scene: no comfort-drinking beats */
 export const DISTRESS = /\b(drink with me|come sit with me|i'?ve been there too|pass(ing)? (me )?the bottle|share (a|the|my) bottle)\b/i;
-/** school, youth, family and authority roles, non-consent, the throat */
-export const HARD = /\b(teen\w*|school\w*|classroom|student|freshman|sophomore|youth|step[- ]?(sis|sister|bro|brother|mom|dad|daughter|son|family)|stepmom|stepdad|daddy|mommy|teacher|professor|babysit\w*|nanny|asleep|passed out|unconscious|blackout drunk|forc(e|ed|ing)|rape|non-?con\w*|chok\w*|throat|neck|strangl\w*|breath ?play)\b/i;
+/** always a hard limit (child, family roles, non-consent, choking) vs only in sexual lines ("asleep", "neck", "art school") */
+export const HARD_ALWAYS = /\b(loli\w*|shota\w*|underage|preteen|pre-teen|step[- ]?(sis|sister|bro|brother|mom|dad|daughter|son|family)|stepmom|stepdad|daddy|mommy|rape\w*|non-?con\w*|chok\w*|strangl\w*|breath ?play)\b/i;
+export const HARD = /\b(teen\w*|school\w*|classroom|student|freshman|sophomore|youth|teacher|professor|babysit\w*|nanny|asleep|passed out|unconscious|blackout drunk|forc(e|ed|ing)|throat|neck)\b/i;
+const SEX_LINE = /\b(fuck\w*|cock|dick|pussy|cum|cumming|naked|nude|tits|nipples?|moan\w*|clit|wet for|so wet|inside me|bend me|spread (my|your|them|em|her) )\b/i;
 /** family words — fine in an ordinary exchange ("my sister Mara"), never in a hot line */
 export const FAMILY = /\b(sister|brother|mom|mum|mother|dad|father|aunt|uncle|cousin|niece|nephew)\b/i;
 export const CLOCK = /\b(\d{1,2}(:\d{2})?\s?(am|pm|a\.m\.|p\.m\.)|\d{1,2}:\d{2}|midnight)\b/i;
@@ -39,7 +41,10 @@ export const sharedWith = (t: string, taken: Set<string>) => [...grams4(t)].filt
 /** why a line can't be used ("" = fine). kind: "example" (an ordinary exchange) or a hot-line stage */
 export function lineProblem(t: string, kind: "example" | "tease" | "explicit" | "after", o: { dom?: boolean; echo?: string } = {}): string {
   if (/\*|asterisk/i.test(t)) return "an asterisk";
-  if (minorWords(t).length || HARD.test(t)) return `a hard limit (${(minorWords(t)[0] ?? t.match(HARD)?.[0] ?? "").toLowerCase()})`;
+  if (minorWords(t).length || HARD_ALWAYS.test(t) || ((kind === "explicit" || SEX_LINE.test(t)) && HARD.test(t))) {
+    const hit = minorWords(t)[0] ?? t.match(HARD_ALWAYS)?.[0] ?? t.match(HARD)?.[0] ?? "";
+    return `a hard limit (${hit.toLowerCase()})`;
+  }
   if (STOCK.test(t)) return `a banned line (${t.match(STOCK)?.[0]})`;
   if (EARN.test(t) && !(o.dom && kind === "example")) return "a banned line (earn it)";
   // his own word, echoed to shrug it off ("premium for what?"), is fine; anything else about the app isn't

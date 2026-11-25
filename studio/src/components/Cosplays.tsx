@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { viewUrl } from "../lib/api";
 import { useCharacters, type Character } from "../lib/characters";
-import { charFor, runCosplays, scanCosplays, setAtOnce, setMain, useCosplays, type CosGroup } from "../lib/cosplayRun";
+import { charFor, runCosplays, scanCosplays, setAtOnce, setMain, stopCosplays, useCosplays, type CosGroup } from "../lib/cosplayRun";
 import { useJobs } from "../lib/jobs";
 import { Thumb } from "./Thumb";
 import { DropSelect, Icon, cx } from "./ui";
@@ -97,7 +97,7 @@ function CosplaysPanel() {
         <label className="flex items-center gap-1.5 text-[12px] text-muted" title="How many characters are made at the same time — change it while it runs. The writing and chat tests are DeepSeek calls, so 8–16 is fine; if DeepSeek starts answering 429 (too many requests) or the timer goes red on writer steps, lower it. On the local writer (no DeepSeek key) keep it at 1">At once
           <DropSelect value={String(atOnce)} onChange={(e) => setAtOnce(Number(e.target.value))} className="inset h-10 border px-2 text-ink">{[1, 2, 4, 6, 8, 12, 16, 24].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
         {running
-          ? <button onClick={() => useCosplays.setState({ stop: true })} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop</button>
+          ? <button onClick={() => stopCosplays()} className="press flex h-10 items-center gap-2 border border-bad/50 px-4 text-[13px] font-semibold text-bad hover:bg-bad/10"><Icon name="stop" size={14} /> Stop</button>
           : <>
             <button onClick={() => void runCosplays({ again: true })} disabled={!groups.length} title="Every profile and its chat lines written again — for when the writer has changed"
               className="press chip-raised flex h-10 items-center gap-2 px-3.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40"><Icon name="refresh" size={13} /> Write all again</button>
@@ -143,6 +143,15 @@ function CosplaysPanel() {
           {FILTERS.map(([f, l]) => { const n = count(f); if (f !== "all" && !n && filter !== f) return null; return (
             <button key={f} onClick={() => setFilter(f)} className={cx("press tag-btn !inline-flex !h-8 items-center gap-2 !px-3 !text-[12.5px]", filter === f && "on", f === "problem" && filter !== f && "!border-bad/50 !text-bad")}>
               {l}<span className={cx("font-mono text-[11px]", filter === f ? "opacity-70" : "text-dim")}>{n}</span></button>); })}
+          {toPick > 0 && !running && (
+            <button onClick={async () => {
+              let n = 0;
+              for (const r of rows) if (r.st === "pick" && r.c && r.g.pics[0]) { await setMain(r.c.id, r.g.pics[0], false); n++; }
+              if (n) toast(`Kept newest picture as main for ${n} character${n === 1 ? "" : "s"}`, "good");
+            }} className="press chip-raised ml-1 h-8 px-3 text-[12px] text-ink hover:border-accent">Keep newest for all ({toPick})</button>)}
+          {count("test") > 0 && !running && (
+            <button onClick={() => void runCosplays({ onlyFailed: true, fix: true })}
+              className="press chip-raised h-8 px-3 text-[12px] text-accent hover:border-accent">Fix all failed ({count("test")})</button>)}
           <span className="ml-auto flex items-center gap-2 text-[12px] text-dim">
             <span className="hidden lg:inline">Click a picture to make it her main · double-click to see it big</span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a character" aria-label="Find a character"
@@ -202,6 +211,8 @@ function Card({ g, c, st, status, working }: { g: CosGroup; c?: Character; st: R
           </div>
           {!c && <MakeOne g={g} />}
           {c && (st === "test" || st === "problem") && <MakeOne g={g} fix />}
+          {c && <button onClick={() => { useCosplays.setState({ open: false }); void import("./SiteLink").then((m) => m.openSiteLink(c.id)); }} title="Open her profile and chat test in Your site"
+            className="press chip-raised h-7 px-2 text-[11.5px] text-muted hover:text-ink">Open</button>}
           {c && <MakeOne g={g} redo />}
           <span className="font-mono text-[11px] text-dim">{g.pics.length} pic{g.pics.length === 1 ? "" : "s"}</span>
         </div>
