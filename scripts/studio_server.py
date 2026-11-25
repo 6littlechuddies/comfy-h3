@@ -6625,11 +6625,13 @@ async def _site_push(job: dict, d: dict):
             try: p = _file_of(ref)
             except web.HTTPException: return None
             return p if os.path.isfile(p) else None
-        # CARD: the picture on the grid and in chat = her cover photo (Characters → Cover photo, or one picked for the site);
+        # CARD: the picture on the grid and in chat = her chosen cover / cosplay mainFrom / Characters cover;
         # AVATAR: her face (or a picked one) — the site shows the card when there is one. Factory roles "card" / "avatar".
         for role, v in (("avatar", site.get("avatar") or "face"), ("card", site.get("cover") or "front")):
             own = site.get("avatarFile" if role == "avatar" else "coverFile")
-            if role == "card" and not own and not site.get("cover") and isinstance(c.get("cover"), dict): own = c["cover"]
+            if role == "card" and not own:
+                if isinstance(site.get("mainFrom"), dict) and site["mainFrom"].get("filename"): own = site["mainFrom"]
+                elif not site.get("cover") and isinstance(c.get("cover"), dict): own = c["cover"]
             p = own_path(own) or vpath(v) or vpath("front")
             if p and os.path.isfile(p): files.append((role, p))
         # BANNER: the explore page's wide hero (factory role "cover"), only when one was picked — else the site keeps its own
@@ -6692,10 +6694,15 @@ async def _site_push(job: dict, d: dict):
             await asyncio.gather(*(send(p) for p in uniq))
             gen = ["Krea 2", "MiniMax H3"] if c.get("style") == "realistic" else ["Anima / Illustrious", "MiniMax H3"]
             appearance = {k: c.get(k, "") for k in ("hair", "eyes", "body", "outfit", "details")}
+            is_cosplay = (
+                str(c.get("source") or "").startswith("Cosplay of ")
+                or bool(site.get("mainFrom"))
+                or any(str(t).strip().lower() == "cosplay" for t in (site.get("tags") or []))
+            )
             manifest = {
                 "external_id": ext, "name": (str(site.get("name") or "").strip() or c.get("name")), "age": max(21, int(age)), "gender": c.get("gender"), "style": c.get("style"),  # the site's ages are 21+
                 # a cosplay character carries the "cosplay" tag (the site's Cosplay section can pick them out)
-                "tags": list(dict.fromkeys((site.get("tags") or []) + (["cosplay"] if str(c.get("source") or "").startswith("Cosplay of ") else []))),
+                "tags": list(dict.fromkeys((site.get("tags") or []) + (["cosplay"] if is_cosplay else []))),
                 "profile": {"bio": site.get("bio", ""), "personality": site.get("personality") or c.get("personality", ""), "backstory": site.get("backstory", ""),
                             "greeting": site.get("greeting", ""), "appearance": appearance, "description": c.get("block") or ""},
                 "persona_prompt": _persona_clean(_no_length(_weave_facts((site.get("personaCore") if d.get("short_persona") and site.get("personaCore") else site.get("persona")) or "", site))), "voice_notes": _persona_clean(" ".join(x for x in [site.get("voice", "").strip(), f"Habits: {site['quirks'].strip()}." if site.get("quirks") else ""] if x)),
@@ -6703,7 +6710,7 @@ async def _site_push(job: dict, d: dict):
             }
             # the site's own fields (factory API "site" block): only what's written is sent. A cosplay character goes in the
             # Cosplay section (since 23 Nov: listed there only); everyone else is left to the category her style gives her
-            manifest["site"] = _site_block(site, str(c.get("source") or "").startswith("Cosplay of "))
+            manifest["site"] = _site_block(site, is_cosplay)
             if not manifest["site"]: manifest.pop("site")
             sig = [str(w).strip() for w in (site.get("signatureWords") or []) if str(w).strip()]
             if sig: manifest["voice_notes"] = (manifest["voice_notes"] + f" Words she reaches for: {', '.join(sig)}.").strip()

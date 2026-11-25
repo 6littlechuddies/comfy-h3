@@ -491,11 +491,34 @@ function DeepToggle() {
   );
 }
 
+// Persisted selection across CharacterPage open/back navigations (never loses ticked checkboxes)
+let _siteSelCache: Set<string> = (() => {
+  try {
+    const raw = sessionStorage.getItem("h3.site.sel");
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch { /* */ }
+  return new Set<string>();
+})();
+const saveSiteSel = (next: Set<string>) => {
+  _siteSelCache = next;
+  try { sessionStorage.setItem("h3.site.sel", JSON.stringify([...next])); } catch { /* */ }
+};
+const isCosplayChar = (c: Character) =>
+  /^Cosplay of /.test(c.source ?? "") || !!c.site?.mainFrom || (c.site?.tags ?? []).some((t) => t.trim().toLowerCase() === "cosplay");
+const mainPicOf = (c: Character) => c.site?.coverFile ?? c.site?.mainFrom ?? c.cover ?? c.views.front;
+
 // ------------------------------------------------------------------ level 1: every character, many at once
 function Characters({ connected }: { connected: boolean }) {
   const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && c.views.front);
   const toast = useJobs((s) => s.toast);
-  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [sel, setSelRaw] = useState<Set<string>>(() => new Set(_siteSelCache));
+  const setSel = (v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setSelRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      saveSiteSel(next);
+      return next;
+    });
+  };
   const busy = useSiteBusy((s) => s.busy);
   // drag across the tick boxes to tick (or untick) many at once
   const drag = useRef<boolean | null>(null);
@@ -605,17 +628,30 @@ function Characters({ connected }: { connected: boolean }) {
   const sendAll = async () => {
     let ok = 0, held = 0;
     chosen.forEach((c) => mark(c.id, "Waiting…"));
+    // Auto-alias any cosplay whose site.name is missing or identical to her source name before uploading
+    const needAlias = chosen.filter((c) => {
+      const m = /^Cosplay of (.+?)(?: \(|$)/.exec(c.source ?? "");
+      if (!m) return false;
+      const shown = (c.site?.name || c.name).trim().toLowerCase();
+      return !c.site?.name?.trim() || shown === m[1].trim().toLowerCase();
+    });
+    if (needAlias.length) {
+      try {
+        const { nameCosplays } = await import("../lib/cosplayRun");
+        await nameCosplays((t) => needAlias.forEach((c) => mark(c.id, t)));
+      } catch { /* fall back to sendOne */ }
+    }
     await runPool(chosen, 4, async (c) => {
       const cur = useCharacters.getState().list.find((x) => x.id === c.id)!;
-      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${c.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); return; } }
+      if (!hasProfile(cur)) { mark(c.id, "Writing profile…"); try { await writeProfile(cur, false, (t) => mark(c.id, t)); } catch (e) { toast(`${cur.site?.name || cur.name}: ${(e as Error).message}`, "bad"); mark(c.id, null); return; } }
       // not chat-tested (or failed): tested and fixed first; still failing → not sent
       if (!useCharacters.getState().list.find((x) => x.id === c.id)?.site?.chatTest?.pass) {
-        const t = await (await import("../lib/chatTest")).testAndFix(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: (m) => mark(c.id, m) }).catch((e) => { toast(`${c.name}: chat test didn't run (${(e as Error).message})`, "bad"); return null; });
-        if (!t || !t.pass) { if (t) toast(`${c.name}: failed the chat test (${t.score}/100) — not sent. Open her Chat test to see why`, "bad"); held++; mark(c.id, null); return; }
+        const t = await (await import("../lib/chatTest")).testAndFix(useCharacters.getState().list.find((x) => x.id === c.id)!, { onStep: (m) => mark(c.id, m) }).catch((e) => { toast(`${cur.site?.name || cur.name}: chat test didn't run (${(e as Error).message})`, "bad"); return null; });
+        if (!t || !t.pass) { if (t) toast(`${cur.site?.name || cur.name}: failed the chat test (${t.score}/100) — not sent. Open her Chat test to see why`, "bad"); held++; mark(c.id, null); return; }
       }
       mark(c.id, "Sending…");
       const r = await sendOne(useCharacters.getState().list.find((x) => x.id === c.id)!, (t) => mark(c.id, t));
-      if (r.ok) ok++; else toast(`${c.name}: ${r.note}`, "bad");
+      if (r.ok) ok++; else toast(`${cur.site?.name || cur.name}: ${r.note}`, "bad");
       mark(c.id, null);
     });
     toast(`${ok} of ${chosen.length} sent as drafts${held ? ` · ${held} held back by the chat test` : ""}`, ok === chosen.length ? "good" : "info");
@@ -626,9 +662,12 @@ function Characters({ connected }: { connected: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[13px] text-muted">Pick one to open it, or tick several (drag across the boxes) to do them together.</p>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={() => setSel(sel.size === list.length ? new Set() : new Set(list.map((c) => c.id)))}>{sel.size === list.length ? "Select none" : "Select all"}</button>
-        {list.some((c) => c.style === "realistic" && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every realistic (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).map((c) => c.id)))}>Select realistic ({list.filter((c) => c.style === "realistic" && !c.site?.mainFrom).length})</button>}
-        {list.some((c) => c.style === "anime" && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every anime (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "anime" && !c.site?.mainFrom).map((c) => c.id)))}>Select anime ({list.filter((c) => c.style === "anime" && !c.site?.mainFrom).length})</button>}
-        {list.some((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every non-cosplay character that failed or hasn't passed the chat test yet" onClick={() => setSel(new Set(list.filter((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom).map((c) => c.id)))}>Select failed/untested ({list.filter((c) => !c.site?.chatTest?.pass && !c.site?.mainFrom).length})</button>}
+        {list.some((c) => !!c.site?.chatTest?.pass) && <button className="text-[12.5px] text-good hover:text-ink" title="Tick every character who passed the chat test (ready for bulk Send as drafts)" onClick={() => setSel(new Set(list.filter((c) => !!c.site?.chatTest?.pass).map((c) => c.id)))}>Select passed ({list.filter((c) => !!c.site?.chatTest?.pass).length})</button>}
+        {list.some((c) => !c.site?.chatTest?.pass || (c.site?.chatTest?.score ?? 0) < 80) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character under 80 points or failed/untested" onClick={() => setSel(new Set(list.filter((c) => !c.site?.chatTest?.pass || (c.site?.chatTest?.score ?? 0) < 80).map((c) => c.id)))}>Select &lt; 80 ({list.filter((c) => !c.site?.chatTest?.pass || (c.site?.chatTest?.score ?? 0) < 80).length})</button>}
+        {list.some((c) => c.style === "realistic" && !isCosplayChar(c)) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every realistic (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "realistic" && !isCosplayChar(c)).map((c) => c.id)))}>Select realistic ({list.filter((c) => c.style === "realistic" && !isCosplayChar(c)).length})</button>}
+        {list.some((c) => c.style === "anime" && !isCosplayChar(c)) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every anime (non-cosplay) character" onClick={() => setSel(new Set(list.filter((c) => c.style === "anime" && !isCosplayChar(c)).map((c) => c.id)))}>Select anime ({list.filter((c) => c.style === "anime" && !isCosplayChar(c)).length})</button>}
+        {list.some(isCosplayChar) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every cosplay character" onClick={() => setSel(new Set(list.filter(isCosplayChar).map((c) => c.id)))}>Select cosplays ({list.filter(isCosplayChar).length})</button>}
+        {list.some((c) => !c.site?.chatTest?.pass && !isCosplayChar(c)) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every non-cosplay character that failed or hasn't passed the chat test yet" onClick={() => setSel(new Set(list.filter((c) => !c.site?.chatTest?.pass && !isCosplayChar(c)).map((c) => c.id)))}>Select failed/untested ({list.filter((c) => !c.site?.chatTest?.pass && !isCosplayChar(c)).length})</button>}
         {list.some(autoNamed) && <button className="text-[12.5px] text-muted hover:text-ink" title="Tick every character still named after her look (“Black Bob Bangs · Maid Outfit”)" onClick={() => setSel(new Set(list.filter(autoNamed).map((c) => c.id)))}>Select unnamed ({list.filter(autoNamed).length})</button>}
         <Btn onClick={() => setNaming(true)} disabled={!chosen.length || Object.keys(busy).length > 0} why="Tick characters first" title="A first name for each, from her look, picture prompt and profile — you check them before anything is renamed"><Icon name="script" size={14} /> Name them{chosen.length ? ` · ${chosen.length}` : ""}</Btn>
         <Btn onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then click each one's main picture and send"><Icon name="sparkle" size={13} /> Cosplays</Btn>
@@ -653,24 +692,30 @@ function Characters({ connected }: { connected: boolean }) {
           const st = status(c);
           const sets = c.site?.sets ?? [];
           const on = sel.has(c.id);
+          const display = c.site?.name?.trim() || c.name;
+          const aliased = !!c.site?.name?.trim() && c.site.name.trim() !== c.name;
+          const ct = c.site?.chatTest;
+          const cat = isCosplayChar(c) ? "cosplay" : c.style;
+          const pic = mainPicOf(c)!;
           return (
             <div key={c.id} onMouseEnter={() => { if (drag.current != null) tick(c.id, drag.current); }} className={cx("group relative flex flex-col overflow-hidden border transition-colors", on ? "border-accent" : "border-line hover:border-muted")}>
-              <button onClick={() => go(c.id)} className="relative aspect-[3/4] overflow-hidden bg-raised" aria-label={`Open ${c.name}`}>
-                <img src={viewUrl((c.cover ?? c.views.front)!)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+              <button onClick={() => go(c.id)} className="relative aspect-[3/4] overflow-hidden bg-raised" aria-label={`Open ${display}`}>
+                <img src={viewUrl(pic)} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
                 {/* her hover loop, played on hover the way the site's card does */}
                 {c.site?.loopFile && <video src={viewUrl(c.site.loopFile)} muted loop playsInline preload="none" onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.play().catch(() => {}); }} onMouseLeave={(e) => { e.currentTarget.style.opacity = "0"; e.currentTarget.pause(); }} className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity" />}
                 {c.site?.loopFile && <span className="micro pointer-events-none absolute right-2 top-2 bg-black/70 px-1 text-white">LOOP</span>}
+                {ct && <span className={cx("micro pointer-events-none absolute right-2 bottom-2 px-1.5 py-0.5 font-mono", ct.pass ? "bg-good/90 text-black" : "bg-bad/90 text-white")}>{ct.score} {ct.pass ? "PASS" : "FAIL"}</span>}
                 {busy[c.id] && <span className="absolute inset-x-0 bottom-0 bg-black/80 px-2 py-1.5 text-[11.5px] text-ink"><span className="pulse">●</span> {busy[c.id]}</span>}
               </button>
               {/* a big tick area: press and drag across the cards to tick (or untick) a row at once */}
-              <button role="checkbox" aria-checked={on} aria-label={`Select ${c.name}`} title="Select — press and drag across others to select them too"
+              <button role="checkbox" aria-checked={on} aria-label={`Select ${display}`} title="Select — press and drag across others to select them too"
                 onMouseDown={(e) => { e.preventDefault(); drag.current = !on; tick(c.id, !on); }} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); tick(c.id, !on); } }}
                 className="absolute left-0 top-0 z-10 flex h-12 w-12 cursor-pointer items-start justify-start p-2">
                 <span className={cx("flex h-7 w-7 items-center justify-center border", on ? "border-accent bg-accent text-accentink" : "border-line bg-black/70 text-transparent group-hover:text-white/60")}><Icon name="check" size={14} /></span>
               </button>
               <div className="flex flex-col gap-0.5 px-2.5 py-2">
-                <span className="truncate text-[13.5px] font-semibold">{c.name}</span>
-                <span className="text-[11.5px] text-muted">{hasProfile(c) ? "Profile ready" : "No profile yet"} · {sets.length} folder{sets.length === 1 ? "" : "s"}{c.site?.loopFile ? " · loop" : ""}</span>
+                <span className="truncate text-[13.5px] font-semibold" title={aliased ? `${display} (as ${c.name})` : display}>{display}{aliased && <span className="ml-1 font-normal text-[11.5px] text-dim">· {c.name}</span>}</span>
+                <span className="text-[11.5px] text-muted">{cat} · {hasProfile(c) ? "Profile ready" : "No profile"} · {sets.length} folder{sets.length === 1 ? "" : "s"}{c.site?.loopFile ? " · loop" : ""}</span>
                 <span className={cx("text-[11.5px]", STATUS[st][1])}>{STATUS[st][0]}</span>
               </div>
             </div>
