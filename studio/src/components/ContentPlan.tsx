@@ -122,7 +122,7 @@ function AutoPlanBox() {
     setBusy("Starting…");
     try {
       const { planAndQueue } = await import("../lib/autoPlan");
-      const r = await planAndQueue(chars.filter((c) => who.includes(c.id)), { sets: n, per, mix, backdrop, poseSet: poseSet || undefined, faceFix: true, usePoseWear }, setBusy, review);
+      const r = await planAndQueue(chars.filter((c) => who.includes(c.id)), { sets: n, per, mix, backdrop, poseSet: poseSet || undefined, faceFix: false, usePoseWear }, setBusy, review);
       toast(review ? `${r.rows} prompts written into the rows below — read or edit any of them, then press Queue.` : `Planned and queued ${r.jobs} pictures in ${n * who.length} sets — each lands in its site set as it's done.`, "good", "batch");
     } catch (e) { toast((e as Error).message, "bad", "batch"); } finally { setBusy(null); }
   };

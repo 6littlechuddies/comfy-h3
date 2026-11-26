@@ -78,11 +78,14 @@ export async function sharpenFace(src: FileRef | { name: string }, o: FaceOpts =
   return last;
 }
 
-/** Create's "Sharpen the face after": every picture a job with `faceFix` finishes goes through the face pass */
+/** Create's "Sharpen the face after": only when a job transitions live from queued/running -> done (never on reload/restore!) */
+const faceRan = new Set<string>();
 useJobs.subscribe((s, prev) => {
   for (const j of s.jobs) {
     const fix = j.meta?.faceFix as { character: string | null; strength: number } | undefined;
-    if (!fix || j.status !== "done" || prev.jobs.find((x) => x.id === j.id)?.status === "done") continue;
+    const before = prev.jobs.find((x) => x.id === j.id);
+    if (!fix || j.status !== "done" || !before || (before.status !== "running" && before.status !== "queued") || faceRan.has(j.id)) continue;
+    faceRan.add(j.id);
     const c = fix.character ? useCharacters.getState().list.find((x) => x.id === fix.character) ?? null : null;
     const outs = j.outputs.filter((x) => x.kind === "image" && x.type === "output");
     (async () => {

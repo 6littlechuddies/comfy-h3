@@ -484,7 +484,7 @@ export async function queueAll(only?: string[]): Promise<number> {
             if (r.control) await (await import("./posewear")).depthReady();
             const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 50);
             job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name}${named ? ` · ${named}` : ""} · ${cs.view}`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
-              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 4, prefix: "studio/batch/create", control: r.control }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
+              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 2.8, prefix: "studio/batch/create", control: r.control }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
             useBatch.getState().update(r.id, { debug: { path: "character sheet (Krea 2 Identity Edit on a blank canvas)", character: c.name, view: cs.view, reference: cs.ref.name, pose: r.pose?.title ?? null,
               poseImage: r.control?.image ?? null, poseDepth: r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : null, poseStrength: r.control?.strength ?? null,
               loras: cs.loras.map((l) => `${l.name} @${l.strength}`), instruction: cs.instruction.slice(0, 600), canvas: `${cs.canvas.width}×${cs.canvas.height}` } });
