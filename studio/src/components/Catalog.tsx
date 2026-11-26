@@ -5,14 +5,15 @@ import { Thumb } from "./Thumb";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
-import { viewUrl, type FileRef } from "../lib/api";
+import { toInput, viewUrl, type FileRef } from "../lib/api";
 import { coverOf, useCharacters, type Character } from "../lib/characters";
 import { isFav, toggleFav, useFavs } from "../lib/favs";
+import { buildEdit, type ApiGraph } from "../lib/graphs";
 import { useJobs } from "../lib/jobs";
 import { deleteFile } from "../lib/made";
 import { moveResults } from "../lib/move";
 import { askConfirm } from "./Dialogs";
-import { useSettings } from "../lib/settings";
+import { editArgs, newSeed, useSettings } from "../lib/settings";
 import { openPictureMenu } from "./PictureMenu";
 import { openViewer } from "./Viewer";
 import { DropSelect, Icon, cx } from "./ui";
@@ -51,10 +52,13 @@ function CatalogPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [picked, setPicked] = useState<Record<string, CatItem>>({});
+  const [remaking, setRemaking] = useState<Record<string, { pct: number; step?: string }>>({});
+  const remakeUnsubs = useRef<(() => void)[]>([]);
   const anchor = useRef<number | null>(null);
   const favs = useFavs((s) => s.set);
   const toast = useJobs((s) => s.toast);
   const close = () => useCatalog.setState({ open: false });
+  useEffect(() => () => { remakeUnsubs.current.forEach((u) => u()); remakeUnsubs.current = []; }, []);
   const req = useRef(0);
   const load = async (offset: number) => {
     const my = ++req.current;
@@ -144,6 +148,108 @@ function CatalogPanel() {
   const groups = ["Realistic", "Realistic cosplays", "Anime", "Other folders"].map((g) => ({ g, rows: [...rows, ...rest].filter((r) => r.group === g && (r.n > 0 || (r.id && g !== "Other folders"))).sort((a, b) => b.n - a.n) })).filter((x) => x.rows.length);
   // the character the site buttons are for: the project whose folder is open, else the one picked on the left
   const siteChar = chars.find((c) => folder.split("\n")[0] === `@${c.id}`) ?? sel;
+  const remakeItem = async (it: CatItem) => {
+    const oldKey = fileKey(it);
+    if (remaking[oldKey]) return;
+    const oldRef = asRef(it);
+    setRemaking((r) => ({ ...r, [oldKey]: { pct: 0, step: "Reading prompt…" } }));
+    const clear = () => setRemaking((r) => { const n = { ...r }; delete n[oldKey]; return n; });
+    try {
+      const res = await fetch("/studio-api/catalog/graph", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: it.filename, subfolder: it.subfolder, type: "output" }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.error || `Couldn't read prompt (${res.status})`);
+
+      // Match the character behind this picture so missing LoadImage refs (e.g. after a rental move) auto-heal
+      const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      const packSlug = it.subfolder.match(/packs\/([^/]+)/i)?.[1] ?? "";
+      const ch =
+        (it.meta?.project ? chars.find((c) => c.id === it.meta?.project) : undefined)
+        ?? (it.meta?.character ? chars.find((c) => norm(c.name) === norm(it.meta!.character!)) : undefined)
+        ?? (packSlug ? chars.find((c) => norm(c.name) === norm(packSlug)) : undefined)
+        ?? siteChar
+        ?? undefined;
+
+      let graph: ApiGraph | null = d.graph && typeof d.graph === "object" ? (JSON.parse(JSON.stringify(d.graph)) as ApiGraph) : null;
+      if (graph) {
+        const missing = new Set<string>(Array.isArray(d.missing_inputs) ? d.missing_inputs : []);
+        let freshInput: string | null = null;
+        if (missing.size > 0 && ch) {
+          const refFile = ch.views.face ?? ch.views.front;
+          if (refFile) freshInput = (await toInput(refFile)).name;
+        }
+        for (const node of Object.values(graph)) {
+          const inp = node?.inputs as Record<string, unknown> | undefined;
+          if (!inp) continue;
+          if (typeof inp.seed === "number") inp.seed = newSeed();
+          if (typeof inp.noise_seed === "number") inp.noise_seed = newSeed();
+          if (node.class_type === "LoadImage" && typeof inp.image === "string" && missing.has(inp.image) && freshInput) {
+            inp.image = freshInput;
+          }
+          if (typeof inp.filename_prefix === "string") {
+            inp.filename_prefix = inp.filename_prefix.replace(/_[a-z0-9]{8}$/, "");
+          }
+        }
+      } else {
+        const prompt = (String(d.prompt || it.meta?.prompt || "")).trim();
+        if (!ch || !prompt) throw new Error("No embedded workflow or prompt found in this picture");
+        const { characterShot } = await import("../lib/make");
+        const { ref, instruction, loras, canvas } = await characterShot(ch, prompt, prompt, "tall", [], null);
+        const e = useSettings.getState().s.edit;
+        graph = buildEdit({ ...editArgs(e, "krea"), loras, enhance: false, seed: newSeed(), images: [ref.name], blank: canvas, instruction, negative: "", resolution: 1024, refBoost: 2.8, prefix: "studio/create/remake" });
+      }
+
+      setRemaking((r) => ({ ...r, [oldKey]: { pct: 5, step: "Queued…" } }));
+      const job = await useJobs.getState().run("create", `Remake · ${it.meta?.label || it.filename}`, graph, "edit:krea:1:raw", {
+        project: it.meta?.project ?? ch?.id ?? null,
+        no4k: true,
+        front: true,
+      });
+
+      const unsub = useJobs.subscribe((st) => {
+        const j = st.jobs.find((x) => x.id === job.id);
+        if (!j) return;
+        if (j.status === "queued" || j.status === "running") {
+          const pct = j.max > 0 ? Math.min(99, Math.round((j.value / j.max) * 100)) : (j.status === "running" ? 15 : 5);
+          setRemaking((r) => (r[oldKey] ? { ...r, [oldKey]: { pct, step: j.nodeTitle || (j.status === "queued" ? "Queued…" : "Remaking…") } } : r));
+          return;
+        }
+        unsub();
+        remakeUnsubs.current = remakeUnsubs.current.filter((u) => u !== unsub);
+        if (j.status === "done" && j.outputs[0]) {
+          const out = j.outputs[0];
+          const newRef: FileRef = { filename: out.filename, subfolder: out.subfolder, type: "output" };
+          // Swap in-place at the exact same grid slot
+          setItems((old) => old.map((x) => (fileKey(x) === oldKey ? { ...x, filename: out.filename, subfolder: out.subfolder, type: "output", mtime: Math.floor(Date.now() / 1000) } : x)));
+          // Update any character pack/gallery referencing the old file so site packs stay in sync
+          const cst = useCharacters.getState();
+          const sameRef = (f: FileRef) => f.filename === oldRef.filename && (f.subfolder ?? "") === (oldRef.subfolder ?? "");
+          for (const c of cst.list) {
+            let changed = false;
+            const sets = c.site?.sets?.map((s) => {
+              const items2 = s.items?.map((f) => (sameRef(f) ? ((changed = true), newRef) : f));
+              return items2 ? { ...s, items: items2 } : s;
+            });
+            const galleryFiles = c.site?.galleryFiles?.map((f) => (sameRef(f) ? ((changed = true), newRef) : f));
+            if (changed) cst.save({ ...c, site: { ...c.site, ...(sets ? { sets } : {}), ...(galleryFiles ? { galleryFiles } : {}) } });
+          }
+          deleteFile(oldRef);
+          clear();
+          toast("Remade in place", "good");
+        } else {
+          clear();
+          toast(j.error || "Remake failed — original kept", "bad");
+        }
+      });
+      remakeUnsubs.current.push(unsub);
+    } catch (e) {
+      clear();
+      throw e;
+    }
+  };
   const [dropOn, setDropOn] = useState<string | null>(null);
   const dragList = (it: CatItem) => (picked[fileKey(it)] ? Object.values(picked) : [it]);
   const projectRow = (r: { key: string; id: string | null; name: string; also?: string; n: number; face?: FileRef }) => (
@@ -189,14 +295,26 @@ function CatalogPanel() {
           {!err && !loading && !items.length && <p className="py-16 text-center text-[13px] text-muted">{q ? "Nothing made from those words." : onlyFav ? "No favourites here yet — hover a picture and press ★." : "Nothing here yet — everything you make shows up here, for good."}</p>}
           <div className="grid grid-cols-3 gap-2 md:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8">
             {items.map((it, i) => {
-              const on = !!picked[fileKey(it)]; const star = isFav(favs, asRef(it));
+              const key = fileKey(it);
+              const on = !!picked[key]; const star = isFav(favs, asRef(it)); const rm = remaking[key];
               return (
-                <div key={fileKey(it)} className={cx("group relative aspect-[3/4] overflow-hidden border bg-raised2", on ? "border-accent outline outline-2 outline-accent" : "border-line hover:border-accent")}
-                  draggable onDragStart={(e) => { const l = dragList(it); e.dataTransfer.setData(CAT_DRAG, JSON.stringify(l)); e.dataTransfer.effectAllowed = "move"; }}>
-                  <button onClick={(e) => click(e, i)} onContextMenu={(e) => openPictureMenu(e, { output: asRef(it), label: it.meta?.label })}
+                <div key={key} className={cx("group relative aspect-[3/4] overflow-hidden border bg-raised2", on ? "border-accent outline outline-2 outline-accent" : rm ? "border-accent/80" : "border-line hover:border-accent")}
+                  draggable={!rm} onDragStart={(e) => { const l = dragList(it); e.dataTransfer.setData(CAT_DRAG, JSON.stringify(l)); e.dataTransfer.effectAllowed = "move"; }}>
+                  <button onClick={(e) => { if (!rm) click(e, i); }} onContextMenu={(e) => openPictureMenu(e, { output: asRef(it), label: it.meta?.label, onRemake: it.kind === "image" && !rm ? () => remakeItem(it) : undefined })}
                     title={[it.meta?.label, it.meta?.prompt, `${new Date(it.mtime * 1000).toLocaleString()}`].filter(Boolean).join("\n")} className="block h-full w-full">
-                    <Thumb f={asRef(it)} video={it.kind === "video"} className="h-full w-full object-cover" />
+                    <Thumb f={asRef(it)} video={it.kind === "video"} className={cx("h-full w-full object-cover transition-opacity", rm && "opacity-45")} />
                   </button>
+                  {rm && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/55 px-2 backdrop-blur-[2px]">
+                      <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/25 border-t-accent" />
+                      <span className="text-center text-[11.5px] font-medium leading-tight text-white">
+                        {rm.pct > 0 ? `Remaking ${rm.pct}%` : (rm.step || "Remaking…")}
+                      </span>
+                      <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20">
+                        <div className="h-full bg-accent transition-all duration-200" style={{ width: `${Math.max(12, rm.pct)}%` }} />
+                      </div>
+                    </div>
+                  )}
                   <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-1.5 pb-1 pt-4 text-left text-[10.5px] leading-tight text-white/85 opacity-0 group-hover:opacity-100">
                     {!folder && <b className="block truncate font-medium">{it.meta?.project ? chars.find((c) => c.id === it.meta?.project)?.name ?? it.folder : it.folder}</b>}{TAB_NAME[it.tab] ?? it.tab} · {new Date(it.mtime * 1000).toLocaleDateString()}
                   </span>

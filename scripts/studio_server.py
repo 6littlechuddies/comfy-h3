@@ -2513,6 +2513,35 @@ async def media_meta(req):
     return web.json_response(out)
 
 
+async def catalog_graph(req):
+    """Return the embedded ComfyUI API graph of a picture so the Catalog can remake it in place with a fresh seed."""
+    d = await req.json()
+    src = safe_join(folder(d.get("type", "output")), d.get("subfolder", ""), d["filename"])
+    if not os.path.isfile(src): raise web.HTTPNotFound()
+    try:
+        out = await asyncio.get_running_loop().run_in_executor(None, read_media_meta, src)
+    except Exception as e:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": f"Couldn't read it: {type(e).__name__}"})
+    if not _minor_ok(out.get("prompt")):
+        return web.json_response({"ok": False, "error": "This one can't be remade here: its prompt may involve minors."}, status=451)
+    raw = out.get("raw_workflow") or {}
+    graph = raw.get("prompt") if isinstance(raw, dict) else None
+    missing_inputs = []
+    if isinstance(graph, dict):
+        inp_dir = folder("input")
+        for node in graph.values():
+            if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+                img = (node.get("inputs") or {}).get("image")
+                if isinstance(img, str) and img and not os.path.isfile(os.path.join(inp_dir, img)):
+                    missing_inputs.append(img)
+    return web.json_response({
+        "ok": True,
+        "graph": graph if isinstance(graph, dict) else None,
+        "prompt": out.get("prompt") or "",
+        "missing_inputs": missing_inputs,
+    })
+
+
 WF_CACHE: dict[str, dict] = {}
 WORKFLOWS = os.environ.get("H3_WORKFLOWS") or os.path.join(COMFY_DIR, "user", "default", "workflows")
 
@@ -7635,7 +7664,7 @@ def main():
         web.post("/studio-api/transcribe", transcribe),
         web.get("/studio-api/characters/export", characters_export), web.post("/studio-api/characters/import", characters_import),
         web.post("/studio-api/import/start", import_start), web.put("/studio-api/import/{id}/chunk", import_chunk),
-        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/catalog/project", catalog_project), web.post("/studio-api/catalog/seen", catalog_seen), web.route("*", "/studio-api/cleanup", cleanup), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
+        web.post("/studio-api/import/{id}/finish", import_finish), web.get("/studio-api/import/latest", import_latest), web.get("/studio-api/catalog", catalog), web.post("/studio-api/catalog/graph", catalog_graph), web.post("/studio-api/catalog/meta", catalog_meta), web.post("/studio-api/catalog/project", catalog_project), web.post("/studio-api/catalog/seen", catalog_seen), web.route("*", "/studio-api/cleanup", cleanup), web.post("/studio-api/import/restore", import_restore), web.get("/studio-api/import/{id}", import_status),
     ])
     if LOCAL:
         app.router.add_get("/h3-downloads", local_downloads)

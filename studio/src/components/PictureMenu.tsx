@@ -28,6 +28,8 @@ export interface PicTarget {
   url?: string;
   video?: boolean;
   label?: string;
+  /** retry this picture's prompt in place (Catalog right-click → Remake) */
+  onRemake?: () => Promise<string | void>;
 }
 
 
@@ -85,7 +87,7 @@ async function asPng(url: string): Promise<Blob> {
 // The menu was ~28 items. Your usage log (all rentals) showed only a handful in use — New character from this picture,
 // Download, Delete, Use in Edit, Animate — so those (plus 4K, green screen, cut out, how it was made) stay on top and the
 // rest sit under "More". Anything you pick 3+ times from More moves up by itself.
-const MAIN = new Set(["e1", "an", "newc", "how", "look", "cover", "loop", "4k", "green", "cut", "sfw", "copy", "save", "del", "faceon"]);
+const MAIN = new Set(["remake", "e1", "an", "newc", "how", "look", "cover", "loop", "4k", "green", "cut", "sfw", "copy", "save", "del", "faceon"]);
 const USE_KEY = "h3.picmenu.use";
 const uses = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(USE_KEY) || "{}"); } catch { return {}; } };
 const isMain = (k: string) => MAIN.has(k) || (uses()[k] ?? 0) >= 3;
@@ -140,6 +142,10 @@ export function PictureMenuHost() {
     return folder ? st.list.find((x) => x.name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").trim().slice(0, 60) === folder) : undefined;
   })();
   const items: { key: string; icon: string; label: string; run: () => Promise<string | void>; hide?: boolean }[] = [
+    {
+      key: "remake", icon: "refresh", label: "Remake · retry prompt", hide: isVideo || !t.onRemake,
+      run: () => t.onRemake!(),
+    },
     {
       // the workflow that works, in one click: this picture + your character, likeness carried into its prompt, 2 takes
       key: "faceon", icon: "user", label: `Put ${selName ?? "your character"}'s face on this`, hide: isVideo || !selName, run: async () => {
