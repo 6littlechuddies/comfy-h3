@@ -97,7 +97,7 @@ async def get_state(req):
 # when a machine happened to upload. A machine that restored an old copy uploads it with the old time, so it never wins.
 STAMP_FILE = os.path.join(STATE, "last_change.txt")
 WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models", "pose_blueprints",
-              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed", "plans", "chat_tests"}
+              "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "site_media", "speed", "plans", "chat_tests"}
 
 
 def last_change() -> float:
@@ -5480,7 +5480,7 @@ def _build_export(want: set, results: bool = True) -> tuple[str, str]:
             if d is not None: z.writestr(f"{name}.json", json.dumps(d))
         if not want:  # everything: your preferences come along
             # a full checkpoint: preferences, timings, your LoRA library and own checkpoints (re-downloaded on import), results
-            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "catalog_seen", "input_sources", "site_addr", "speed"):
+            for name in ("settings", "favorites", "styles", "timings", "notify", "loras", "models", "prefs", "edit_chats", "catalog_meta", "catalog_seen", "input_sources", "site_addr", "site_media", "speed"):
                 d = _state_json(name)
                 if d is not None: z.writestr(f"{name}.json", json.dumps(d))
             _export_results(z, files=results)
@@ -5817,6 +5817,10 @@ def _import_extras(z, refused_ids: set | None = None, tick=None, pictures: bool 
     for name in ("timings", "notify", "site_addr"):  # (download "Later" is per rental: it doesn't travel in exports)
         d = rd(f"{name}.json") if f"{name}.json" in names else None
         if d is not None: _state_write(name, d); got[name] = True
+    sm = rd("site_media.json") if "site_media.json" in names else None
+    if isinstance(sm, dict) and sm:  # media_ids already uploaded to your site (carry across rentals)
+        cur = _state_json(SITE_MEDIA, {}) or {}
+        _state_write(SITE_MEDIA, {**sm, **(cur if isinstance(cur, dict) else {})}); got[SITE_MEDIA] = True
     ec = rd("edit_chats.json") if "edit_chats.json" in names else None
     if isinstance(ec, dict) and isinstance(ec.get("chats"), list):  # edit chats: yours stay, theirs are added
         cur = _state_json("edit_chats", {}) or {}
@@ -6255,7 +6259,8 @@ async def transcribe(req):
 # pre-signed slot, attach avatar / cover / reference pictures, PUT each photo set. Everything lands as a draft. The key
 # comes from the template (SITE_FACTORY_TOKEN) or is pasted into the Studio (kept like the CivitAI key, never exported).
 SITE_KEY_FILE = os.path.join(STATE, "site_key")
-SITE_MEDIA = "site_media"  # state: {file fingerprint: media_id} — a file already uploaded isn't uploaded again
+SITE_MEDIA = "site_media"  # state: {"<site_url>|<external_id>|<sha1>": media_id} — cached across rentals
+_SITE_MEDIA_LOCK = asyncio.Lock()
 SITE_JOBS: dict[str, dict] = {}
 
 
@@ -6599,14 +6604,15 @@ def _chat_block(site: dict, has_levels: bool = False) -> dict:
     return out
 
 
-def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
-    """Given a 422 response from PUT /characters/{ext}, strip any rejected site.chat keys (including nested subkeys
-    like hot_lines.cold) in place and return the labels of what was dropped. Returns [] when the 422 is not about
-    site.chat (so real profile/bio errors surface immediately)."""
-    site_obj = manifest.get("site")
-    chat = site_obj.get("chat") if isinstance(site_obj, dict) else None
-    if not isinstance(chat, dict) or not chat: return []
-    err = _site_err(res)
+_UNKNOWN_FIELD_RE = re.compile(
+    r"\bnot a field\b|\bunknown (?:field|key|property)\b|\bunrecognized (?:field|key|property)\b|\bunexpected (?:field|key|property)\b|\badditional properties\b",
+    re.I,
+)
+_HOT_CLASH_RE = re.compile(r"\bshares\b|\bclash\b|\boverlap\b|\btwo girls\b|\bwrite her own\b", re.I)
+
+
+def _site_problems_list(res) -> list[tuple[str, str]]:
+    """Extract (field, message) pairs from a Factory API 422 response."""
     probs: list[tuple[str, str]] = []
     if isinstance(res, dict):
         e = res.get("error", res)
@@ -6616,9 +6622,35 @@ def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
                 for p in raw_probs:
                     if isinstance(p, dict):
                         probs.append((str(p.get("field") or p.get("path") or ""), str(p.get("message") or p.get("msg") or "")))
+    return probs
+
+
+def _hot_line_clashes(res) -> list[dict]:
+    """Extract cross-character hot_lines phrase-clash problems from a 422 response."""
+    out: list[dict] = []
+    for f, m in _site_problems_list(res):
+        mm = re.match(r"^(?:site\.)?chat\.hot_lines(?:\.(\w+))?$", f)
+        if mm and not _UNKNOWN_FIELD_RE.search(m) and _HOT_CLASH_RE.search(m):
+            out.append({"field": f, "stage": mm.group(1) or "hot_lines", "message": m})
+    return out
+
+
+def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
+    """Given a 422 response from PUT /characters/{ext}, strip ONLY genuinely unknown site.chat schema fields
+    (e.g. "Not a field" on an older server lacking PR #1 keys like opener_keywords or hot_lines.cold) in place and
+    return the labels of what was dropped. Never strips content/validation errors such as cross-character hot_lines
+    phrase clashes — those return [] so the error surfaces cleanly instead of silently pushing empty hot_lines."""
+    site_obj = manifest.get("site")
+    chat = site_obj.get("chat") if isinstance(site_obj, dict) else None
+    if not isinstance(chat, dict) or not chat: return []
+    err = _site_err(res)
+    probs = _site_problems_list(res)
     chat_probs = [(f, m) for f, m in probs if re.match(r"^(?:site\.)?chat(?:\.|$)", f)]
-    has_chat_err = bool(chat_probs) or (not probs and bool(re.search(r"\bchat\b", err, re.I)))
-    if not has_chat_err: return []
+    unknown_chat_probs = [(f, m) for f, m in chat_probs if _UNKNOWN_FIELD_RE.search(m)]
+    if probs:
+        if not unknown_chat_probs: return []
+    else:
+        if not (re.search(r"\bchat\b", err, re.I) and _UNKNOWN_FIELD_RE.search(err)): return []
     dropped: list[str] = []
 
     def drop_sub(parent: str, sub: str) -> bool:
@@ -6637,17 +6669,26 @@ def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
             return True
         return False
 
-    for field, msg in chat_probs:
+    for field, msg in unknown_chat_probs:
         rel = re.sub(r"^(?:site\.)?chat\.?", "", field)
         if not rel:
+            matched_any = False
             for k in list(chat.keys()):
-                if re.search(rf"\b{re.escape(k)}\b", msg): drop_key(k)
+                if re.search(rf"\b{re.escape(k)}\b", msg):
+                    if drop_key(k): matched_any = True
             if isinstance(chat.get("hot_lines"), dict) and "cold" in chat["hot_lines"] and re.search(r"\bcold\b", msg):
-                drop_sub("hot_lines", "cold")
+                if drop_sub("hot_lines", "cold"): matched_any = True
+            if not matched_any:
+                site_obj.pop("chat", None)
+                dropped.append("all chat lines")
+                if not site_obj: manifest.pop("site", None)
+                return dropped
             continue
         parts = rel.split(".")
         key, sub = parts[0], (parts[1] if len(parts) > 1 else None)
-        if sub and drop_sub(key, sub): continue
+        if sub:
+            drop_sub(key, sub)
+            continue
         if key == "hot_lines" and isinstance(chat.get("hot_lines"), dict):
             hit_sub = [sk for sk in list(chat["hot_lines"].keys()) if re.search(rf"\b{re.escape(sk)}\b", msg)]
             if hit_sub:
@@ -6655,21 +6696,22 @@ def _strip_rejected_chat_keys(manifest: dict, res) -> list[str]:
                 continue
         drop_key(key)
 
-    if not dropped:
+    if not probs and not dropped:
         for m in re.finditer(r"chat\.(\w+)(?:\.(\w+))?", err):
             k, sub = m.group(1), m.group(2)
-            if sub and drop_sub(k, sub): continue
-            drop_key(k)
+            if sub:
+                drop_sub(k, sub)
+            else:
+                drop_key(k)
+        if not dropped:
+            # Backwards compatibility: if an unstructured pre-PR #1 unknown-field error mentions site.chat, drop newer PR #1 keys first
+            for k in _CHAT_EXT_KEYS: drop_key(k)
+            drop_sub("hot_lines", "cold")
+        if not dropped:
+            site_obj.pop("chat", None)
+            dropped.append("all chat lines")
 
-    if not dropped:
-        # Backwards compatibility: if a pre-PR #1 server complains generically about site.chat, drop the newer PR #1 keys first
-        for k in _CHAT_EXT_KEYS: drop_key(k)
-        drop_sub("hot_lines", "cold")
-
-    if not dropped:
-        site_obj.pop("chat", None)
-        dropped.append("all chat lines")
-    elif not chat:
+    if not chat:
         site_obj.pop("chat", None)
     if not site_obj: manifest.pop("site", None)
     return dropped
@@ -6832,18 +6874,129 @@ def _loop_wanted(res) -> int | None:
     return int(m.group(1)) if m else None
 
 
-async def _site_upload(s, path: str, job: dict) -> str:
-    """one file through an upload slot; returns its media_id (cached, so it's sent once)"""
+_STALE_MEDIA_RE = re.compile(
+    r"no such media_id|\bexpired?\b|unused uploads expire|never confirmed|belongs to another character",
+    re.I,
+)
+
+
+def _site_media_key(path: str, ext: str = "", site_url: str | None = None) -> str:
+    """Scoped SITE_MEDIA cache key: site URL + character external_id + SHA-1 of file content.
+    Content hashing survives mtime drift across GPU rental restores, while URL + external_id scoping
+    prevents cross-site and cross-character media_id reuse."""
     import hashlib
-    st = os.stat(path)
-    fp = hashlib.sha1(f"{os.path.basename(path)}:{st.st_size}:{int(st.st_mtime)}".encode()).hexdigest()[:16]
-    cache = _state_json(SITE_MEDIA, {}) or {}
-    if fp in cache: return cache[fp]
+    url = (site_cfg()["url"] if site_url is None else site_url).rstrip("/")
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return f"{url}|{ext}|{h.hexdigest()[:20]}"
+
+
+def _payload_media_ids(payload: dict) -> set[str]:
+    """Every media_id string referenced in a PUT /media or PUT /sets payload."""
+    out: set[str] = set()
+    if not isinstance(payload, dict): return out
+    for k in ("avatar", "card", "cover", "loop"):
+        v = payload.get(k)
+        if isinstance(v, str) and v: out.add(v)
+    for k in ("gallery", "reference"):
+        arr = payload.get(k)
+        if isinstance(arr, list):
+            for el in arr:
+                if isinstance(el, str) and el: out.add(el)
+                elif isinstance(el, dict) and isinstance(el.get("media_id"), str) and el["media_id"]: out.add(el["media_id"])
+    items = payload.get("items")
+    if isinstance(items, list):
+        for el in items:
+            if isinstance(el, dict):
+                for sk in ("media_id", "poster"):
+                    v = el.get(sk)
+                    if isinstance(v, str) and v: out.add(v)
+    return out
+
+
+def _stale_media_ids(res, payload: dict) -> set[str]:
+    """Given a 422 response from PUT /media or PUT /sets, return the set of referenced media_ids that the site
+    reported as missing/expired/unconfirmed/wrong-character so they can be evicted and re-uploaded once."""
+    stale: set[str] = set()
+    all_mids = _payload_media_ids(payload)
+    if not all_mids: return stale
+    probs = _site_problems_list(res)
+    saw_stale = False
+    for raw_field, msg in probs:
+        if not _STALE_MEDIA_RE.search(msg): continue
+        saw_stale = True
+        field = re.sub(r"^(?:media|roles)\.", "", raw_field.strip())
+        if field in ("avatar", "card", "cover", "loop"):
+            v = payload.get(field)
+            if isinstance(v, str) and v: stale.add(v)
+            continue
+        m = re.match(r"^(gallery|reference)\[(\d+)\](?:\.media_id)?$", field)
+        if m:
+            arr = payload.get(m.group(1))
+            idx = int(m.group(2))
+            if isinstance(arr, list) and 0 <= idx < len(arr):
+                el = arr[idx]
+                if isinstance(el, str) and el: stale.add(el)
+                elif isinstance(el, dict) and isinstance(el.get("media_id"), str) and el["media_id"]: stale.add(el["media_id"])
+            continue
+        m = re.match(r"^items\[(\d+)\](?:\.(media_id|poster))?$", field)
+        if m:
+            arr = payload.get("items")
+            idx = int(m.group(1))
+            sub = m.group(2) or "media_id"
+            if isinstance(arr, list) and 0 <= idx < len(arr) and isinstance(arr[idx], dict):
+                v = arr[idx].get(sub)
+                if isinstance(v, str) and v: stale.add(v)
+            continue
+        for mid in all_mids:
+            if mid in msg: stale.add(mid)
+    if stale: return stale
+    err = _site_err(res)
+    if saw_stale or (not probs and _STALE_MEDIA_RE.search(err)):
+        named = {mid for mid in all_mids if mid in err}
+        return named if named else all_mids
+    return stale
+
+
+async def _site_media_evict(media_ids: set[str], keys: set[str] | None = None) -> int:
+    """Evict stale media_ids (and/or cache keys) from SITE_MEDIA safely under _SITE_MEDIA_LOCK."""
+    if not media_ids and not keys: return 0
+    removed = 0
+    async with _SITE_MEDIA_LOCK:
+        cache = _state_json(SITE_MEDIA, {}) or {}
+        if not isinstance(cache, dict): return 0
+        drop = [k for k, v in cache.items() if (keys and k in keys) or (v in media_ids)]
+        for k in drop:
+            cache.pop(k, None)
+            removed += 1
+        if removed:
+            os.makedirs(STATE, exist_ok=True)
+            _state_write(SITE_MEDIA, cache)
+            set_last_change()
+    return removed
+
+
+async def _site_upload(s, path: str, job: dict, ext: str = "", force: bool = False) -> str:
+    """one file through an upload slot; returns its media_id (cached under _SITE_MEDIA_LOCK, scoped by site URL +
+    external_id + file content hash so parallel uploads never clobber each other and mappings survive rental switches)"""
+    key = await asyncio.to_thread(_site_media_key, path, ext)
+    if not force:
+        async with _SITE_MEDIA_LOCK:
+            cache = _state_json(SITE_MEDIA, {}) or {}
+            if isinstance(cache, dict) and key in cache and cache[key]:
+                return cache[key]
     body, ct, name = await asyncio.to_thread(_site_ready_file, path)
     job["step"] = f"uploading {name} ({len(body) // 1024} KB)"
     mid, _host = await _site_send_one(s, body, ct, name)
-    cache = _state_json(SITE_MEDIA, {}) or {}
-    cache[fp] = mid; _state_write(SITE_MEDIA, cache)
+    async with _SITE_MEDIA_LOCK:
+        cache = _state_json(SITE_MEDIA, {}) or {}
+        if not isinstance(cache, dict): cache = {}
+        cache[key] = mid
+        os.makedirs(STATE, exist_ok=True)
+        _state_write(SITE_MEDIA, cache)
+        set_last_change()
     job["uploaded"] = job.get("uploaded", 0) + 1
     return mid
 
@@ -6932,8 +7085,19 @@ async def _site_push(job: dict, d: dict):
             gate = asyncio.Semaphore(SITE_UPLOAD_PARALLEL)
             async def send(p: str):
                 async with gate:
-                    mids[p] = await _site_upload(s, p, job)
+                    mids[p] = await _site_upload(s, p, job, ext=ext)
                     job["done"] = job.get("done", 0) + 1
+            async def reupload_stale(stale: set[str]) -> bool:
+                if not stale: return False
+                await _site_media_evict(stale)
+                stale_paths = [p for p, mid in mids.items() if mid in stale]
+                if not stale_paths: return False
+                job["step"] = f"re-uploading {len(stale_paths)} expired file{'' if len(stale_paths) == 1 else 's'}"
+                async def resend(p: str):
+                    async with gate:
+                        mids[p] = await _site_upload(s, p, job, ext=ext, force=True)
+                await asyncio.gather(*(resend(p) for p in stale_paths))
+                return True
             uniq = list(dict.fromkeys(p for _, p in files))
             job["total"] = len(uniq)
             await asyncio.gather(*(send(p) for p in uniq))
@@ -6977,53 +7141,77 @@ async def _site_push(job: dict, d: dict):
             if left:
                 job["chat_note"] = "the site didn't take: " + ", ".join(left) + (" — turn Chat v4.1 on for her in admin" if "enabled" in left or "all chat lines" in left else "")
             elif "chat" in (manifest.get("site") or {}): job["chat_note"] = "chat lines sent"
+            if code == 422:
+                clashes = _hot_line_clashes(res)
+                if clashes:
+                    job["hot_lines_clash"] = clashes
+                    raise RuntimeError(
+                        "Hot-lines phrase clash (character NOT pushed with stripped lines — rewrite the clashing line and resend): "
+                        + " · ".join(f"{cl['stage']}: {cl['message']}" for cl in clashes)
+                    )
             if code not in (200, 201): raise RuntimeError(f"the site refused the character ({code}): {_site_err(res)}")
             job["character"] = res
-            media: dict = {}
-            if (p := next((p for r, p in files if r == "avatar"), None)): media["avatar"] = mids[p]
-            if (p := next((p for r, p in files if r == "card"), None)): media["card"] = mids[p]
-            if (p := next((p for r, p in files if r == "banner"), None)): media["cover"] = mids[p]
-            gallery_mids = list(dict.fromkeys(mids[p] for r, p in files if r == "gallery" and p in mids))
-            if gallery_mids:
-                media["gallery"] = gallery_mids
-            elif "galleryFiles" in site and isinstance(site.get("galleryFiles"), list) and len(site["galleryFiles"]) == 0:
-                media["gallery"] = []
-            ref_mids = [mids[p] for r, p in files if r == "reference" and p in mids]
-            if site.get("send_reference", True) and ref_mids:
-                media["reference"] = ref_mids
             loop_p = next((p for r, p in files if r == "loop"), None)
-            if loop_p and loop_p in mids: media["loop"] = mids[loop_p]
+            def build_media() -> dict:
+                out: dict = {}
+                if (p := next((p for r, p in files if r == "avatar"), None)): out["avatar"] = mids[p]
+                if (p := next((p for r, p in files if r == "card"), None)): out["card"] = mids[p]
+                if (p := next((p for r, p in files if r == "banner"), None)): out["cover"] = mids[p]
+                gallery_mids = list(dict.fromkeys(mids[p] for r, p in files if r == "gallery" and p in mids))
+                if gallery_mids:
+                    out["gallery"] = gallery_mids
+                elif "galleryFiles" in site and isinstance(site.get("galleryFiles"), list) and len(site["galleryFiles"]) == 0:
+                    out["gallery"] = []
+                ref_mids = [mids[p] for r, p in files if r == "reference" and p in mids]
+                if site.get("send_reference", True) and ref_mids:
+                    out["reference"] = ref_mids
+                if loop_p and loop_p in mids: out["loop"] = mids[loop_p]
+                return out
+            media = build_media()
             job["step"] = "media"
             code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
+            if code == 422 and await reupload_stale(_stale_media_ids(res, media)):
+                media = build_media()
+                job["step"] = "media"
+                code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
             want = _loop_wanted(res) if code == 422 and loop_p else None
             if want:
                 # the site said the exact size it wanted: made again at that size and sent again, once
                 job["step"] = f"remaking the hover loop at {LOOP_W}x{want}"; job["loop_size"] = f"{LOOP_W}x{want}"
-                media["loop"] = await _site_upload(s, await asyncio.to_thread(_make_loop, loop_src, want), job)
+                new_loop_p = await asyncio.to_thread(_make_loop, loop_src, want)
+                mids[new_loop_p] = await _site_upload(s, new_loop_p, job, ext=ext)
+                loop_p = new_loop_p
+                media["loop"] = mids[new_loop_p]
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/media", media)
             if code not in (200, 201, 204): raise RuntimeError(f"the site refused the pictures{' or the hover loop' if loop_p else ''} ({code}): {_site_err(res)}")
             job["sets_done"] = []
             all_sets = [x for x in (site.get("sets") or []) if isinstance(x, dict)]
             for st_ in sets:
-                items = []
-                for i, it in enumerate(st_["items"]):
-                    try: p = _file_of(it)
-                    except web.HTTPException: continue
-                    if p not in mids: continue
-                    kind = "video" if re.search(r"\.(mp4|webm|mov)$", p, re.I) else "image"
-                    items.append({"media_id": mids[p], "kind": kind, "order": i + 1, "rating": it.get("rating") or st_.get("rating") or "sfw",
-                                  "caption": it.get("caption", ""), **({"duration_s": it["duration"]} if it.get("duration") else {})})
                 # a set with no title is refused ("title: Required."): "Premium set 2" / "Free set 1" by its place in the list
                 tier = st_.get("tier", "free")
                 n = 1 + sum(1 for x in all_sets[: all_sets.index(st_)] if x.get("tier", "free") == tier) if st_ in all_sets else 1
                 title = str(st_.get("title") or "").strip() or f"{'Premium' if tier == 'premium' else 'Free'} set {n}"
-                body = {"set_key": st_["set_key"], "title": title, "description": st_.get("description", ""), "tier": st_.get("tier", "free"),
-                        # no price = the site decides (its own pricing rules)
-                        "price_suggestion": st_.get("price") if st_.get("tier") == "premium" and st_.get("price") else None,
-                        # the set's cover has to be a picture ("cover: Must be a picture."): its first picture, never a video
-                        "cover": next((x["media_id"] for x in items if x["kind"] == "image"), None), "items": items}
+                def build_set_body(st_=st_, title=title) -> dict:
+                    items = []
+                    for i, it in enumerate(st_["items"]):
+                        try: p = _file_of(it)
+                        except web.HTTPException: continue
+                        if p not in mids: continue
+                        kind = "video" if re.search(r"\.(mp4|webm|mov)$", p, re.I) else "image"
+                        items.append({"media_id": mids[p], "kind": kind, "order": i + 1, "rating": it.get("rating") or st_.get("rating") or "sfw",
+                                      "caption": it.get("caption", ""), **({"duration_s": it["duration"]} if it.get("duration") else {})})
+                    return {"set_key": st_["set_key"], "title": title, "description": st_.get("description", ""), "tier": st_.get("tier", "free"),
+                            # no price = the site decides (its own pricing rules)
+                            "price_suggestion": st_.get("price") if st_.get("tier") == "premium" and st_.get("price") else None,
+                            # the set's cover has to be a picture ("cover: Must be a picture."): its first picture, never a video
+                            "cover": next((x["media_id"] for x in items if x["kind"] == "image"), None), "items": items}
+                body = build_set_body()
                 job["step"] = f"set {st_.get('title') or st_['set_key']}"
                 code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/sets/{quote(st_['set_key'])}", _plain(body))
+                if code == 422 and await reupload_stale(_stale_media_ids(res, body)):
+                    body = build_set_body()
+                    job["step"] = f"set {st_.get('title') or st_['set_key']}"
+                    code, res = await _site_call(s, "PUT", f"/characters/{quote(ext)}/sets/{quote(st_['set_key'])}", _plain(body))
                 if code not in (200, 201): raise RuntimeError(f"the site refused the set “{title}” ({code}): {_site_err(res)}")
                 job["sets_done"].append(st_["set_key"])
         job.update(status="done", step="done")
