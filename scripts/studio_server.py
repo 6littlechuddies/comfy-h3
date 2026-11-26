@@ -96,7 +96,7 @@ async def get_state(req):
 # when you last changed your work (characters, settings, presets…): backups are named by it, and "newest" means this — not
 # when a machine happened to upload. A machine that restored an old copy uploads it with the old time, so it never wins.
 STAMP_FILE = os.path.join(STATE, "last_change.txt")
-WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models",
+WORK_STATE = {"characters", "scenes", "presets", "scene_presets", "lora_sets", "my_recipes", "settings", "styles", "loras", "models", "pose_blueprints",
               "prefs", "edit_chats", "favorites", "inspo", "wordbank", "site_addr", "speed", "plans", "chat_tests"}
 
 
@@ -1958,6 +1958,221 @@ async def civitai_collection_summary(req):
     return web.json_response({"pictures": len(items), "told": told, "more": cursor not in (None, ""), "loras": loras,
         "by_name": sorted(({"name": n, "count": e["count"], "weight": round(sum(e["weights"]) / len(e["weights"]), 2) if e["weights"] else None} for n, e in by_name.items()), key=lambda x: -x["count"])[:20],
         "samplers": sorted(samplers.items(), key=lambda kv: -kv[1])[:5], "steps": mid(steps), "cfg": mid(cfgs)})
+
+
+BLUEPRINTS_FILE = os.path.join(STATE, "pose_blueprints.json")
+_BP_BOILERPLATE = re.compile(
+    r"\b(?:masterpiece|best quality|worst quality|low quality|highres|absurdres|8k|4k|uhd|raw photo|photorealistic|hyperrealistic|score_\d+(?:_up)?|source_\w+|rating_\w+)\b",
+    re.I,
+)
+_BP_LORA_TAG = re.compile(r"<lora:[^>]+>", re.I)
+_BP_TAG_RULES = [
+    ("mirror", r"\bmirror\b"),
+    ("selfie", r"\bselfie\b|holding (?:a )?phone"),
+    ("lingerie", r"\blingerie|lace bra|bralette|panties|thong|corset|garter|stockings|thigh[- ]?highs|fishnets\b"),
+    ("towel", r"\btowel\b|after shower|damp hair"),
+    ("boobs", r"\bboobs|breasts|tits|topless|nipples|cleavage|underboob\b"),
+    ("topless", r"\btopless|bare breasts|shirtless|pulling (?:her )?(?:top|shirt) up\b"),
+    ("ass", r"\bass\b|butt|glutes|rear view|from behind|bent over|bending over"),
+    ("all_fours", r"\ball fours|on all fours|doggy|hands and knees\b"),
+    ("doggy", r"\bdoggy|from behind|bent over|arched back\b"),
+    ("missionary", r"\bmissionary|lying on (?:her )?back.*legs (?:spread|open|apart)\b"),
+    ("spread", r"\bspread(?:ing)? (?:her )?(?:legs|pussy|thighs|cheeks)\b"),
+    ("touching", r"\bmasturbat|fingering|touching herself|hand between (?:her )?legs\b"),
+    ("nude", r"\bnude|naked|unclothed|completely naked\b"),
+    ("kneeling", r"\bkneeling|on (?:her )?knees\b"),
+    ("oral_pov", r"\bopen mouth|tongue out|looking up.*pov|pov.*kneeling\b"),
+    ("lying_back", r"\blying on (?:her )?back|lying back|reclining\b"),
+    ("close_up", r"\bclose[- ]?up|macro|portrait\b"),
+    ("full_body", r"\bfull body|head to toe|wide shot\b"),
+]
+
+
+def _load_blueprints() -> dict:
+    try:
+        with open(BLUEPRINTS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:  # noqa: BLE001
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    d.setdefault("blueprints", [])
+    d.setdefault("sources", [])
+    return d
+
+
+def _save_blueprints(d: dict):
+    os.makedirs(STATE, exist_ok=True)
+    with open(BLUEPRINTS_FILE + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2, ensure_ascii=False)
+    os.replace(BLUEPRINTS_FILE + ".tmp", BLUEPRINTS_FILE)
+
+
+def _strip_prompt_identity(raw_prompt: str) -> str:
+    """Clean raw CivitAI prompt boilerplate and LoRA syntax into a neutral pose/scene seed."""
+    cleaned = _BP_LORA_TAG.sub(" ", raw_prompt or "")
+    cleaned = _BP_BOILERPLATE.sub(" ", cleaned)
+    cleaned = re.sub(r"\(([^():]+):[\d.]+\)", r"\1", cleaned)
+    cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
+    cleaned = re.sub(r"(,\s*){2,}", ", ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.")
+    return cleaned[:420]
+
+
+def _classify_blueprint(prompt: str, explicit_flag: bool = False) -> tuple[int, str, list[str]]:
+    low = prompt.lower()
+    tags = [tag for tag, pat in _BP_TAG_RULES if re.search(pat, low)]
+    if any(t in tags for t in ("spread", "touching", "missionary", "oral_pov")) or ("nude" in tags and any(t in tags for t in ("doggy", "all_fours", "lying_back"))):
+        tier, rating = 4, "explicit"
+    elif any(t in tags for t in ("topless", "boobs", "ass", "all_fours", "doggy", "nude")):
+        tier, rating = 3, "explicit"
+    elif explicit_flag or any(t in tags for t in ("lingerie", "towel")):
+        tier, rating = 2, "suggestive"
+    else:
+        tier, rating = 1, "sfw"
+    if "video_ready" not in tags:
+        tags.append("video_ready")
+    return tier, rating, tags[:6]
+
+
+def _workflow_recipe_of(mm: dict) -> dict:
+    """Extract reusable non-identity ComfyUI/A1111 recipe signals (sampler, steps, cfg, node types)."""
+    out: dict = {}
+    for k in ("sampler", "steps", "cfgScale", "Size"):
+        if mm.get(k) not in (None, ""):
+            out[k] = mm[k]
+    comfy = _comfy_of(mm)
+    if isinstance(comfy, dict):
+        out["has_comfy_workflow"] = True
+        nodes = comfy.get("prompt") if isinstance(comfy.get("prompt"), dict) else comfy
+        if isinstance(nodes, dict):
+            node_types = sorted({str(v.get("class_type")) for v in nodes.values() if isinstance(v, dict) and v.get("class_type")})
+            if node_types:
+                out["node_types"] = node_types[:16]
+    return out
+
+
+async def blueprints_get(_req):
+    """Return the saved Undress Roadmap Pose Blueprints library (cloud-synced in pose_blueprints.json)."""
+    d = _load_blueprints()
+    bps = d.get("blueprints") or []
+    by_tier = {str(t): sum(1 for b in bps if int(b.get("tier") or 1) == t) for t in range(1, 6)}
+    return web.json_response({"blueprints": bps, "count": len(bps), "by_tier": by_tier, "sources": d.get("sources") or []})
+
+
+async def blueprints_put(req):
+    """Save or merge custom Pose Blueprints (e.g. edited roadmap or Candy reference poses)."""
+    body = await req.json()
+    if not isinstance(body, dict) or not isinstance(body.get("blueprints"), list):
+        return web.json_response({"error": "Expected {blueprints: [...]}"}, status=400)
+    d = _load_blueprints()
+    mode = str(body.get("mode") or "replace")
+    incoming = [b for b in body["blueprints"] if isinstance(b, dict) and _minor_ok(json.dumps(b))]
+    if mode == "merge":
+        seen = {str(b.get("pose") or "").strip().lower() for b in d["blueprints"]}
+        for b in incoming:
+            key = str(b.get("pose") or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                d["blueprints"].append(b)
+    else:
+        d["blueprints"] = incoming
+    _save_blueprints(d)
+    return web.json_response({"ok": True, "count": len(d["blueprints"])})
+
+
+async def civitai_export_blueprints(req):
+    """
+    Bulk-export a CivitAI saved collection (and/or pasted Candy pose notes) into identity-stripped,
+    tier-classified Undress Roadmap Pose Blueprints saved to pose_blueprints.json.
+    """
+    body = await req.json() if req.can_read_body else {}
+    raw = str(body.get("id") or body.get("collection") or req.query.get("id", "")).strip()
+    max_items = max(1, min(190, int(body.get("max_items") or 96)))
+    candy_notes = str(body.get("candy_examples") or "").strip()
+    extracted: list[dict] = []
+    source_meta: dict = {"exported_at": int(time.time()), "collection": raw or None, "with_workflow": 0}
+
+    if raw:
+        m = COLLECTION_LINK.search(raw) or re.fullmatch(r"\s*(\d+)\s*", raw)
+        if not m:
+            return web.json_response({"error": "Pick a collection, or paste a link like https://civitai.com/collections/12345"}, status=400)
+        cid = int(m.group(1))
+        items, cursor = [], None
+        for _ in range(4):
+            page, cursor = await _collection_raw(cid, cursor)
+            items += [i for i in page if isinstance(i, dict) and i.get("id")]
+            if not page or cursor in (None, "") or len(items) >= max_items:
+                break
+        if not items:
+            raise web.HTTPBadGateway(text=json.dumps({"error": "CivitAI returned no items for this collection — verify your API key and collection access"}), content_type="application/json")
+        sem = asyncio.Semaphore(6)
+        async def meta_of(i):
+            mm = i.get("meta") if isinstance(i.get("meta"), dict) else {}
+            if mm.get("prompt") or i.get("hasMeta") is False:
+                return i, mm
+            async with sem:
+                return i, {**mm, **(await _gen_meta(int(i["id"])))}
+        pairs = await asyncio.gather(*(meta_of(i) for i in items[:max_items]), return_exceptions=True)
+        for pair in pairs:
+            if not isinstance(pair, tuple):
+                continue
+            item, mm = pair
+            if not isinstance(mm, dict):
+                continue
+            raw_prompt = str(mm.get("prompt") or "").strip()
+            if not raw_prompt or not _minor_ok(raw_prompt):
+                continue
+            pose_seed = _strip_prompt_identity(raw_prompt)
+            if len(pose_seed) < 12:
+                continue
+            tier, rating, tags = _classify_blueprint(pose_seed, _explicit(item))
+            recipe = _workflow_recipe_of(mm)
+            if recipe.get("has_comfy_workflow"):
+                source_meta["with_workflow"] += 1
+            extracted.append({
+                "id": f"civitai-{item['id']}",
+                "source": "civitai",
+                "civitai_id": item["id"],
+                "title": f"Tier {tier} · {', '.join(tags[:2]).replace('_', ' ').title()}",
+                "tier": tier,
+                "rating": rating,
+                "tags": tags,
+                "pose": pose_seed,
+                "recipe": recipe,
+            })
+
+    if candy_notes:
+        for idx, line in enumerate(candy_notes.splitlines(), 1):
+            clean = line.strip(" -*•\t")
+            if len(clean) < 10 or not _minor_ok(clean):
+                continue
+            tier, rating, tags = _classify_blueprint(clean, True)
+            extracted.append({
+                "id": f"candy-{int(time.time())}-{idx}",
+                "source": "candy",
+                "title": f"Tier {tier} · {', '.join(tags[:2]).replace('_', ' ').title()}",
+                "tier": tier,
+                "rating": rating,
+                "tags": tags,
+                "pose": clean[:420],
+            })
+
+    d = _load_blueprints()
+    seen = {str(b.get("pose") or "").strip().lower() for b in d["blueprints"]}
+    added = 0
+    for bp in extracted:
+        key = bp["pose"].strip().lower()
+        if key not in seen:
+            seen.add(key)
+            d["blueprints"].append(bp)
+            added += 1
+    source_meta["added"] = added
+    source_meta["scanned"] = len(extracted)
+    d["sources"] = ([source_meta] + (d.get("sources") or []))[:20]
+    _save_blueprints(d)
+    by_tier = {str(t): sum(1 for b in d["blueprints"] if int(b.get("tier") or 1) == t) for t in range(1, 6)}
+    return web.json_response({"ok": True, "added": added, "total": len(d["blueprints"]), "by_tier": by_tier, "with_workflow": source_meta["with_workflow"], "sample": extracted[:8]})
 
 
 WF_HAS: dict[int, bool] = {}
@@ -4208,7 +4423,7 @@ STAGES = {"look": "Look block writer", "krea": "Krea 2 frame builder", "context"
           "editplan": "Edit chat: your words → a precise edit instruction", "sort": "Sort pictures into site sets (Your site)", "setplan": "Plan photo sets for a character (Batch)", "name": "Name characters from their look (Your site)", "deep": "Deep profile: life, reactions, sample texts, critic (Your site)", "cosplay": "Cosplay: character → adult check, costume, Krea 2 prompt (Batch)", "taste": "Learn what you keep: liked vs deleted prompts → notes", "alias": "Site name: a near-twin of a character's name (Your site)", "live": "Live pack: her stream tips / call actions and idle loops, in her manner (Your site, Batch)", "lines": "Chat lines: examples, voice examples and her hot lines bank (Your site, Chat v4.1)", "chatsim": "Chat test: how she chats in the test (stand-in for the site's system-prompt-v4.1.md — drop that file in here)", "chatjudge": "Chat test: the reviewer that scores her test chat and says what to fix"}
 BUILTIN_FILE = {"krea": "studio_krea.txt", "context": "studio_context.txt", "compiler": "studio_compiler.txt", "look": "studio_look.txt", "tweak": "studio_tweak.txt",
                 "describe": "studio_describe.txt", "tags": "studio_tags.txt", "chat": "studio_chat.txt", "plan": "studio_plan.txt", "site": "studio_site.txt",
-                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt", "alias": "studio_alias.txt", "live": "studio_live.txt", "lines": "studio_lines.txt", "chatsim": "studio_chatsim.txt", "chatjudge": "studio_chatjudge.txt"}
+                "changes": "studio_changes.txt", "remix": "studio_remix.txt", "read": "studio_read.txt", "match": "studio_match.txt", "likeness": "studio_likeness.txt", "editplan": "studio_editplan.txt", "sort": "studio_sort.txt", "setplan": "studio_setplan.txt", "blueprints": "studio_blueprints.txt", "name": "studio_name.txt", "deep": "studio_deep.txt", "cosplay": "studio_cosplay.txt", "taste": "studio_taste.txt", "alias": "studio_alias.txt", "live": "studio_live.txt", "lines": "studio_lines.txt", "chatsim": "studio_chatsim.txt", "chatjudge": "studio_chatjudge.txt"}
 TEMPLATES = {
     "context": "{seconds} second {mode}. {description}\nCharacters: {characters}",
     "compiler": "We are doing {MODE}. {seconds} seconds, {aspect}.\nReferences: {references}\n\n{blueprint}",
@@ -4237,6 +4452,7 @@ TEMPLATES = {
     "chatjudge": "HER CARD:\n{card}\n\nREFERENCE:\n{reference}\n\nCHATS:\n{transcript}\n\nCHECKS:\n{checks}",
     "live": "WHO SHE IS:\n{character}\n\nFRAMING: {framing}\nHOW MANY ACTIONS: {count}\nALLOWED RATINGS: {ratings}\nKEEP THESE KEYS (already made — plan them again with the same key):\n{keep}\n\nEXAMPLES (what other creators offer):\n{examples}",
     "setplan": "CHARACTER: {character}\nPROFILE: {profile}\nSETS: {sets}\nPICTURES PER SET: {per}\nMIX: {mix}\nBACKDROP: {backdrop}\nPOSE IDEAS: {poses}\nALREADY MADE: {existing}",
+    "blueprints": "SOURCE PROMPTS:\n{prompts}",
 }
 PARAMS = {"temperature": 0.6, "top_p": 0.9, "top_k": 40, "repeat_penalty": 1.05, "max_tokens": 8192}
 # your own files: the model's own default thinking (as in LM Studio), and no picture unless you switch it on
@@ -7405,6 +7621,7 @@ def main():
         web.get("/studio-api/civitai/images", civitai_images), web.get("/studio-api/civitai/workflows", civitai_workflows), web.post("/studio-api/civitai/workflows/zip", civitai_workflows_zip),
         web.get("/studio-api/civitai/image", civitai_image), web.get("/studio-api/civitai/media", civitai_media), web.get("/studio-api/civitai/pic", civitai_pic),
         web.get("/studio-api/civitai/collections", civitai_collections), web.get("/studio-api/civitai/debug", civitai_debug), web.get("/studio-api/civitai/collection", civitai_collection), web.get("/studio-api/civitai/collection-summary", civitai_collection_summary), web.get("/studio-api/civitai/collection-models", civitai_collection_models), web.post("/studio-api/civitai/fetch-media", civitai_fetch_media),
+        web.post("/studio-api/civitai/export-blueprints", civitai_export_blueprints), web.get("/studio-api/blueprints", blueprints_get), web.put("/studio-api/blueprints", blueprints_put),
         web.post("/studio-api/notify/watch", notify_watch), web.post("/studio-api/notify/test", notify_test),
         web.get("/studio-api/packs", packs_list), web.post("/studio-api/packs", packs_add), web.put("/studio-api/packs/active", packs_activate),
         web.patch("/studio-api/packs/{id}", packs_update), web.delete("/studio-api/packs/{id}", packs_delete), web.get("/studio-api/packs/{id}/text", packs_text),
