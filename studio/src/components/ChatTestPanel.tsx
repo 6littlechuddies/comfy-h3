@@ -6,6 +6,7 @@ import type { Character } from "../lib/characters";
 import { loadChatTests, setChatTests, useChatTests, type ChatTestResult, type JudgeProvider } from "../lib/chatTest";
 import type { Turn } from "../lib/chatScore";
 import { useJobs } from "../lib/jobs";
+import { LiveChatSim } from "./LiveChatSim";
 import { Icon, TextArea, TextIn, cx } from "./ui";
 
 const ago = (t: number) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
@@ -16,6 +17,7 @@ export function ChatTestPanel({ c, busy, setBusy }: { c: Character; busy: string
   const [open, setOpen] = useState(false);
   const [chat, setChat] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [simOpen, setSimOpen] = useState(false);
   const setup = useChatTests();
   useEffect(() => { void loadChatTests(); }, []);
   const run = async (fix: boolean) => {
@@ -47,12 +49,15 @@ export function ChatTestPanel({ c, busy, setBusy }: { c: Character; busy: string
           className="press chip-raised flex h-9 items-center gap-1.5 px-3 text-[12.5px] disabled:opacity-40"><Icon name="chat" size={13} /> Test</button>
         <button disabled={!!busy || !c.site?.persona} onClick={() => void run(true)} title="Test; if she doesn't pass, rewrite her chat lines (and persona, if that's the cause) from what it found and test again — twice at most, keeping whichever scored better"
           className={cx("press flex h-9 items-center gap-1.5 px-3.5 text-[12.5px] font-semibold disabled:opacity-40", state === "pass" ? "btn-raised" : "btn-primary")}><Icon name="sparkle" size={13} /> Test & fix</button>
+        <button onClick={() => setSimOpen(!simOpen)} aria-expanded={simOpen} title="Interactive chat simulator with UrGF trigger-pack router, haggling, and simulated credits"
+          className={cx("press chip-raised flex h-9 items-center gap-1.5 px-3 text-[12.5px]", simOpen && "border-accent text-accent")}><Icon name="play" size={12} /> Live Simulator</button>
         <button onClick={() => setSetupOpen(!setupOpen)} aria-expanded={setupOpen} title="What she's tested with and who reviews it — shared by every character"
           className={cx("press flex h-9 items-center gap-1.5 px-2.5 text-[12px]", setupOpen ? "text-ink" : "text-muted hover:text-ink")}><Icon name="layers" size={13} /> Setup · {setup.chats.length} real chats</button>
         {t && <button onClick={() => setOpen(!open)} aria-expanded={open} className="press flex h-9 w-9 items-center justify-center text-muted hover:text-ink" title={open ? "Hide" : "Show what it found"}>
           <Icon name={open ? "up" : "down"} size={14} /></button>}
       </div>
 
+      {simOpen && <LiveChatSim c={c} />}
       {setupOpen && <TestSetup />}
       {t && open && (
         <div className="flex flex-col gap-4 border-t border-line p-3 text-[12.5px]">

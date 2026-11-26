@@ -86,7 +86,7 @@ export function cardSig(c: Character): string {
 const cur = (id: string) => useCharacters.getState().list.find((x) => x.id === id);
 
 /** her system prompt for the test: the active "Chat test · her chat" file with the site's {{placeholders}} filled from her card */
-async function systemFor(c: Character): Promise<{ text: string; site: boolean }> {
+export async function systemFor(c: Character): Promise<{ text: string; site: boolean }> {
   if (!usePacks.getState().loaded) await usePacks.getState().load();
   const pack = activePack("chatsim");
   if (!pack) throw new Error("No “Chat test · her chat” prompt file");
@@ -146,11 +146,48 @@ async function runChat(sys: string, c: Character, script: typeof SCRIPT, card: C
   return turns;
 }
 
-const cardOf = (c: Character): Card => {
+export const cardOf = (c: Character): Card => {
   const ch = c.site?.chat ?? {};
   const holds = ch.heatHolds ?? (ch.holdProfile === "warm" ? 1 : ch.holdProfile === "tease" ? 3 : ch.holdProfile === "dom" ? 2 : 1);
   return { name: c.site?.name || c.name, city: c.site?.facts?.city, signature: [...(c.site?.signatureWords ?? [])].filter((w) => w.length > 2), holds, openerKeywords: ch.openerKeywords };
 };
+
+/** Interactive single-turn simulator step using H3 Studio's live DeepSeek chat model, notes, guard, and optional haggle note */
+export async function runInteractiveSimTurn(args: {
+  c: Character;
+  history: { role: "user" | "assistant"; content: string }[];
+  prevBubbles: string[][];
+  simState: SimState;
+  turnNumber: number;
+  userMessage: string;
+  extraNotes?: string[];
+}): Promise<{
+  bubbles: string[];
+  notes: string[];
+  hits: string[];
+  regens: number;
+  nextState: SimState;
+}> {
+  const sys = await systemFor(args.c);
+  const card = cardOf(args.c);
+  const name = args.c.site?.name || args.c.name;
+  const nextState: SimState = { ...args.simState };
+  const notes = [...serverNotes(nextState, args.userMessage, args.prevBubbles, args.turnNumber, card), ...(args.extraNotes ?? [])];
+  const base = [{ role: "system", content: sys.text }, ...args.history, { role: "user", content: args.userMessage }];
+  let best: string[] = [];
+  let bestHits: string[] = [];
+  let regens = 0;
+  for (let a = 0; a < 3; a++) {
+    const extra = a === 0 ? notes : [...notes, `(note: rewrite, and don't use any of these: ${bestHits.join("; ")})`];
+    const out = splitReply(await reply(extra.length ? [...base, { role: "system", content: extra.join("\n") }] : base), name);
+    const retired = args.turnNumber > 2 && !nextState.hookBit ? (card.openerKeywords ?? []).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 3) : [];
+    const hits = guardHits(out, args.prevBubbles, "", retired);
+    if (a === 0 || hits.length < bestHits.length) { best = out; bestHits = hits; }
+    if (!hits.length) break;
+    regens++;
+  }
+  return { bubbles: best, notes, hits: bestHits, regens, nextState };
+}
 
 /** test her once and save the result on her (site.chatTest) */
 export async function testChat(c0: Character, o: { onStep?: (t: string) => void; save?: boolean } = {}): Promise<ChatTestResult> {
