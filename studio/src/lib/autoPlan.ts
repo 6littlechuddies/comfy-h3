@@ -30,7 +30,7 @@ function pickDepth(pool: PwItem[], used: Set<string>, rating: string, coupleLeft
 export async function planFor(c: Character, o: AutoPlan, usedTitles: string[] = [], depthPool: PwItem[] = [], usedPoses: Set<string> = new Set()): Promise<Partial<Row>[]> {
   const site = c.site ?? {}, fx = site.facts ?? {};
   const facts = [fx.job && `Job: ${fx.job}`, fx.city && `World/City: ${fx.city}`, fx.home && `Home: ${fx.home}`, fx.wearing && `Signature outfit: ${fx.wearing}`, fx.room && `Scene: ${fx.room}`].filter(Boolean).join(" · ");
-  const profile = [facts, site.bio, site.personality && `Personality: ${site.personality}`, site.backstory, site.tags?.length && `Tags: ${site.tags.join(", ")}`, c.personality && `Notes: ${c.personality}`].filter(Boolean).join(" ");
+  const profile = [facts, site.bio, site.personality && `Personality: ${site.personality}`, site.tags?.length && `Tags: ${site.tags.join(", ")}`, c.personality && `Notes: ${c.personality}`].filter(Boolean).join(" ");
   const poseSet = useInspo.getState().sets.find((x) => x.id === o.poseSet);
   const existing = [...(site.sets ?? []).map((s) => s.title), ...usedTitles].filter(Boolean).slice(-40).join(", ");
   const raw = await runWriter("setplan", {
@@ -71,17 +71,24 @@ export async function planAndQueue(chars: Character[], o: AutoPlan, step: (t: st
   const buckets: Partial<Row>[][] = new Array(chars.length);
   let nextIdx = 0, done = 0;
   const limit = Math.min(6, chars.length);
+  const failed: string[] = [];
   await Promise.all(Array.from({ length: limit }, async () => {
     while (nextIdx < chars.length) {
       const i = nextIdx++;
       const c = chars[i];
       step(`Planning photo packs (${done + 1}–${Math.min(done + limit, chars.length)} of ${chars.length})…`);
-      buckets[i] = await planFor(c, o, usedTitles, depthPool, usedPoses);
+      try {
+        buckets[i] = await planFor(c, o, usedTitles, depthPool, usedPoses);
+      } catch (e) {
+        buckets[i] = [];
+        failed.push(`${c.site?.name || c.name}: ${(e as Error).message}`);
+      }
       done++;
       step(`Planned ${done} of ${chars.length} photo packs…`);
     }
   }));
   const all: Partial<Row>[] = buckets.flat();
+  if (!all.length) throw new Error(failed[0] || "No photo packs were planned");
   const b = useBatch.getState();
   b.set({ target: "image" });
   const empty = b.rows.filter((r) => !r.imitate && !r.idea.trim() && !r.prompt.trim());
