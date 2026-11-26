@@ -226,20 +226,25 @@ export async function mergeRemix(words: string, base: string): Promise<string> {
 
 /** a NEW picture of a character from a written shot: a blank canvas + their sheet view closest to the angle the words ask
  *  for ("from behind" → their back view), Krea 2 Identity Edit. Shared by Create (character + words) and Batch. */
+const BARE_OR_SINGLE_TOP = /\b(lingerie|bralette|bra|corset|bustier|bodysuit|teddy|babydoll|chemise|slip|bikini|swimsuit|swimwear|monokini|strapless|off.?shoulder|bare.?shoulder|tube ?top|halter|camisole|tank ?top|crop ?top|single top|towel|topless|nude|naked|bare breasts?|bare tits?|undressed)\b/i;
+
 export async function characterShot(c: Character, words: string, shot: string, shape: string, extra: LoraPick[], lib: Awaited<ReturnType<typeof loraLibrary>> | null) {
   const { angleView, plainOf } = await import("./editchat");
   const { useCharacters } = await import("./characters");
-  // When swapping into lingerie, swimwear, or a bare-shoulder outfit, prefer the face reference (if present)
-  // so her original front-view shirt/top pixels do not bleed underneath the new garment.
-  const outfitSwap = /\b(lingerie|bralette|bra|panties|bikini|swimsuit|swimwear|corset|bodysuit|teddy|chemise|babydoll|lace set|towel|tank top|crop top|halter|tube top|off-shoulder|strapless|sundress|slip dress)\b/i.test(words);
-  const want: View = angleView(words) ?? ((outfitSwap || /\b(close.?up|portrait|headshot|selfie)\b/i.test(words)) ? "face" : "front");
+  const angled = angleView(words);
+  const want: View =
+    angled && angled !== "front"
+      ? angled
+      : (/\b(close.?up|portrait|headshot|selfie)\b/i.test(words) || BARE_OR_SINGLE_TOP.test(words))
+        ? "face"
+        : "front";
   const view: View = c.views[want] ? want : "front";
   const ref0 = await useCharacters.getState().asMedia(c.id, view);
   if (!ref0) throw new Error(`${c.name} needs a front picture first`);
   const ref = view === "front" ? await plainOf(c, ref0).catch(() => ref0) : ref0;
   const canvas = shape === "wide" || shape === "16:9" ? { width: 1216, height: 832 } : shape === "square" || shape === "1:1" ? { width: 1024, height: 1024 } : shape === "tall" ? { width: 832, height: 1248 } : { width: 768, height: 1344 };
   const noun = nounOf(c.gender);
-  const instruction = `The first picture is a blank canvas; the second picture shows who this ${noun} is. Make this new photo of exactly that ${noun} — keeping their face, eyes, hair, skin and body proportions from the second picture, wearing solely the single outfit described here directly against bare skin where appropriate, in this new pose, angle, expression and place: ${shot} Only this one ${noun} in the picture, alone. Everyone is an adult.`;
+  const instruction = `The first picture is a blank canvas; the second picture shows who this ${noun} is. Make this new photo of exactly that ${noun} — keeping her exact face, eyes, hair, skin tone and body proportions — dressed solely in the single outfit described below worn directly against bare skin (or nude if described), in the exact pose, angle, expression and place described here: ${shot} Only this one ${noun} in the picture, alone. Everyone is an adult.`;
   const e = useSettings.getState().s.edit;
   let loras = mergeLoras(editArgs(e, "krea").loras, mergeLoras(extra, charLoras(c, "krea2")));
   if (lib) loras = balanceLoras(loras, lib, BUDGET.kreaEdit).loras;
