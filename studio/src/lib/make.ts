@@ -244,7 +244,7 @@ export async function characterShot(c: Character, words: string, shot: string, s
   const ref = view === "front" ? await plainOf(c, ref0).catch(() => ref0) : ref0;
   const canvas = shape === "wide" || shape === "16:9" ? { width: 1216, height: 832 } : shape === "square" || shape === "1:1" ? { width: 1024, height: 1024 } : shape === "tall" ? { width: 832, height: 1248 } : { width: 768, height: 1344 };
   const noun = nounOf(c.gender);
-  const instruction = `The first picture is a blank canvas; the second picture shows who this ${noun} is. Make this new photo of exactly that ${noun} — keeping her exact face, eyes, hair, skin tone and body proportions — dressed solely in the single outfit described below worn directly against bare skin (or nude if described), in the exact pose, angle, expression and place described here: ${shot} Only this one ${noun} in the picture, alone. Everyone is an adult.`;
+  const instruction = `Single full-frame photo filling the entire frame edge to edge of exactly this ${noun} from the reference picture — keeping her exact face, eyes, hair, skin tone and body proportions — dressed solely in the single outfit described below worn directly against bare skin (or nude if described), in the exact pose, angle, expression and place described here: ${shot} Only this one ${noun} in the picture, alone. Everyone is an adult.`;
   const e = useSettings.getState().s.edit;
   let loras = mergeLoras(editArgs(e, "krea").loras, mergeLoras(extra, charLoras(c, "krea2")));
   if (lib) loras = balanceLoras(loras, lib, BUDGET.kreaEdit).loras;
