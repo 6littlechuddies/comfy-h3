@@ -26,6 +26,7 @@ export interface LiveClip {
   /** her likeness on this part's last frame (DeepSeek's face match, 0-10) before and after the face fix, and which went on */
   likeness?: { before?: number | null; after?: number | null; used: "fixed" | "original" | "no sheet"; why?: string };
 }
+export type ActionClothingState = "clothed" | "clothed_and_nude" | "undress" | "nude";
 export interface LiveAction {
   key: string; title: string; prompt: string; hint: string;
   rating: "sfw" | "suggestive" | "explicit"; seconds: number; segs: number;
@@ -35,15 +36,25 @@ export interface LiveAction {
   level?: number;
   /** the relationship level (1–7) her Live Action button opens at; unset = the site's default for its rating */
   unlock?: number;
+  /** 2-state Live Action role: clothed-only, both clothed & nude takes, undress bridge, or nude-only */
+  clothingState?: ActionClothingState;
   /** kept for old packs: the site no longer locks Live Action by plan (20 Nov) */
   tier: "free" | "premium" | "ultimate"; tokens: number; on: boolean;
 }
 export interface LiveState {
   anchor?: { ref: FileRef; input: string; at: number };
+  /** 2-state Live Action mode (Clothed Anchor → Undress → Nude Anchor) */
+  twoState?: boolean;
+  /** pixel-aligned Nude Anchor edited from her Clothed Anchor + Nude Body Sheet */
+  nudeAnchor?: { ref: FileRef; input: string; at: number };
+  /** optional Mid-Undress Still edited from her Clothed Anchor for 2-part undress of layered outfits/cosplays */
+  midAnchor?: { ref: FileRef; input: string; at: number };
   framing: "waist_up" | "full_body";
   /** fix her face on the last frame of every action part before the next part starts from it (on unless turned off) */
   faceFix?: boolean;
   idle: { key: string; kind: "idle" | "typing" | "talk"; prompt: string; seconds: number; on: boolean }[];
+  /** idle loops played after she undresses (start & end on nudeAnchor) */
+  nudeIdle?: { key: string; kind: "idle" | "typing" | "talk"; prompt: string; seconds: number; on: boolean }[];
   actions: LiveAction[];
   clips: Record<string, LiveClip>;
   sent?: { at: number; status: number; problems?: string };
@@ -70,24 +81,40 @@ export const TEST_WAYS: { way: TestWay; label: string; what: string }[] = [
 
 const STILL = "The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
 export const DEFAULT_IDLE: LiveState["idle"] = [
-  { key: "idle_main", kind: "idle", seconds: 6, on: true, prompt: `She rests in the same pose and spot, looking softly into the camera: slow natural breathing, a blink, a faint smile, a small shift of her weight, one hand briefly touching her hair. ${STILL}` },
-  { key: "idle_typing", kind: "typing", seconds: 6, on: true, prompt: `She glances down at a phone held just below the bottom of the frame, thumbs typing a message, a small smile at what she writes, then she looks back up into the camera. ${STILL}` },
-  { key: "idle_talk", kind: "talk", seconds: 6, on: true, prompt: `She talks to the camera in a relaxed, friendly way, as if answering a message in her live stream chat: small natural hand gestures, a nod, a smile. ${STILL}` },
+  { key: "idle_main", kind: "idle", seconds: 5, on: true, prompt: `She rests in the same pose and spot, a warm closed-mouth smile growing into a soft natural laugh, then settling gently back into a relaxed smile with eye contact. ${STILL}` },
+  { key: "idle_smirk", kind: "idle", seconds: 8, on: true, prompt: `She tilts her head slightly with a knowing, flirty smirk, holding steady eye contact with the camera, subtly shifting her shoulders and breathing naturally before settling back. ${STILL}` },
+  { key: "idle_tease", kind: "idle", seconds: 10, on: true, prompt: `Her lips part playfully as she gives a cheeky little tongue-out tease and brushes a loose strand of hair behind her ear, ending in a coy half-smile back in her resting pose. ${STILL}` },
+  { key: "idle_typing", kind: "typing", seconds: 6, on: true, prompt: `She glances down at a phone or keyboard held just below the bottom of the frame, fingers typing a reply with a small amused smile, then looks back up into the camera. ${STILL}` },
+  { key: "idle_talk", kind: "talk", seconds: 12, on: true, prompt: `She leans slightly toward the lens and talks warmly to the camera as if answering a message in her live chat: relaxed natural hand gestures, a nod, and a bright smile. ${STILL}` },
+];
+export const DEFAULT_NUDE_IDLE: NonNullable<LiveState["nudeIdle"]> = [
+  { key: "nude_idle_main", kind: "idle", seconds: 5, on: true, prompt: `Completely nude in her resting pose, she gives a warm relaxed smile that grows into a soft breathless laugh, holding eye contact with the camera before settling back. ${STILL}` },
+  { key: "nude_idle_smirk", kind: "idle", seconds: 8, on: true, prompt: `Completely nude in her resting pose, she tilts her head with a knowing sultry smirk, heavy-lidded eyes locked on the lens, breathing slowly and shifting her weight slightly. ${STILL}` },
+  { key: "nude_idle_tease", kind: "idle", seconds: 10, on: true, prompt: `Completely nude in her resting pose, she parts her lips with a playful tongue tease, runs one hand lightly along her collarbone and hair, then returns her hand to her resting spot with a cheeky smile. ${STILL}` },
+  { key: "nude_idle_coy", kind: "idle", seconds: 6, on: true, prompt: `Completely nude in her resting pose, she glances down shyly with a coy smile, then lifts her eyes straight back up to the camera with a soft teasing look. ${STILL}` },
 ];
 export const DEFAULT_ACTIONS: LiveAction[] = [
-  { key: "blow_kiss", title: "Blow a kiss", seconds: 5, segs: 1, rating: "sfw", tier: "free", tokens: 20, on: true, hint: "blows a kiss at the camera and laughs",
+  { key: "blow_kiss", title: "Blow a kiss", seconds: 5, segs: 1, rating: "sfw", clothingState: "clothed_and_nude", tier: "free", tokens: 5, on: true, hint: "blows a kiss at the camera and laughs",
     prompt: "She raises her hand to her lips, blows a kiss toward the camera and laughs softly." },
-  { key: "wave", title: "Wave hello", seconds: 4, segs: 1, rating: "sfw", tier: "free", tokens: 10, on: true, hint: "waves hello at the camera with a big smile",
-    prompt: "She waves at the camera with a big bright smile, a little bounce in her shoulders." },
-  { key: "wink", title: "Wink", seconds: 4, segs: 1, rating: "sfw", tier: "free", tokens: 10, on: true, hint: "leans in a little and winks at the camera",
-    prompt: "She leans a little toward the camera, winks with one eye and gives a playful smile." },
-  { key: "heart_hands", title: "Heart hands", seconds: 5, segs: 1, rating: "sfw", tier: "free", tokens: 15, on: true, hint: "makes a heart with her hands for the camera",
-    prompt: "She makes a heart shape with both hands in front of her chest, tilts her head and smiles warmly at the camera." },
+  { key: "suck_finger", title: "Finger tease", seconds: 5, segs: 1, rating: "suggestive", clothingState: "clothed_and_nude", tier: "free", tokens: 12, on: true, hint: "teasingly brings her finger to her lips while holding eye contact",
+    prompt: "She brings one finger slowly to her parted lips, holds sultry eye contact with the lens, and gives a playful smirk." },
+  { key: "little_dance", title: "Little dance", seconds: 6, segs: 1, rating: "sfw", clothingState: "clothed_and_nude", tier: "free", tokens: 15, on: true, hint: "sways and dances playfully for the camera",
+    prompt: "She sways her shoulders and hips playfully in a relaxed little dance while smiling at the camera." },
+  { key: "lift_shirt", title: "Lift my top", seconds: 6, segs: 1, rating: "suggestive", clothingState: "clothed", tier: "premium", tokens: 28, on: true, hint: "teasingly lifts the hem of her top for a brief peek and grins",
+    prompt: "She playfully tugs up the hem of her top to tease a glimpse underneath, bites her lip, then smooths it back down with a cheeky grin." },
 ];
-export const emptyLive = (): LiveState => ({ framing: "waist_up", idle: DEFAULT_IDLE.map((x) => ({ ...x })), actions: DEFAULT_ACTIONS.map((x) => ({ ...x })), clips: {} });
-export const liveOf = (c: Character): LiveState => ({ ...emptyLive(), ...(c.live ?? {}) });
+export const emptyLive = (): LiveState => ({ framing: "waist_up", idle: DEFAULT_IDLE.map((x) => ({ ...x })), nudeIdle: DEFAULT_NUDE_IDLE.map((x) => ({ ...x })), actions: DEFAULT_ACTIONS.map((x) => ({ ...x })), clips: {} });
+export const liveOf = (c: Character): LiveState => {
+  const base = emptyLive();
+  const cur: Partial<LiveState> = c.live ?? {};
+  return { ...base, ...cur, nudeIdle: cur.nudeIdle?.length ? cur.nudeIdle : base.nudeIdle };
+};
+export const isTwoState = (l: LiveState): boolean => !!l.twoState;
+export const actionState = (a: LiveAction): ActionClothingState => a.clothingState ?? "clothed";
 export const segKey = (a: string, i: number) => `act_${a}_s${i + 1}`;
 export const retKey = (a: string) => `act_${a}_ret`;
+export const nudeSegKey = (a: string, i: number) => `nact_${a}_s${i + 1}`;
+export const nudeRetKey = (a: string) => `nact_${a}_ret`;
 export const fileUrl = (cid: string, key: string, at = 0) => `/studio-api/live/file?cid=${encodeURIComponent(cid)}&key=${encodeURIComponent(key)}&v=${at}`;
 
 /** how big a join's jump was before it was eased (0-100, mean pixel difference): under 3 nobody sees it, under 8 the
@@ -121,9 +148,38 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 
 /** the still: the picture cut to 9:16 and sized 720×1280. A new still means every clip has to be made again */
 export async function setAnchor(cid: string, ref: FileRef) {
-  const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref });
+  const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref, slot: "anchor" });
   await saveLive(cid, (l) => ({ ...l, anchor: { ref, input: d.input, at: Date.now() }, room: undefined,
     clips: Object.fromEntries(Object.entries(l.clips).map(([k, c]) => [k, { ...c, status: "new" as const, enc: undefined, ok: false, jobId: undefined, src: undefined }])) }));
+}
+
+/** 2-state Nude Anchor (720×1280 PNG): resets nude idles, nude takes, and undress bridge clips */
+export async function setNudeAnchor(cid: string, ref: FileRef) {
+  const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref, slot: "nude_anchor" });
+  await saveLive(cid, (l) => {
+    const nudeKeys = new Set(l.actions.filter((a) => actionState(a) === "nude" || actionState(a) === "undress").map((a) => a.key));
+    const reset = (k: string) => k.startsWith("nude_idle_") || k.startsWith("nact_") || [...nudeKeys].some((ak) => k.startsWith(`act_${ak}_`));
+    return {
+      ...l,
+      nudeAnchor: { ref, input: d.input, at: Date.now() },
+      clips: Object.fromEntries(Object.entries(l.clips).map(([k, c]) => [k, reset(k) ? { ...c, status: "new" as const, enc: undefined, ok: false, jobId: undefined, src: undefined } : c])),
+    };
+  });
+}
+
+/** optional Mid-Undress Still (for 2-part undress of complex outfits / cosplays): resets undress bridge clips */
+export async function setMidAnchor(cid: string, ref: FileRef | null) {
+  if (!ref) { await saveLive(cid, (l) => ({ ...l, midAnchor: undefined })); return; }
+  const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref, slot: "mid_anchor" });
+  await saveLive(cid, (l) => {
+    const undressKeys = new Set(l.actions.filter((a) => actionState(a) === "undress").map((a) => a.key));
+    const reset = (k: string) => [...undressKeys].some((ak) => k.startsWith(`act_${ak}_`));
+    return {
+      ...l,
+      midAnchor: { ref, input: d.input, at: Date.now() },
+      clips: Object.fromEntries(Object.entries(l.clips).map(([k, c]) => [k, reset(k) ? { ...c, status: "new" as const, enc: undefined, ok: false, jobId: undefined, src: undefined } : c])),
+    };
+  });
 }
 
 /** one clip: H3 makes it, the rental re-encodes it onto its joins. Segments wait for the one before them */
@@ -132,34 +188,57 @@ export async function makeClip(cid: string, key: string, attempt = 0, noRefs = f
   const { c, l } = await get(cid);
   if (!l.anchor) throw new Error("Pick her still first");
   const anchor = l.anchor.input;
+  const nudeAnchor = l.nudeAnchor?.input;
+  const midAnchor = l.midAnchor?.input;
+  const two = isTwoState(l);
   const idle = l.idle.find((x) => x.key === key);
-  const act = l.actions.find((a) => key.startsWith(`act_${a.key}_`));
-  let kind: ClipKind, prompt: string, seconds: number, mode: "loop" | "i2v" | "fl", images: string[], start: string, end: string | undefined, talk = false;
+  const nudeIdle = (l.nudeIdle ?? []).find((x) => x.key === key);
+  const isNudeTake = key.startsWith("nact_");
+  const act = l.actions.find((a) => key.startsWith(isNudeTake ? `nact_${a.key}_` : `act_${a.key}_`));
+  let kind: ClipKind, prompt: string, seconds: number, mode: "loop" | "i2v" | "fl", images: string[], start: string, end: string | undefined, talk = false, useNudeRefs = false;
   if (idle) {
     kind = idle.kind; prompt = idle.prompt; seconds = idle.seconds; mode = "loop"; images = [anchor]; start = anchor; end = anchor; talk = idle.kind === "talk";
+  } else if (nudeIdle) {
+    if (!nudeAnchor) throw new Error("Make or pick her Nude Anchor still first");
+    kind = nudeIdle.kind; prompt = nudeIdle.prompt; seconds = nudeIdle.seconds; mode = "loop"; images = [nudeAnchor]; start = nudeAnchor; end = nudeAnchor; talk = nudeIdle.kind === "talk"; useNudeRefs = true;
   } else if (act) {
-    const isRet = key === retKey(act.key);
+    const st = two ? actionState(act) : "clothed";
+    const isNudeOnly = two && st === "nude";
+    const isUndress = two && st === "undress";
+    const useNudeBase = isNudeTake || isNudeOnly;
+    if ((useNudeBase || isUndress) && !nudeAnchor) throw new Error(`${act.title}: make or pick her Nude Anchor still first`);
+    const baseAnchor = useNudeBase ? nudeAnchor! : anchor;
+    const endAnchor = isUndress ? nudeAnchor! : baseAnchor;
+    const segFn = isNudeTake ? nudeSegKey : segKey;
+    const retFn = isNudeTake ? nudeRetKey : retKey;
+    const isRet = key === retFn(act.key);
     const i = isRet ? act.segs : Number(/_s(\d+)$/.exec(key)?.[1] ?? 1) - 1;
-    const prev = i === 0 ? anchor : l.clips[segKey(act.key, i - 1)]?.enc?.last;
+    const prev = i === 0 ? baseAnchor : l.clips[segFn(act.key, i - 1)]?.enc?.last;
     if (!prev) throw new Error(`${act.title}: make part ${i} first`);
+    useNudeRefs = useNudeBase || (isUndress && (isRet || i > 0));
     if (isRet) {
-      kind = "return"; seconds = 3; mode = "fl"; images = [prev, anchor]; start = prev; end = anchor;
-      prompt = `She settles smoothly back into her resting pose, facing the camera with a soft smile. ${STILL}`.replace(" She ends in exactly the pose she started in.", "");
+      kind = "return"; seconds = isUndress ? 4 : 3; mode = "fl"; images = [prev, endAnchor]; start = prev; end = endAnchor;
+      prompt = isUndress
+        ? `Completely nude now, she finishes slipping off any last clothing and settles smoothly into her exact nude resting pose, facing the camera with a soft teasing smile. ${STILL}`.replace(" She ends in exactly the pose she started in.", "")
+        : `${useNudeBase ? "Completely nude, she" : "She"} settles smoothly back into her resting pose, facing the camera with a soft smile. ${STILL}`.replace(" She ends in exactly the pose she started in.", "");
+    } else if (isUndress && midAnchor && act.segs >= 2 && i === 0) {
+      kind = "seg"; seconds = Math.min(15, act.seconds); mode = "fl"; images = [baseAnchor, midAnchor]; start = baseAnchor; end = midAnchor;
+      const beat = act.parts?.[0] ?? "She smoothly slips off her outer layer/top and tosses it aside, landing naturally in her half-undressed pose.";
+      prompt = `${beat} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
     } else {
       kind = "seg"; seconds = Math.min(15, act.seconds); mode = "i2v"; images = [prev]; start = prev; end = undefined;
-      // a longer action: each part its own beat, told what came before so it carries the move on instead of restarting it
       const beat = act.parts?.[i] ?? act.prompt;
       const before = i > 0 ? (act.parts?.[i - 1] ?? act.prompt) : "";
-      prompt = `${i > 0 ? `This continues a move already under way (the part before: ${before}) — from the first frame she is mid-motion and keeps the same direction and tempo, no restart: ` : ""}${beat}${act.parts && i < act.parts.length - 1 ? " The move is still going at the end of this part (it continues in the next)." : ""} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
+      const nudePrefix = useNudeBase ? "Completely nude throughout, in the exact same room and framing: " : "";
+      prompt = `${nudePrefix}${i > 0 ? `This continues a move already under way (the part before: ${before}) — from the first frame she is mid-motion and keeps the same direction and tempo, no restart: ` : ""}${beat}${act.parts && i < act.parts.length - 1 ? " The move is still going at the end of this part (it continues in the next)." : ""} ${STILL.replace(" She ends in exactly the pose she started in.", "")}`;
     }
   } else throw new Error(`Unknown clip ${key}`);
   await patchClip(cid, key, kind, { status: "making", error: undefined, ok: false });
   try {
     // the same planning as 02 Scenes: the plan line goes through the H3 prompt compiler (timing, motion beats, what stays
     // still), with her start frame attached — written once per plan line and reused when the clip is made again
-    // her references: the turnaround, the expression sheet and the room sheet go in as reference pictures and her start (and
-    // end) frame is pinned with Add Guide — H3's reference mode, so the clip both starts on the still and keeps her face and room
-    const R = !noRefs && l.refs !== false ? await clipRefs(c, l) : null;
+    // her references: the turnaround (or nude body sheet for nude clips), expression sheet and room sheet go in as reference pictures
+    const R = !noRefs && l.refs !== false ? await clipRefs(c, l, useNudeRefs) : null;
     const pics = R ? [start, ...(end && end !== start ? [end] : []), ...R.files] : [];
     const refsLine = R ? refsText(R.labels, end !== undefined && end !== start, mode === "loop") : "";
     const from = `${R ? `refs:${R.files.join(",")}|` : ""}${prompt}`;
@@ -220,20 +299,39 @@ export async function makeClip(cid: string, key: string, attempt = 0, noRefs = f
 
 /** every clip this pack needs, in play order */
 export function packKeys(l: LiveState): string[] {
-  return [...l.idle.filter((x) => x.on).map((x) => x.key), ...l.actions.filter((a) => a.on).flatMap((a) => [...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key)])];
+  const two = isTwoState(l);
+  const clothedIdles = l.idle.filter((x) => x.on).map((x) => x.key);
+  const nudeIdles = two ? (l.nudeIdle ?? []).filter((x) => x.on).map((x) => x.key) : [];
+  const actionClips = l.actions.filter((a) => a.on).flatMap((a) => {
+    const base = [...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key)];
+    if (two && actionState(a) === "clothed_and_nude") {
+      return [...base, ...Array.from({ length: a.segs }, (_, i) => nudeSegKey(a.key, i)), nudeRetKey(a.key)];
+    }
+    return base;
+  });
+  return [...clothedIdles, ...nudeIdles, ...actionClips];
 }
 
 /** make what's missing (or everything with redo): idle loops side by side, each action's parts one after another */
 export async function makeAll(cid: string, redo = false): Promise<void> {
   const { l } = await get(cid);
+  const two = isTwoState(l);
   const need = (k: string) => redo || l.clips[k]?.status !== "ready";
-  const jobs: Promise<void>[] = l.idle.filter((x) => x.on && need(x.key)).map((x) => makeClip(cid, x.key).catch(() => {}));
+  const jobs: Promise<void>[] = [
+    ...l.idle.filter((x) => x.on && need(x.key)).map((x) => makeClip(cid, x.key).catch(() => {})),
+    ...(two ? (l.nudeIdle ?? []).filter((x) => x.on && need(x.key)).map((x) => makeClip(cid, x.key).catch(() => {})) : []),
+  ];
   for (const a of l.actions.filter((x) => x.on)) {
-    const keys = [...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key)];
-    jobs.push((async () => {
-      let after = false; // once a part is made again, everything after it has to be too (it starts from its last frame)
-      for (const k of keys) { if (after || need(k)) { after = true; await makeClip(cid, k); } }
-    })().catch(() => {}));
+    const chains: string[][] = [[...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key)]];
+    if (two && actionState(a) === "clothed_and_nude") {
+      chains.push([...Array.from({ length: a.segs }, (_, i) => nudeSegKey(a.key, i)), nudeRetKey(a.key)]);
+    }
+    for (const keys of chains) {
+      jobs.push((async () => {
+        let after = false; // once a part is made again, everything after it has to be too (it starts from its last frame)
+        for (const k of keys) { if (after || need(k)) { after = true; await makeClip(cid, k); } }
+      })().catch(() => {}));
+    }
   }
   await Promise.all(jobs);
 }
@@ -241,19 +339,37 @@ export async function makeAll(cid: string, redo = false): Promise<void> {
 /** a clip made again: the parts of that action after it start from a different frame now, so they're redone too */
 export async function redoClip(cid: string, key: string): Promise<void> {
   const { l } = await get(cid);
-  const a = l.actions.find((x) => key.startsWith(`act_${x.key}_`));
+  const isNude = key.startsWith("nact_");
+  const a = l.actions.find((x) => key.startsWith(isNude ? `nact_${x.key}_` : `act_${x.key}_`));
   if (!a) return makeClip(cid, key);
-  const keys = [...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key)];
+  const segFn = isNude ? nudeSegKey : segKey;
+  const retFn = isNude ? nudeRetKey : retKey;
+  const keys = [...Array.from({ length: a.segs }, (_, i) => segFn(a.key, i)), retFn(a.key)];
   for (const k of keys.slice(keys.indexOf(key))) await makeClip(cid, k);
 }
 
-/** the order to watch it in: every idle from and back to the plain idle, every action between two plain idles — so every
- *  join the site can play is in it once */
+/** the order to watch it in: every clothed idle & action, then undress → nude idles & nude actions — so every join is in it once */
 export function reelKeys(l: LiveState): string[] {
+  const two = isTwoState(l);
   const base = l.idle.find((x) => x.on && x.kind === "idle")?.key ?? l.idle.find((x) => x.on)?.key;
+  const nudeBase = two ? ((l.nudeIdle ?? []).find((x) => x.on && x.kind === "idle")?.key ?? (l.nudeIdle ?? []).find((x) => x.on)?.key) : undefined;
   const out: string[] = base ? [base] : [];
   for (const x of l.idle.filter((y) => y.on && y.key !== base)) out.push(x.key, ...(base ? [base] : []));
-  for (const a of l.actions.filter((y) => y.on)) out.push(...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key), ...(base ? [base] : []));
+  for (const a of l.actions.filter((y) => y.on && (!two || (actionState(y) !== "nude" && actionState(y) !== "undress")))) {
+    out.push(...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key), ...(base ? [base] : []));
+  }
+  if (two) {
+    const undress = l.actions.find((y) => y.on && actionState(y) === "undress");
+    if (undress) out.push(...Array.from({ length: undress.segs }, (_, i) => segKey(undress.key, i)), retKey(undress.key));
+    if (nudeBase) out.push(nudeBase);
+    for (const x of (l.nudeIdle ?? []).filter((y) => y.on && y.key !== nudeBase)) out.push(x.key, ...(nudeBase ? [nudeBase] : []));
+    for (const a of l.actions.filter((y) => y.on && actionState(y) === "clothed_and_nude")) {
+      out.push(...Array.from({ length: a.segs }, (_, i) => nudeSegKey(a.key, i)), nudeRetKey(a.key), ...(nudeBase ? [nudeBase] : []));
+    }
+    for (const a of l.actions.filter((y) => y.on && actionState(y) === "nude")) {
+      out.push(...Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), retKey(a.key), ...(nudeBase ? [nudeBase] : []));
+    }
+  }
   return out;
 }
 export async function makeReel(cid: string): Promise<string> {
@@ -266,7 +382,11 @@ export async function makeReel(cid: string): Promise<string> {
 /** what's still in the way of sending (empty = ready) */
 export function blockers(l: LiveState): string[] {
   const out: string[] = [];
+  const two = isTwoState(l);
   if (!l.anchor) out.push("pick her still");
+  if (two && !l.nudeAnchor) out.push("make or pick her Nude Anchor still");
+  if (two && !(l.nudeIdle ?? []).some((x) => x.on && x.kind === "idle")) out.push("at least one nude idle loop");
+  if (two && !l.actions.some((a) => a.on && actionState(a) === "undress")) out.push("an Undress bridge action");
   const keys = packKeys(l);
   const notReady = keys.filter((k) => l.clips[k]?.status !== "ready");
   if (notReady.length) out.push(`${notReady.length} clip${notReady.length === 1 ? "" : "s"} not made yet`);
@@ -281,15 +401,21 @@ export async function sendLive(cid: string): Promise<{ ok: boolean; note: string
   const { c, l } = await get(cid);
   if (!c.site?.sent?.ok) throw new Error(`${c.name} isn't on the site yet — send her first (the site answers 409 otherwise)`);
   await ensureFitted(cid);
+  const two = isTwoState(l);
   const pack = {
     framing: l.framing,
+    ...(two && l.nudeAnchor ? { nude_anchor: true, nude_idle: (l.nudeIdle ?? []).filter((x) => x.on).map((x) => ({ key: x.key, kind: x.kind, rating: "explicit" })) } : {}),
     idle: l.idle.filter((x) => x.on).map((x) => ({ key: x.key, kind: x.kind, rating: "sfw" })),
-    actions: l.actions.filter((a) => a.on).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).map((a) => ({
-      key: a.key, title: a.title.slice(0, 40), segments: Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), return: retKey(a.key),
-      rating: a.rating, reaction_hint: a.hint.slice(0, 200), // the site unlocks Live Action buttons by her relationship level with him (1–7, since 20 Nov); without one it uses
-      // 1 for sfw, 2 for suggestive and her intimate level for explicit — and never opens explicit earlier than that
-      live_action: a.unlock && a.unlock >= 1 && a.unlock <= 7 ? { min_level: a.unlock } : {}, live_stream: { tokens: a.tokens },
-    })),
+    actions: l.actions.filter((a) => a.on).sort((a, b) => (a.level ?? 99) - (b.level ?? 99)).map((a) => {
+      const st = two ? actionState(a) : undefined;
+      return {
+        key: a.key, title: a.title.slice(0, 40), segments: Array.from({ length: a.segs }, (_, i) => segKey(a.key, i)), return: retKey(a.key),
+        ...(st ? { clothing_state: st } : {}),
+        ...(two && st === "clothed_and_nude" ? { nude_segments: Array.from({ length: a.segs }, (_, i) => nudeSegKey(a.key, i)), nude_return: nudeRetKey(a.key) } : {}),
+        rating: a.rating, reaction_hint: a.hint.slice(0, 200),
+        live_action: a.unlock && a.unlock >= 1 && a.unlock <= 7 ? { min_level: a.unlock } : {}, live_stream: { tokens: a.tokens },
+      };
+    }),
   };
   const r = await post<{ status: number; body: unknown; problems: string }>("/studio-api/live/send", { cid, pack });
   const ok = r.status >= 200 && r.status < 300;
@@ -328,17 +454,24 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
     ratings: o.ratings.join(", "), keep: keep.length ? keep.map((a) => `${a.key}: ${a.title}`).join("\n") : "(none)",
     examples: o.examples.trim() || "(none — use your own judgement of what live-stream creators offer)",
   }, { tab: "characters", label: `${c.name} · planning her live pack`, big: true, images: [...(l.anchor ? [l.anchor.input] : await sheetPic(c)), ...(o.pictures ?? [])].slice(0, 8) });
-  type A = Partial<LiveAction> & { key?: string };
-  const d = looseJson<{ setting?: string; still?: string; idle?: Record<string, string>; actions?: A[] }>(raw);
+  type A = Partial<LiveAction> & { key?: string; clothing_state?: string };
+  const d = looseJson<{ setting?: string; still?: string; idle?: Record<string, string>; nude_idle?: Record<string, string>; actions?: A[] }>(raw);
   const STILL_END = " The camera is fixed (a phone on a stand, live-webcam look), one continuous shot with no cuts, the same light and background throughout. She ends in exactly the pose she started in.";
   const slug = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || `action_${Math.random().toString(36).slice(2, 7)}`;
+  const STATES: ActionClothingState[] = ["clothed", "clothed_and_nude", "undress", "nude"];
   const seen = new Set<string>();
   const acts: LiveAction[] = (d.actions ?? []).flatMap((a) => {
     const key = slug(a.key || a.title || "");
     if (seen.has(key) || !a.prompt) return [];
     seen.add(key);
     const rating = (o.ratings.includes(a.rating as LiveAction["rating"]) ? a.rating : o.ratings[0]) as LiveAction["rating"];
-    return [{ key, title: String(a.title || key).slice(0, 40), prompt: String(a.prompt), hint: String(a.hint || "").slice(0, 200), rating,
+    const rawState = String(a.clothing_state ?? a.clothingState ?? "").trim() as ActionClothingState;
+    const clothingState: ActionClothingState = STATES.includes(rawState)
+      ? rawState
+      : rating === "explicit"
+        ? (/undress|strip|take.*off/i.test(`${key} ${a.title ?? ""}`) ? "undress" : "nude")
+        : (/shirt|top|bra|skirt|hem|zip|cleavage/i.test(`${key} ${a.title ?? ""}`) ? "clothed" : "clothed_and_nude");
+    return [{ key, title: String(a.title || key).slice(0, 40), prompt: String(a.prompt), hint: String(a.hint || "").slice(0, 200), rating, clothingState,
       seconds: Math.max(3, Math.min(15, Number(a.seconds) || 5)), segs: Math.max(1, Math.min(4, Number(a.segs) || 1)),
       tier: (["free", "premium", "ultimate"].includes(String(a.tier)) ? a.tier : rating === "sfw" ? "free" : rating === "suggestive" ? "premium" : "ultimate") as LiveAction["tier"],
       tokens: Math.max(1, Math.round(Number(a.tokens) || 20)), on: true,
@@ -348,10 +481,17 @@ export async function planActions(cid: string, o: PlanOpts): Promise<number> {
   await saveLive(cid, (x) => ({
     ...x,
     ...(d.setting ? { setting: String(d.setting).slice(0, 200) } : {}), ...(d.still ? { stillPrompt: String(d.still) } : {}),
-    idle: x.idle.map((y) => (d.idle?.[y.kind] ? { ...y, prompt: `${String(d.idle[y.kind]).replace(/\s*$/, "")}${STILL_END}` } : y)),
+    idle: x.idle.map((y) => {
+      const txt = d.idle?.[y.key] ?? d.idle?.[y.kind];
+      return txt ? { ...y, prompt: `${String(txt).replace(/\s*$/, "")}${STILL_END}` } : y;
+    }),
+    nudeIdle: (x.nudeIdle ?? DEFAULT_NUDE_IDLE).map((y) => {
+      const txt = d.nude_idle?.[y.key] ?? d.nude_idle?.[y.kind];
+      return txt ? { ...y, prompt: `${String(txt).replace(/\s*$/, "")}${STILL_END}` } : y;
+    }),
     actions: acts,
     // clips of actions that aren't in the plan any more go; the kept ones (same key) stay
-    clips: Object.fromEntries(Object.entries(x.clips).filter(([k]) => !k.startsWith("act_") || acts.some((a) => k.startsWith(`act_${a.key}_`)))),
+    clips: Object.fromEntries(Object.entries(x.clips).filter(([k]) => (!k.startsWith("act_") && !k.startsWith("nact_")) || acts.some((a) => k.startsWith(`act_${a.key}_`) || k.startsWith(`nact_${a.key}_`)))),
   }));
   return acts.length;
 }
@@ -450,19 +590,89 @@ export async function makeStill(cid: string, takes = 2): Promise<FileRef[]> {
 }
 
 
+/** pixel-aligned Nude Anchor takes edited directly from her Clothed Anchor + Nude Body Sheet (exact same room, camera, lighting, pose) */
+export async function makeNudeAnchor(cid: string, takes = 2): Promise<FileRef[]> {
+  const { c, l } = await get(cid);
+  if (!l.anchor) throw new Error("Pick or make her Clothed Anchor still first");
+  const [{ nudeAnchorGraph }, { useJobs, waitForJob }, { toInput }] = await Promise.all([import("./sheet"), import("./jobs"), import("./api")]);
+  const nudeSheet = c.views.nudeSheet ? (await toInput(c.views.nudeSheet).catch(() => null))?.name : undefined;
+  const jobs = await Promise.all(Array.from({ length: takes }, () =>
+    useJobs.getState().run("characters", `${c.name} · live nude anchor`, nudeAnchorGraph(c, l.anchor!.input, nudeSheet, `studio/live/${cid}_nude`), "edit:krea:2:raw", { project: cid, charId: cid, live: "nude_anchor" })));
+  const outs: FileRef[] = [];
+  for (const j of jobs) {
+    const d = await waitForJob(j.id).catch(() => null);
+    const o = d?.outputs.find((x) => x.kind === "image" && x.type === "output");
+    if (o) outs.push({ filename: o.filename, subfolder: o.subfolder, type: o.type });
+  }
+  if (!outs.length) throw new Error(`${c.name}: her nude anchor didn't come out — try again`);
+  return outs;
+}
+
+/** optional Mid-Undress Still edited from her Clothed Anchor for 2-part undress of layered outfits / cosplays */
+export async function makeMidAnchor(cid: string, takes = 2): Promise<FileRef[]> {
+  const { c, l } = await get(cid);
+  if (!l.anchor) throw new Error("Pick or make her Clothed Anchor still first");
+  const [{ undressMidGraph }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
+  const jobs = await Promise.all(Array.from({ length: takes }, () =>
+    useJobs.getState().run("characters", `${c.name} · live mid-undress still`, undressMidGraph(c, l.anchor!.input, `studio/live/${cid}_mid`), "edit:krea:1:raw", { project: cid, charId: cid, live: "mid_anchor" })));
+  const outs: FileRef[] = [];
+  for (const j of jobs) {
+    const d = await waitForJob(j.id).catch(() => null);
+    const o = d?.outputs.find((x) => x.kind === "image" && x.type === "output");
+    if (o) outs.push({ filename: o.filename, subfolder: o.subfolder, type: o.type });
+  }
+  if (!outs.length) throw new Error(`${c.name}: her mid-undress still didn't come out — try again`);
+  return outs;
+}
+
+/** 1-time unclothed body baseline sheet edited directly from her clothed All-angles sheet (or front view) */
+export async function ensureNudeSheet(cid: string, force = false): Promise<boolean> {
+  const { useCharacters } = await import("./characters");
+  const c0 = useCharacters.getState().list.find((x) => x.id === cid);
+  if (!c0) return false;
+  if (c0.views.nudeSheet && !force) return true;
+  const baseView = c0.views.sheet ? "sheet" : c0.views.front ? "front" : null;
+  if (!baseView) throw new Error("She needs an All angles sheet or front picture first");
+  const [{ nudeSheetGraph }, { useJobs, waitForJob }] = await Promise.all([import("./sheet"), import("./jobs")]);
+  const base = await useCharacters.getState().asMedia(cid, baseView);
+  if (!base) return false;
+  const j = await useJobs.getState().run("characters", `${c0.name}: nude body sheet`, nudeSheetGraph(c0, base.name), "characters:view:krea", { charId: cid, view: "nudeSheet", single: true });
+  await waitForJob(j.id);
+  for (let i = 0; i < 40; i++) {
+    if (useCharacters.getState().list.find((x) => x.id === cid)?.views.nudeSheet) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
 /** a new rental: the fitted clips (and her still) stay on the old one, but every raw video is in your results — fit them
  *  again, in order (each part starts on the new last frame of the one before), keeping your "Looks right" ticks */
 export async function ensureFitted(cid: string): Promise<number> {
   const { l } = await get(cid);
-  const have = await (await fetch(`/studio-api/live/have?cid=${encodeURIComponent(cid)}`)).json() as { have: string[]; anchor: boolean };
+  const two = isTwoState(l);
+  const have = await (await fetch(`/studio-api/live/have?cid=${encodeURIComponent(cid)}`)).json() as { have: string[]; anchor: boolean; nude_anchor?: boolean; mid_anchor?: boolean };
   const keys = packKeys(l).filter((k) => l.clips[k]?.status === "ready");
-  if (have.anchor && keys.every((k) => have.have.includes(k))) return 0;
+  if (have.anchor && (!two || !l.nudeAnchor || have.nude_anchor) && keys.every((k) => have.have.includes(k))) return 0;
   if (!l.anchor) return 0;
   let anchor = l.anchor.input;
   if (!have.anchor) {
-    const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref: l.anchor.ref });
+    const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref: l.anchor.ref, slot: "anchor" });
     anchor = d.input;
     await saveLive(cid, (x) => ({ ...x, anchor: x.anchor ? { ...x.anchor, input: anchor } : x.anchor }));
+  }
+  let nudeAnchor = l.nudeAnchor?.input;
+  if (two && l.nudeAnchor && !have.nude_anchor) {
+    const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref: l.nudeAnchor.ref, slot: "nude_anchor" });
+    const nextNude = d.input;
+    nudeAnchor = nextNude;
+    await saveLive(cid, (x) => ({ ...x, nudeAnchor: x.nudeAnchor ? { ...x.nudeAnchor, input: nextNude } : x.nudeAnchor }));
+  }
+  let midAnchor = l.midAnchor?.input;
+  if (two && l.midAnchor && !have.mid_anchor) {
+    const d = await post<{ input: string }>("/studio-api/live/anchor", { cid, ref: l.midAnchor.ref, slot: "mid_anchor" });
+    const nextMid = d.input;
+    midAnchor = nextMid;
+    await saveLive(cid, (x) => ({ ...x, midAnchor: x.midAnchor ? { ...x.midAnchor, input: nextMid } : x.midAnchor }));
   }
   let n = 0;
   const fit = async (key: string, start: string, end: string | undefined) => {
@@ -473,10 +683,24 @@ export async function ensureFitted(cid: string): Promise<number> {
     n++; return e.last;
   };
   for (const x of l.idle.filter((y) => y.on)) if (l.clips[x.key]?.status === "ready") await fit(x.key, anchor, anchor);
+  if (two && nudeAnchor) {
+    for (const x of (l.nudeIdle ?? []).filter((y) => y.on)) if (l.clips[x.key]?.status === "ready") await fit(x.key, nudeAnchor, nudeAnchor);
+  }
   for (const a of l.actions.filter((y) => y.on)) {
-    let prev: string | undefined = anchor;
-    for (let i = 0; i < a.segs && prev; i++) prev = await fit(segKey(a.key, i), prev, undefined);
-    if (prev) await fit(retKey(a.key), prev, anchor);
+    const st = two ? actionState(a) : "clothed";
+    const startA = st === "nude" && nudeAnchor ? nudeAnchor : anchor;
+    const endA = (st === "nude" || st === "undress") && nudeAnchor ? nudeAnchor : anchor;
+    let prev: string | undefined = startA;
+    for (let i = 0; i < a.segs && prev; i++) {
+      const segEnd = st === "undress" && midAnchor && a.segs >= 2 && i === 0 ? midAnchor : undefined;
+      prev = await fit(segKey(a.key, i), prev, segEnd);
+    }
+    if (prev) await fit(retKey(a.key), prev, endA);
+    if (two && st === "clothed_and_nude" && nudeAnchor) {
+      let nPrev: string | undefined = nudeAnchor;
+      for (let i = 0; i < a.segs && nPrev; i++) nPrev = await fit(nudeSegKey(a.key, i), nPrev, undefined);
+      if (nPrev) await fit(nudeRetKey(a.key), nPrev, nudeAnchor);
+    }
   }
   return n;
 }
@@ -529,11 +753,15 @@ async function fixJoin(c: Character, cid: string, last: string): Promise<{ used:
 
 
 /** the reference pictures every clip gets (input names) and how the compiler should name them — after the pinned frame(s) */
-async function clipRefs(c: Character, l: LiveState): Promise<{ files: string[]; labels: string[] } | null> {
+async function clipRefs(c: Character, l: LiveState, useNudeSheet = false): Promise<{ files: string[]; labels: string[] } | null> {
   const { toInput } = await import("./api");
   const files: string[] = [], labels: string[] = [];
   const add = async (f: FileRef | undefined, label: string) => { if (!f) return; const n = await toInput(f).then((x) => x.name).catch(() => ""); if (n) { files.push(n); labels.push(label); } };
-  await add(c.views.sheet ?? c.views.front, c.views.sheet ? "her reference sheet: the same woman from several angles (front, back, side, face, three-quarter) — her identity, face, hair, body and outfit" : "a picture of her — her identity, face, hair, body and outfit");
+  if (useNudeSheet && c.views.nudeSheet) {
+    await add(c.views.nudeSheet, "her unclothed body reference sheet: the same woman nude from several angles — her exact face, hair, skin tone, bust, waist, hips and natural body proportions");
+  } else {
+    await add(c.views.sheet ?? c.views.front, c.views.sheet ? "her reference sheet: the same woman from several angles (front, back, side, face, three-quarter) — her identity, face, hair, body and outfit" : "a picture of her — her identity, face, hair, body and outfit");
+  }
   await add(c.views.faces, "her expression sheet: her face in twelve expressions and four mouth shapes — how her face looks when it moves");
   if (l.room) { files.push(l.room.input); labels.push("her room as a set sheet: the same view with nobody in it, a wider view of the room, and the wall behind her — the room's layout, furniture and light"); }
   return files.length ? { files, labels } : null;

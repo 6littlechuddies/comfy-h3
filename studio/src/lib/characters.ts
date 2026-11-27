@@ -20,6 +20,7 @@ export const VIEWS = [
   { id: "angry", label: "Angry", hint: "expression" },
   { id: "surprised", label: "Surprised", hint: "expression" },
   { id: "sheet", label: "All angles", hint: "the whole sheet in one picture" },
+  { id: "nudeSheet", label: "Nude body sheet", hint: "her unclothed turnaround baseline, edited from All angles" },
   { id: "faces", label: "Expressions", hint: "her face in 12 moods + mouth shapes, one picture" },
 ] as const;
 export type View = (typeof VIEWS)[number]["id"];

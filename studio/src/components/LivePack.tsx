@@ -8,8 +8,8 @@ import { create } from "zustand";
 import { viewUrl, type FileRef } from "../lib/api";
 import { useCharacters, type Character } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
-import { TEST_WAYS, blockers, checkOnSite, planActions, fileUrl, jumpLevel, liveOf, makeAll, makeReel, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor,
-  type LiveAction, type LiveClip, type LiveState } from "../lib/live";
+import { TEST_WAYS, actionState, blockers, checkOnSite, ensureNudeSheet, planActions, fileUrl, isTwoState, jumpLevel, liveOf, makeAll, makeMidAnchor, makeNudeAnchor, makeReel, nudeRetKey, nudeSegKey, packKeys, redoClip, retKey, saveLive, segKey, sendLive, setAnchor, setMidAnchor, setNudeAnchor,
+  type ActionClothingState, type LiveAction, type LiveClip, type LiveState } from "../lib/live";
 import { Btn, DropSelect, Icon, cx } from "./ui";
 
 export const useLivePack = create<{ cid: string | null }>(() => ({ cid: null }));
@@ -38,14 +38,23 @@ function Join({ d, label }: { d?: number | null; label: string }) {
 }
 
 /** her still, small: where every action starts and ends */
-function StillMini({ cid, at, label }: { cid: string; at?: number; label: string }) {
+function StillMini({ cid, at, label, slot = "anchor" }: { cid: string; at?: number; label: string; slot?: "anchor" | "nude_anchor" | "mid_anchor" }) {
   return (
     <span className="mt-[68px] flex w-10 shrink-0 flex-col items-center gap-1" title={label}>
-      <span className="aspect-[9/16] w-full overflow-hidden border border-accent/50 bg-raised2">{at ? <img src={fileUrl(cid, "anchor", at)} alt="" className="h-full w-full object-cover" /> : null}</span>
-      <span className="text-[9.5px] uppercase tracking-wide text-dim">still</span>
+      <span className={cx("aspect-[9/16] w-full overflow-hidden border bg-raised2", slot === "nude_anchor" ? "border-bad/60" : slot === "mid_anchor" ? "border-amber-300/60" : "border-accent/50")}>
+        {at ? <img src={fileUrl(cid, slot, at)} alt="" className="h-full w-full object-cover" /> : null}
+      </span>
+      <span className="text-[9.5px] uppercase tracking-wide text-dim">{slot === "nude_anchor" ? "nude" : slot === "mid_anchor" ? "mid" : "still"}</span>
     </span>
   );
 }
+
+const STATE_BADGE: Record<ActionClothingState, [string, string]> = {
+  clothed: ["Clothed", "text-muted border-line2"],
+  clothed_and_nude: ["Clothed + Nude", "text-accent border-accent/50"],
+  undress: ["Undress → Nude", "text-amber-300 border-amber-300/50"],
+  nude: ["Nude only", "text-bad border-bad/50"],
+};
 
 function Switch({ on, set, children, title }: { on: boolean; set: (v: boolean) => void; children: React.ReactNode; title?: string }) {
   return (
@@ -62,8 +71,10 @@ const field = "inset h-7 border border-line bg-raised px-1.5 text-[12px] text-in
 
 function LivePack({ c }: { c: Character }) {
   const l = liveOf(c);
+  const two = isTwoState(l);
   const toast = useJobs((s) => s.toast);
   const [picking, setPicking] = useState(!l.anchor);
+  const [pickingSlot, setPickingSlot] = useState<"anchor" | "nude_anchor" | "mid_anchor">("anchor");
   const [busy, setBusy] = useState("");
   const [reel, setReel] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -114,18 +125,25 @@ function LivePack({ c }: { c: Character }) {
         {/* her still and her room */}
         <aside className="flex w-[300px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line p-4">
           <section className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between"><h3 className="text-[13.5px] font-semibold">Her still</h3>
-              {l.anchor && !picking && <button onClick={() => setPicking(true)} className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Pick another</button>}
-              {picking && l.anchor && <button onClick={() => setPicking(false)} className="text-[12px] text-muted hover:text-ink">Keep this one</button>}</div>
+            <div className="flex items-baseline justify-between"><h3 className="text-[13.5px] font-semibold">{picking && pickingSlot === "nude_anchor" ? "Pick Nude Anchor" : picking && pickingSlot === "mid_anchor" ? "Pick Mid-Undress Still" : "Her still (clothed)"}</h3>
+              {l.anchor && !picking && <button onClick={() => { setPickingSlot("anchor"); setPicking(true); }} className="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Pick another</button>}
+              {picking && l.anchor && <button onClick={() => setPicking(false)} className="text-[12px] text-muted hover:text-ink">Keep current</button>}</div>
             {l.anchor && !picking
               ? <img src={fileUrl(c.id, "anchor", l.anchor.at)} alt="Her still" className="aspect-[9/16] w-full border border-line object-cover" />
               : <>
                 <p className="text-[11.5px] leading-relaxed text-dim">Every clip starts or ends on this exact frame. A 9:16 picture of her resting works best; others are cut from the middle.</p>
                 <div className="grid max-h-[46vh] grid-cols-3 gap-1.5 overflow-y-auto">
                   {pics.length ? pics.map((p) => (
-                    <button key={`${p.subfolder}/${p.filename}`} title="Use this as her still" onClick={() => void run("Making her still…", async () => {
-                      if (l.anchor && Object.values(l.clips).some((x) => x.status === "ready") && !confirm("A new still means every clip is made again (they all start or end on it). Go ahead?")) return;
-                      await setAnchor(c.id, p); setPicking(false);
+                    <button key={`${p.subfolder}/${p.filename}`} title={`Use as ${pickingSlot.replace("_", " ")}`} onClick={() => void run(`Setting ${pickingSlot.replace("_", " ")}…`, async () => {
+                      if (pickingSlot === "anchor") {
+                        if (l.anchor && Object.values(l.clips).some((x) => x.status === "ready") && !confirm("A new clothed still means every clip is made again. Go ahead?")) return;
+                        await setAnchor(c.id, p);
+                      } else if (pickingSlot === "nude_anchor") {
+                        await setNudeAnchor(c.id, p);
+                      } else {
+                        await setMidAnchor(c.id, p);
+                      }
+                      setPicking(false);
                     })} className="press aspect-[9/16] overflow-hidden border border-line hover:border-accent">
                       <Thumb f={p} className="h-full w-full object-cover" />
                     </button>)) : <p className="col-span-3 text-[12px] text-dim">No pictures of her yet — make one in 03 Create, or make a still from her room below.</p>}
@@ -136,6 +154,49 @@ function LivePack({ c }: { c: Character }) {
                 <button key={v} role="radio" aria-checked={l.framing === v} onClick={() => up((x) => ({ ...x, framing: v }))}
                   className={cx("press h-7 text-[12px]", l.framing === v ? "bg-raised2 text-ink" : "text-muted hover:text-ink")}>{t}</button>))}
             </div>
+          </section>
+          <section className="flex flex-col gap-2.5 border-t border-line pt-4">
+            <Switch on={two} set={(v) => up((x) => ({ ...x, twoState: v }))} title="2-state Live Action: Clothed Still → Undress bridge → Nude Still, so once she undresses she stays nude and plays nude idles + nude takes cleanly">
+              2-State: Clothed → Undress → Nude
+              <span className="block text-[11px] text-dim">Adds pixel-aligned Nude Anchor + Nude Idles + nude takes for Clothed+Nude actions</span>
+            </Switch>
+            {two && (
+              <div className="flex flex-col gap-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <span className="flex items-center justify-between text-[11px] font-medium text-muted">
+                      <span>Nude Anchor</span>
+                      <button onClick={() => { setPickingSlot("nude_anchor"); setPicking(true); }} className="text-accent hover:underline">Pick</button>
+                    </span>
+                    <span className="flex aspect-[9/16] items-center justify-center overflow-hidden border border-bad/40 bg-raised2 text-center text-[10px] text-dim">
+                      {l.nudeAnchor ? <img src={fileUrl(c.id, "nude_anchor", l.nudeAnchor.at)} alt="Nude anchor" className="h-full w-full object-cover" /> : "Edit from clothed still"}
+                    </span>
+                    <Btn small disabled={!!busy || !l.anchor} why={!l.anchor ? "Pick clothed still first" : "Busy"}
+                      onClick={() => void run("Editing Nude Anchor from clothed still…", async () => {
+                        const outs = await makeNudeAnchor(c.id, 2);
+                        await setNudeAnchor(c.id, outs[0]);
+                        toast(`${outs.length} pixel-aligned nude anchors made (1st selected — click Pick to view other take)`, "good");
+                      })}>{l.nudeAnchor ? "Redo nude still" : "Edit from still"}</Btn>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="flex items-center justify-between text-[11px] font-medium text-muted">
+                      <span>Mid-Undress <span className="text-dim">(opt)</span></span>
+                      {l.midAnchor ? <button onClick={() => void setMidAnchor(c.id, null)} className="text-dim hover:text-bad">Clear</button>
+                        : <button onClick={() => { setPickingSlot("mid_anchor"); setPicking(true); }} className="text-accent hover:underline">Pick</button>}
+                    </span>
+                    <span className="flex aspect-[9/16] items-center justify-center overflow-hidden border border-amber-300/40 bg-raised2 px-1 text-center text-[10px] text-dim">
+                      {l.midAnchor ? <img src={fileUrl(c.id, "mid_anchor", l.midAnchor.at)} alt="Mid undress" className="h-full w-full object-cover" /> : "For layered outfits / cosplays"}
+                    </span>
+                    <Btn small disabled={!!busy || !l.anchor} why={!l.anchor ? "Pick clothed still first" : "Busy"}
+                      onClick={() => void run("Making Mid-Undress still…", async () => {
+                        const outs = await makeMidAnchor(c.id, 2);
+                        await setMidAnchor(c.id, outs[0]);
+                        toast(`${outs.length} mid-undress stills made (1st selected for 2-part Undress)`, "good");
+                      })}>{l.midAnchor ? "Redo mid still" : "Make mid still"}</Btn>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
           {c.style !== "anime" && <section className="flex flex-col gap-2 border-t border-line pt-4">
             <h3 className="text-[13.5px] font-semibold">Her room</h3>
@@ -150,17 +211,23 @@ function LivePack({ c }: { c: Character }) {
               Show every clip her sheets and room
               <span className="block text-[11px] text-dim">Her face, body and room stay the same from part to part</span>
             </Switch>
-            {l.refs !== false && <div className="grid grid-cols-3 gap-1.5">
-              {([["Angles", c.views.sheet ?? c.views.front, null], ["Expressions", c.views.faces, "faces"], ["Room", l.room?.ref, "room"]] as const).map(([t, f, make]) => (
+            {l.refs !== false && <div className={cx("grid gap-1.5", two ? "grid-cols-2" : "grid-cols-3")}>
+              {([
+                ["Angles", c.views.sheet ?? c.views.front, null],
+                ...(two ? [["Nude Body", c.views.nudeSheet, "nudeSheet"] as const] : []),
+                ["Expressions", c.views.faces, "faces"],
+                ["Room", l.room?.ref, "room"],
+              ] as readonly (readonly [string, FileRef | undefined, "room" | "faces" | "nudeSheet" | null])[]).map(([t, f, make]) => (
                 <div key={t} className="flex flex-col gap-1">
                   <span className="flex aspect-square items-center justify-center overflow-hidden border border-line bg-raised2 text-center text-[10px] leading-tight text-dim">
                     {f ? <img src={viewUrl(f)} alt={t} className="h-full w-full object-cover" /> : make === "room" && !l.anchor ? "after her still" : "not made yet"}</span>
                   <span className="flex items-center justify-between text-[10.5px] text-muted">{t}
-                    {make && <button disabled={!!busy || (make === "room" && !l.anchor) || (make === "faces" && !c.views.front)} className="text-accent hover:underline disabled:text-dim disabled:no-underline"
-                      title={make === "room" ? "Her room as a set sheet from her still: the same view empty, a wider view, the wall behind her" : "Her face in twelve expressions and four mouth shapes, one picture (it also lands in her sheet in Characters)"}
-                      onClick={() => void run(make === "room" ? "Making her room sheet…" : "Making her expression sheet…", async () => {
+                    {make && <button disabled={!!busy || (make === "room" && !l.anchor) || (make === "faces" && !c.views.front) || (make === "nudeSheet" && !c.views.sheet && !c.views.front)} className="text-accent hover:underline disabled:text-dim disabled:no-underline"
+                      title={make === "room" ? "Her room as a set sheet from her still" : make === "nudeSheet" ? "Unclothed body baseline edited directly from her All angles sheet so body proportions never drift across nude clips" : "Her face in twelve expressions and four mouth shapes"}
+                      onClick={() => void run(make === "room" ? "Making her room sheet…" : make === "nudeSheet" ? "Making her Nude Body sheet…" : "Making her expression sheet…", async () => {
                         const L = await import("../lib/live");
                         if (make === "room") await L.makeRoom(c.id);
+                        else if (make === "nudeSheet") await ensureNudeSheet(c.id, true);
                         else {
                           const [{ facesGraph }, { useCharacters: uc }] = await Promise.all([import("../lib/sheet"), import("../lib/characters")]);
                           const front = await uc.getState().asMedia(c.id, "front");
@@ -169,7 +236,7 @@ function LivePack({ c }: { c: Character }) {
                           const j = await useJobs.getState().run("characters", `${c.name}: expression sheet`, facesGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "faces" });
                           await waitForJob(j.id);
                         }
-                        toast(make === "room" ? "Her room sheet is in — clips made from now on use it" : "Her expression sheet is in", "good");
+                        toast(make === "room" ? "Her room sheet is in" : make === "nudeSheet" ? "Her Nude Body baseline sheet is in — nude anchor & nude clips will lock to it" : "Her expression sheet is in", "good");
                       })}>{f ? "Redo" : "Make"}</button>}</span>
                 </div>))}
             </div>}
@@ -185,15 +252,35 @@ function LivePack({ c }: { c: Character }) {
         </aside>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <section className="flex flex-col gap-3">
-            <div><h3 className="text-[15px] font-semibold">Idle loops</h3><p className="text-[12px] text-dim">From her still back to it, safe for everyone. They play between everything else.</p></div>
+            <div><h3 className="text-[15px] font-semibold">Clothed idle loops</h3><p className="text-[12px] text-dim">Staggered expressive loops off her Clothed Still (5–12 s each so they don&apos;t feel repetitive). Safe for everyone.</p></div>
             <div className="flex flex-wrap gap-4">
-              {l.idle.map((x) => (
-                <div key={x.key} className={cx("flex flex-col gap-1.5", !x.on && "opacity-45")}>
-                  {clip(x.key, x.kind === "idle" ? "Plain idle" : x.kind === "typing" ? "Typing on her phone" : "Talking to camera", x.kind === "typing" ? "while she writes a reply" : x.kind === "talk" ? "while she answers the chat" : "everything comes back to it")}
-                  {x.kind !== "idle" && <Switch on={x.on} set={(v) => up((s) => ({ ...s, idle: s.idle.map((y) => (y.key === x.key ? { ...y, on: v } : y)) }))}><span className="text-muted">In the pack</span></Switch>}
-                </div>))}
+              {l.idle.map((x) => {
+                const label = x.key === "idle_smirk" ? "Knowing smirk" : x.key === "idle_tease" ? "Playful tease" : x.kind === "typing" ? "Typing" : x.kind === "talk" ? "Talking to camera" : "Smile & laugh";
+                return (
+                  <div key={x.key} className={cx("flex flex-col gap-1.5", !x.on && "opacity-45")}>
+                    {clip(x.key, `${label} (${x.seconds}s)`, x.kind === "typing" ? "while she writes a reply" : x.kind === "talk" ? "while she answers chat" : "staggered idle loop")}
+                    {x.key !== "idle_main" && <Switch on={x.on} set={(v) => up((s) => ({ ...s, idle: s.idle.map((y) => (y.key === x.key ? { ...y, on: v } : y)) }))}><span className="text-muted">In the pack</span></Switch>}
+                  </div>
+                );
+              })}
             </div>
           </section>
+          {two && (
+            <section className="mt-6 flex flex-col gap-3 border-t border-line pt-6">
+              <div><h3 className="text-[15px] font-semibold">Nude idle loops</h3><p className="text-[12px] text-dim">Played automatically once she undresses — starts and ends on her Nude Anchor using her Nude Body sheet.</p></div>
+              <div className="flex flex-wrap gap-4">
+                {(l.nudeIdle ?? []).map((x) => {
+                  const label = x.key.includes("smirk") ? "Nude smirk" : x.key.includes("tease") ? "Nude tease" : x.key.includes("coy") ? "Nude coy look" : "Nude smile";
+                  return (
+                    <div key={x.key} className={cx("flex flex-col gap-1.5", !x.on && "opacity-45")}>
+                      {clip(x.key, `${label} (${x.seconds}s)`, "nude idle loop")}
+                      {x.key !== "nude_idle_main" && <Switch on={x.on} set={(v) => up((s) => ({ ...s, nudeIdle: (s.nudeIdle ?? []).map((y) => (y.key === x.key ? { ...y, on: v } : y)) }))}><span className="text-muted">In the pack</span></Switch>}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <section className="mt-8 flex flex-col gap-3">
             <div className="flex items-end justify-between gap-3">
               <div><h3 className="text-[15px] font-semibold">Her ladder</h3><p className="text-[12px] text-dim">Tips on the stream and buttons on the call, mildest first. Each one starts on her still and comes back to it — {l.actions.filter((a) => a.on).length} of at most 24.</p></div>
@@ -203,7 +290,12 @@ function LivePack({ c }: { c: Character }) {
             <ol className="flex flex-col">
               {ladder.map((a, i) => {
                 const parts = Array.from({ length: a.segs }, (_, j) => segKey(a.key, j));
+                const nudeParts = Array.from({ length: a.segs }, (_, j) => nudeSegKey(a.key, j));
                 const [rt, rtone] = RATING[a.rating];
+                const st = actionState(a);
+                const [stLabel, stTone] = STATE_BADGE[st];
+                const startSlot = two && st === "nude" ? "nude_anchor" : "anchor";
+                const endSlot = two && (st === "nude" || st === "undress") ? "nude_anchor" : "anchor";
                 const more = open === a.key;
                 return (
                   <li key={a.key} className={cx("grid grid-cols-[44px_minmax(0,1fr)] gap-x-3", !a.on && "opacity-45")}>
@@ -218,6 +310,7 @@ function LivePack({ c }: { c: Character }) {
                           <input value={a.title} maxLength={40} onChange={(e) => act(a.key, { title: e.target.value })} aria-label="Button title"
                             className="h-8 min-w-0 flex-1 border border-transparent bg-transparent px-1 text-[14px] font-semibold hover:border-line focus:border-accent focus:outline-none" />
                           <span className={cx("shrink-0 border px-1.5 text-[10.5px]", rtone)}>{rt}</span>
+                          {two && <span className={cx("shrink-0 border px-1.5 text-[10.5px]", stTone)}>{stLabel}</span>}
                           <span className="shrink-0 text-[11.5px] tabular-nums text-muted" title="Tip price on the stream (the site can change it)">{a.tokens} tokens</span>
                           <button onClick={() => act(a.key, { on: !a.on })} title={a.on ? "Take it out of the pack" : "Put it back in the pack"} className="shrink-0 text-[11.5px] text-dim hover:text-ink">{a.on ? "On" : "Off"}</button>
                         </div>
@@ -231,13 +324,15 @@ function LivePack({ c }: { c: Character }) {
                           <span className="text-[11px] text-dim">{a.segs} parts × {a.seconds} s = {a.segs * a.seconds} s, played as one take</span>
                         </div>}
                         <button onClick={() => setOpen(more ? null : a.key)} aria-expanded={more} className="flex items-center gap-1 self-start text-[11.5px] text-muted hover:text-ink">
-                          <Icon name="chev" size={11} className={cx("transition-transform", more ? "rotate-90" : "")} />{more ? "Less" : `Settings · #${a.level ?? "–"}${a.unlock ? ` · opens at level ${a.unlock}` : ""} · ${a.seconds} s${a.segs > 1 ? ` × ${a.segs}` : ""} · call: ${a.tier}`}</button>
+                          <Icon name="chev" size={11} className={cx("transition-transform", more ? "rotate-90" : "")} />{more ? "Less" : `Settings · #${a.level ?? "–"}${a.unlock ? ` · opens at level ${a.unlock}` : ""} · ${a.seconds} s${a.segs > 1 ? ` × ${a.segs}` : ""} · ${stLabel}`}</button>
                         {more && <div className="grid grid-cols-2 gap-2 text-[11.5px] text-muted sm:grid-cols-3">
                           <label className="flex flex-col gap-1" title="Her ladder step: 1 = the free opener, higher = bolder (the order the site gets them in)">Order<input type="number" min={1} max={30} value={a.level ?? ""} onChange={(e) => act(a.key, { level: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })} className={field} /></label>
                           <label className="flex flex-col gap-1">Seconds a part<input type="number" min={2} max={15} value={a.seconds} onChange={(e) => act(a.key, { seconds: Math.max(2, Math.min(15, Number(e.target.value) || 4)) })} className={field} /></label>
                           <label className="flex flex-col gap-1" title="Longer than 15 s: split into parts played back to back">Parts<input type="number" min={1} max={4} value={a.segs} onChange={(e) => act(a.key, { segs: Math.max(1, Math.min(4, Number(e.target.value) || 1)) })} className={field} /></label>
                           <label className="flex flex-col gap-1">Rating<DropSelect value={a.rating} onChange={(e) => act(a.key, { rating: e.target.value as LiveAction["rating"] })} className={field}>
                             <option value="sfw">SFW</option><option value="suggestive">Suggestive</option><option value="explicit">Explicit (paid fans)</option></DropSelect></label>
+                          <label className="flex flex-col gap-1" title="2-state Live Action role: Clothed only, Clothed + Nude (renders a nude take too), Undress bridge, or Nude only">Clothing state<DropSelect value={st} onChange={(e) => act(a.key, { clothingState: e.target.value as ActionClothingState })} className={field}>
+                            <option value="clothed">Clothed only</option><option value="clothed_and_nude">Clothed + Nude (2 takes)</option><option value="undress">Undress bridge → Nude</option><option value="nude">Nude only</option></DropSelect></label>
                           <label className="flex flex-col gap-1" title="The relationship level (1–7) her call button opens at. The site never opens an explicit one before her intimate level, whatever you pick">Opens at level<DropSelect value={String(a.unlock ?? 0)} onChange={(e) => act(a.key, { unlock: Number(e.target.value) || undefined })} className={field}>
                             <option value="0">Site default ({a.rating === "sfw" ? "1" : a.rating === "suggestive" ? "2" : "intimate"})</option>{[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>Level {n}</option>)}</DropSelect></label>
                           <label className="flex flex-col gap-1" title="Its price as a stream tip (the site can change it)">Tip (tokens)<input type="number" min={1} value={a.tokens} onChange={(e) => act(a.key, { tokens: Math.max(1, Number(e.target.value) || 10) })} className={field} /></label>
@@ -245,17 +340,33 @@ function LivePack({ c }: { c: Character }) {
                         </div>}
                       </div>
                       {/* the clips, in play order, with every join between them */}
-                      <div className="flex min-w-0 items-start overflow-x-auto pb-1">
-                        <StillMini cid={c.id} at={l.anchor?.at} label="Starts on her still" />
-                        {parts.map((k, j) => (
-                          <span key={k} className="flex items-start">
-                            <Join d={l.clips[k]?.enc?.d_start} label={j === 0 ? "Still → the action" : `Part ${j} → part ${j + 1}`} />
-                            {clip(k, a.segs > 1 ? `Part ${j + 1}` : "The action")}
-                          </span>))}
-                        <Join d={l.clips[retKey(a.key)]?.enc?.d_start} label="The action → back" />
-                        {clip(retKey(a.key), "Back to the still")}
-                        <Join d={l.clips[retKey(a.key)]?.enc?.d_end} label="Back → her still" />
-                        <StillMini cid={c.id} at={l.anchor?.at} label="Ends on her still" />
+                      <div className="flex min-w-0 flex-col gap-3 overflow-x-auto pb-1">
+                        <div className="flex items-start">
+                          <StillMini cid={c.id} slot={startSlot} at={startSlot === "nude_anchor" ? l.nudeAnchor?.at : l.anchor?.at} label={`Starts on her ${startSlot === "nude_anchor" ? "nude" : "clothed"} still`} />
+                          {parts.map((k, j) => (
+                            <span key={k} className="flex items-start">
+                              <Join d={l.clips[k]?.enc?.d_start} label={j === 0 ? "Still → the action" : `Part ${j} → part ${j + 1}`} />
+                              {clip(k, a.segs > 1 ? `Part ${j + 1}` : st === "undress" ? "Undress" : "The action")}
+                            </span>))}
+                          <Join d={l.clips[retKey(a.key)]?.enc?.d_start} label="The action → back" />
+                          {clip(retKey(a.key), endSlot === "nude_anchor" ? "Settle to nude still" : "Back to the still")}
+                          <Join d={l.clips[retKey(a.key)]?.enc?.d_end} label="Back → target still" />
+                          <StillMini cid={c.id} slot={endSlot} at={endSlot === "nude_anchor" ? l.nudeAnchor?.at : l.anchor?.at} label={`Ends on her ${endSlot === "nude_anchor" ? "nude" : "clothed"} still`} />
+                        </div>
+                        {two && st === "clothed_and_nude" && (
+                          <div className="flex items-start border-t border-dashed border-line pt-2">
+                            <StillMini cid={c.id} slot="nude_anchor" at={l.nudeAnchor?.at} label="Nude take starts on her Nude Anchor" />
+                            {nudeParts.map((k, j) => (
+                              <span key={k} className="flex items-start">
+                                <Join d={l.clips[k]?.enc?.d_start} label={j === 0 ? "Nude still → nude take" : `Nude part ${j} → ${j + 1}`} />
+                                {clip(k, a.segs > 1 ? `Nude part ${j + 1}` : "Nude take")}
+                              </span>))}
+                            <Join d={l.clips[nudeRetKey(a.key)]?.enc?.d_start} label="Nude take → back" />
+                            {clip(nudeRetKey(a.key), "Back to nude still")}
+                            <Join d={l.clips[nudeRetKey(a.key)]?.enc?.d_end} label="Back → nude still" />
+                            <StillMini cid={c.id} slot="nude_anchor" at={l.nudeAnchor?.at} label="Nude take ends on her Nude Anchor" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </li>);

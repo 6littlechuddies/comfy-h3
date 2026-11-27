@@ -164,6 +164,63 @@ export function roomGraph(stillName: string, prefix: string, seed = newSeed()) {
     instruction: `The first picture is a blank canvas; the second picture is a woman in her room. ${ROOM_PROMPT}`, negative: "", resolution: 1440, prefix });
 }
 
+/** 1-time unclothed body turnaround baseline edited directly from her clothed All-angles sheet (or front view), locking exact face, hair, height, bust, waist, hips and skin tone */
+export const NUDE_SHEET_PROMPT = "Edit this character reference sheet so this exact same adult woman is completely nude in every panel (no clothes, no underwear, no accessories), while keeping her EXACT face, hair, skin tone, natural skin texture, height, bust, waist, hip proportions, standing poses, panel layout, scale and flat mid-grey studio background identical to picture 1. Even soft studio lighting, sharp focus, realistic natural anatomy, no text, no labels, no borders. One single adult woman.";
+export function nudeSheetGraph(c: Character, baseSheetName: string, seed = newSeed()) {
+  const e = useSettings.getState().s.edit;
+  const anime = sheetStyle(c) === "anime";
+  const style = anime ? " Keep the exact same anime art style, line art, shading and colours as picture 1." : " Keep it an unretouched realistic photograph with natural skin texture, pores and realistic lighting.";
+  const unet = c.sheet?.ckpt?.krea || undefined;
+  const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
+  return buildEdit({
+    ...editArgs(e, "krea"),
+    loras: [...(editArgs(e, "krea").loras ?? []), ...loras],
+    enhance: false, seed, images: [baseSheetName],
+    instruction: `${NUDE_SHEET_PROMPT}${style}`,
+    negative: "", resolution: 1440,
+    prefix: `studio/characters/${c.id}_nudeSheet`,
+    ...(unet ? { unet } : {}),
+  });
+}
+
+/** pixel-aligned Nude Anchor edited directly from her Clothed Anchor (+ Nude Body Sheet when present): exact same room, camera, light, pose, face and locked unclothed proportions */
+export function nudeAnchorGraph(c: Character, clothedAnchorName: string, nudeSheetName: string | undefined, prefix: string, seed = newSeed()) {
+  const e = useSettings.getState().s.edit;
+  const anime = sheetStyle(c) === "anime";
+  const style = anime ? " Keep the exact same anime art style, line art and shading as picture 1." : " Keep it an unretouched real webcam/phone photo with natural skin texture, pores and the exact same ambient lighting as picture 1.";
+  const unet = c.sheet?.ckpt?.krea || undefined;
+  const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
+  const images = nudeSheetName ? [clothedAnchorName, nudeSheetName] : [clothedAnchorName];
+  const bodyClause = nudeSheetName
+    ? " Picture 2 is her unclothed body reference sheet — match her exact face, skin tone, bust, waist, hips and natural body proportions from picture 2 exactly (do not copy picture 2's grey background or layout)."
+    : " Keep her exact face, hair, skin tone and natural body build from picture 1.";
+  return buildEdit({
+    ...editArgs(e, "krea"),
+    loras: [...(editArgs(e, "krea").loras ?? []), ...loras],
+    enhance: false, seed, images,
+    instruction: `Edit picture 1 so this exact same adult woman is completely nude (all clothing, shoes and accessories removed) in the EXACT same sitting/resting pose, exact same camera angle, exact same framing, exact same room, furniture, objects and lighting as picture 1.${bodyClause} Nothing in the background or camera moves by even a millimetre.${style} Only this one adult woman in the picture.`,
+    negative: "", resolution: 1280, refBoost: nudeSheetName ? 3 : 2, prefix,
+    ...(unet ? { unet } : {}),
+  });
+}
+
+/** optional Mid-Undress Still edited from her Clothed Anchor (for complex outfits & cosplays): outer layer/top/jacket removed down to base layer/lingerie in the exact same room and pose */
+export function undressMidGraph(c: Character, clothedAnchorName: string, prefix: string, seed = newSeed()) {
+  const e = useSettings.getState().s.edit;
+  const anime = sheetStyle(c) === "anime";
+  const style = anime ? " Keep the exact same anime art style, line art and shading as picture 1." : " Keep it an unretouched real webcam/phone photo with natural skin texture and the exact same ambient lighting as picture 1.";
+  const unet = c.sheet?.ckpt?.krea || undefined;
+  const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
+  return buildEdit({
+    ...editArgs(e, "krea"),
+    loras: [...(editArgs(e, "krea").loras ?? []), ...loras],
+    enhance: false, seed, images: [clothedAnchorName],
+    instruction: `Edit picture 1 to show her half-undressed mid-striptease: her outer outfit/jacket/top/costume layers are removed (or slipped off her shoulders and tossed beside her), leaving her in matching simple underwear/lingerie (or base layer) in the EXACT same sitting/resting pose, exact same camera angle, exact same framing, exact same room, furniture and lighting as picture 1. Keep her exact face, hair and body proportions. Nothing in the background or camera moves.${style} Only this one adult woman in the picture.`,
+    negative: "", resolution: 1280, prefix,
+    ...(unet ? { unet } : {}),
+  });
+}
+
 /** "Make sheet": one picture with every view, plus the cut-out. (The angles one by one are still in the sheet maker.) */
 export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "white") {
   const front = await useCharacters.getState().asMedia(c.id, "front");

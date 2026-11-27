@@ -4888,17 +4888,22 @@ def _live_fit(im):
     return im.resize((LIVE_W, LIVE_H), Image.LANCZOS)
 
 
+LIVE_ANCHOR_SLOTS = {"anchor", "nude_anchor", "mid_anchor"}
+
+
 async def live_anchor(req):
-    """{cid, ref} → the still every clip starts or ends on: 720×1280 PNG, in the input folder (videos start from it)"""
+    """{cid, ref, slot?} → the still every clip starts or ends on: 720×1280 PNG, in the input folder (videos start from it)"""
     from PIL import Image
     d = await req.json()
     cid = str(d.get("cid") or ""); folder_ = _live_dir(cid)
+    slot = str(d.get("slot") or "anchor")
+    if slot not in LIVE_ANCHOR_SLOTS: raise web.HTTPBadRequest(text="bad anchor slot")
     src = _file_of(d["ref"]) if isinstance(d.get("ref"), dict) else safe_join(INPUT, str(d.get("input") or ""))
     if not os.path.isfile(src): raise web.HTTPNotFound(text="that picture isn't on this rental")
     with Image.open(src) as im: still = _live_fit(im)
-    name = f"live_{cid}_anchor_{int(time.time())}.png"
-    still.save(os.path.join(INPUT, name)); still.save(os.path.join(folder_, "anchor.png"))
-    return web.json_response({"input": name, "width": LIVE_W, "height": LIVE_H})
+    name = f"live_{cid}_{slot}_{int(time.time())}.png"
+    still.save(os.path.join(INPUT, name)); still.save(os.path.join(folder_, f"{slot}.png"))
+    return web.json_response({"input": name, "slot": slot, "width": LIVE_W, "height": LIVE_H})
 
 
 def _live_target(name: str):
@@ -4974,7 +4979,7 @@ async def live_encode(req):
 async def live_file(req):
     cid, key = req.query.get("cid", ""), req.query.get("key", "")
     if not LIVE_ID.match(key) and key not in ("reel",): raise web.HTTPBadRequest()
-    p = os.path.join(_live_dir(cid), "anchor.png" if key == "anchor" else f"{key}.mp4")
+    p = os.path.join(_live_dir(cid), f"{key}.png" if key in LIVE_ANCHOR_SLOTS else f"{key}.mp4")
     if not os.path.isfile(p): raise web.HTTPNotFound()
     return web.FileResponse(p, headers={"Cache-Control": "no-store"})
 
@@ -4982,7 +4987,12 @@ async def live_file(req):
 async def live_have(req):
     cid = req.query.get("cid", "")
     folder_ = _live_dir(cid)
-    return web.json_response({"have": sorted(f[:-4] for f in os.listdir(folder_) if f.endswith(".mp4") and f != "reel.mp4"), "anchor": os.path.isfile(os.path.join(folder_, "anchor.png"))})
+    return web.json_response({
+        "have": sorted(f[:-4] for f in os.listdir(folder_) if f.endswith(".mp4") and f != "reel.mp4"),
+        "anchor": os.path.isfile(os.path.join(folder_, "anchor.png")),
+        "nude_anchor": os.path.isfile(os.path.join(folder_, "nude_anchor.png")),
+        "mid_anchor": os.path.isfile(os.path.join(folder_, "mid_anchor.png")),
+    })
 
 
 async def live_reel(req):
@@ -5011,8 +5021,12 @@ async def live_send(req):
     sent_file = os.path.join(folder_, "media.json")
     try: sent = json.load(open(sent_file))
     except (OSError, ValueError): sent = {}
-    need = ["anchor"] + [x["key"] for x in pack.get("idle") or []] + [k for a in pack.get("actions") or [] for k in [*(a.get("segments") or []), a.get("return")] if k]
-    paths = {k: os.path.join(folder_, "anchor.png" if k == "anchor" else f"{k}.mp4") for k in need}
+    has_nude = bool(pack.get("nude_anchor") or pack.get("nude_idle"))
+    need = ["anchor"] + (["nude_anchor"] if has_nude else []) \
+        + [x["key"] for x in pack.get("idle") or []] \
+        + [x["key"] for x in pack.get("nude_idle") or []] \
+        + [k for a in pack.get("actions") or [] for k in [*(a.get("segments") or []), a.get("return"), *(a.get("nude_segments") or []), a.get("nude_return")] if k]
+    paths = {k: os.path.join(folder_, f"{k}.png" if k in LIVE_ANCHOR_SLOTS else f"{k}.mp4") for k in need}
     for a in pack.get("actions") or []:  # the button picture: the middle of its first part
         t = (a.get("segments") or [None])[0]
         if t and os.path.isfile(os.path.join(folder_, f"{t}_thumb.jpg")): paths[f"{t}_thumb"] = os.path.join(folder_, f"{t}_thumb.jpg"); a["thumb"] = f"{t}_thumb"
@@ -5034,9 +5048,17 @@ async def live_send(req):
         body = {"version": 1, "anchor": {"media_id": ids["anchor"], "framing": pack.get("framing") or "waist_up"},
                 "idle": [{"media_id": ids[x["key"]], "kind": x.get("kind") or "idle", **({"rating": x["rating"]} if x.get("rating") else {})} for x in pack.get("idle") or []],
                 "actions": []}
+        if has_nude and "nude_anchor" in ids:
+            body["nude_anchor"] = {"media_id": ids["nude_anchor"]}
+        if pack.get("nude_idle"):
+            body["nude_idle"] = [{"media_id": ids[x["key"]], "kind": x.get("kind") or "idle", "rating": x.get("rating") or "explicit"} for x in pack.get("nude_idle") or []]
         for a in pack.get("actions") or []:
             act = {"key": a["key"], "title": str(a.get("title") or a["key"])[:40], "segments": [ids[k] for k in a.get("segments") or []], "return": ids[a["return"]],
                    "rating": a.get("rating") or "sfw", "reaction_hint": str(a.get("reaction_hint") or "")[:200]}
+            if a.get("clothing_state"): act["clothing_state"] = a["clothing_state"]
+            if a.get("nude_segments") and a.get("nude_return"):
+                act["nude_segments"] = [ids[k] for k in a["nude_segments"]]
+                act["nude_return"] = ids[a["nude_return"]]
             if a.get("thumb") and a["thumb"] in ids: act["thumb"] = ids[a["thumb"]]
             if a.get("live_action"): act["live_action"] = a["live_action"]
             if a.get("live_stream"): act["live_stream"] = a["live_stream"]
