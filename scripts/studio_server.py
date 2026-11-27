@@ -6122,7 +6122,7 @@ async def import_latest(req):
 LATER_FILE = os.path.join(STATE, "download_later.json")
 H3_RUN = os.environ.get("H3_RUN", "/opt/h3/run")
 # groups that only work with another one in (Krea 2 RAW uses the Krea 2 text encoder and VAE)
-NEEDS = {"kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"], "kdepth": ["image"], "hmotion": ["video"], "hreal": ["video"], "csheet": ["image", "kedit"], "bfs": ["image"]}
+NEEDS = {"kreal": ["image"], "kedit": ["image"], "kedit2": ["image"], "eros": ["video"], "ph3": ["video"], "kdepth": ["image"], "hmotion": ["video"], "hreal": ["video"], "csheet": ["image", "kedit"], "bfs": ["image"]}
 
 
 async def downloads_later(req):
@@ -7600,7 +7600,7 @@ async def relay_script(req):
 STUDIO_DIST = os.environ.get("H3_STUDIO_DIST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "studio", "dist")
 MODELS_TXT = os.environ.get("H3_MODELS_TXT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models.txt")
 # picture work that fits a 16 GB card; the rest needs the rental's NVIDIA card
-LOCAL_GROUPS = {"image", "krea_te", "kedit", "kedit2", "sam", "anime", "animeref"}
+LOCAL_GROUPS = {"image", "krea_te", "kreal", "kedit", "kedit2", "sam", "anime", "animeref"}
 LOCAL_WHY = {"writer": "On your PC prompts come from your Grok tab: Prompt writer → Grok tab", "writer_xl": "On your PC prompts come from your Grok tab"}
 _HOP = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "upgrade", "origin", "referer", "accept-encoding"}
 

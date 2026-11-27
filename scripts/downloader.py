@@ -550,11 +550,11 @@ DEFAULT_LATER |= RETIRED
 # screen or the Models list — kept for your next rentals) or with H3_PRESET in the template; the Studio's choice wins.
 # "all" (or none) = the old behaviour: everything, smart order. The library (your LoRAs) always comes along.
 PRESETS = {
-    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam", "bfs"]},
+    "real":       {"label": "Realistic pictures, then video", "groups": ["image", "krea_te", "kreal", "kdepth", "kedit2", "writer", "sam", "bfs"]},
     "anime":      {"label": "Anime pictures, then video",  "groups": ["anime", "kdepth", "writer", "sam"]},
-    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "sam", "bfs"]},
+    "real_only":  {"label": "Realistic pictures only",     "groups": ["image", "krea_te", "kreal", "kdepth", "kedit2", "writer", "sam", "bfs"]},
     "anime_only": {"label": "Anime pictures only",         "groups": ["anime", "kdepth", "writer", "sam"]},
-    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kdepth", "kedit2", "writer", "video", "sam", "smooth", "bfs"]},
+    "real_video": {"label": "Realistic pictures + video",  "groups": ["image", "krea_te", "kreal", "kdepth", "kedit2", "writer", "video", "sam", "smooth", "bfs"]},
     "video":      {"label": "Video only",                  "groups": ["image", "writer", "video", "sam", "smooth"]},
     "anime_video": {"label": "Anime pictures + video",     "groups": ["anime", "kdepth", "writer", "video", "sam", "smooth"]},
     "all":        {"label": "Everything",                  "groups": []},

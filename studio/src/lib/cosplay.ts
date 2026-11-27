@@ -163,15 +163,15 @@ const ANGLES = ["eye-level full-body shot, straight on", "three-quarter view fro
 const POSES = ["standing confidently, one hand on her hip", "walking toward the camera mid-stride", "sitting on steps, leaning forward on her knees", "leaning back against a wall, arms crossed",
   "the character's signature action pose with her prop", "kneeling on one knee", "turning, the costume and wig in motion", "reaching one hand toward the lens", "crouching low, ready to spring",
   "sitting sideways on a chair, legs crossed", "laughing, playing with a strand of her wig", "arms raised, stretching", "resting her chin on her hand, thoughtful", "back to a railing, elbows on it"];
-const PLACES = ["a convention hall, other cosplayers blurred behind", "a seamless studio backdrop in a colour from her costume", "a city street at night under neon signs",
-  "a rooftop at golden hour", "an abandoned industrial building with broken windows", "a forest path in dappled sunlight", "a shrine with red torii gates", "a train platform at dusk", "a rainy alley with reflections",
-  "a sunlit beach boardwalk", "a library with tall wooden shelves", "a cosy apartment by a big window", "a park under cherry blossoms", "a bare concrete stairwell in hard light", "a neon-lit arcade", "a desert road at sunset",
-  "a snowy mountain trail", "a greenhouse full of plants", "an old European street with cobblestones", "a hotel corridor with warm lamps", "a subway car at night", "a field of tall grass at dawn", "a gothic church interior",
-  "a harbour with boats and fog", "a karaoke room with coloured lights", "a ruined castle wall", "a misty bamboo grove", "a car park rooftop under sodium lights", "a laundromat at night", "a lakeside dock at sunrise",
-  "a cluttered artist's studio", "a stadium tunnel", "a sunflower field", "a dim jazz bar", "a hospital-white minimalist room", "a carnival with lights at dusk", "a waterfall pool", "a rooftop garden in the city"];
-/** half the shots are a place from the character's own world (named by the writer, a different spot each time) */
-const WORLD = "a specific place from the character's own world — name it, and make it a different spot from the other shots (a room, street, landmark or landscape from their story), recreated as a real location";
-const CLOSE = "close-up portrait, head and shoulders, 85 mm, the wig, makeup and lenses in sharp detail";
+const PLACES = ["a lived-in bedroom with an unmade bed and warm bedside lamp", "a bedroom full-length mirror with clothes draped on a chair", "a hotel room bed with warm lamp light and drawn curtains",
+  "a tiled bathroom mirror with soft overhead vanity light", "a cozy apartment living room couch by a window", "a convention hallway with carpeted floor and overhead fluorescents",
+  "a hotel corridor with warm wall sconces", "a bare concrete parking-garage stairwell in sodium light", "a rooftop deck at dusk with apartment buildings behind", "a dim city sidewalk at night outside a convenience store",
+  "a casual apartment kitchen counter in late afternoon window light", "a dimly lit karaoke room with subtle coloured LEDs", "a quiet laundromat at night with fluorescent glow",
+  "a small balcony at golden hour overlooking neighborhood roofs", "a cramped gaming/desk room with warm monitor glow", "a booth inside a quiet late-night diner",
+  "a hallway doorway in a lived-in apartment", "a cluttered dressing room corner with a ring lamp off to the side", "a backseat of a parked car at night under streetlamps", "a plain apartment wall with subtle afternoon shadows"];
+/** Every shot stays grounded in ordinary, everyday real-world cosplayer locations (never fantasy/CGI sets) */
+const WORLD = "an ordinary, grounded real-world place where a real cosplayer actually shoots photos (a lived-in bedroom, hotel room, bathroom mirror, apartment couch, convention hallway, parking stairwell, or night sidewalk) — pick a different everyday spot per shot, NEVER a fantasy castle, shrine, spaceship, or CGI movie backdrop";
+const CLOSE = "candid close-up portrait, head and shoulders, 35 mm / smartphone lens, natural skin texture, costume collar and hair in real indoor light";
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 /** a dealer of shots for one run: angle, pose and place each walk their own shuffled list, so neighbours never match.
  *  Each character's first shot is a close-up; every other shot is set in the character's own world */

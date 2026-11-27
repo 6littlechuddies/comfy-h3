@@ -17,6 +17,12 @@ vae               https://huggingface.co/Comfy-Org/Krea-2/resolve/main/vae/qwen_
 # fallback. Kept under the name the Studio looks for. ---
 text_encoders     https://huggingface.co/ethanfel/Krea-2-Base-Diffusers/resolve/main/comfyui/text_encoders/qwen3vl_4b_abliterated_fp8_comfy.safetensors  qwen3VL4BAbliteratedComfyui_v10_full_fp8.safetensors  fallback=https://civitai.com/api/download/models/3070870
 
+# @group kreal Grounded realism LoRA (Lenovo UltraReal Krea 2)
+# --- Danrisi's Lenovo UltraReal for Krea 2 (huggingface.co/Danrisi/Lenovo_Krea2, Apache-2.0, native Krea 2 LoRA, no trigger word):
+# strips glossy/CGI/fantasy polish in favor of candid unretouched skin, natural indoor lighting, and grounded backgrounds.
+# Named with "UltraReal" so Studio's REALISM_RE auto-tags it as a realism ("detail") LoRA (start around 0.6-0.85 with a character LoRA, or 0.9-1.0 solo). ---
+loras/Krea2       https://huggingface.co/Danrisi/Lenovo_Krea2/resolve/main/lenovo_krea2_3000.safetensors  Lenovo_UltraReal_Krea2.safetensors
+
 # @group kedit Edit (Krea 2)
 # --- Krea 2 Identity Edit LoRA v1.2 (huggingface.co/conradlocke/krea2-identity-edit; Krea 2 Community License): turns Krea 2
 # into an editor — plain-words edits and "put this character into this scene". Uses the Krea 2 model, text encoder and
