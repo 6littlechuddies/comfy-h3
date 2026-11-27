@@ -2175,6 +2175,81 @@ async def civitai_export_blueprints(req):
     return web.json_response({"ok": True, "added": added, "total": len(d["blueprints"]), "by_tier": by_tier, "with_workflow": source_meta["with_workflow"], "sample": extracted[:8]})
 
 
+async def civitai_collection_poses(req):
+    """Fetch saved images from a CivitAI collection (by ?id= or ?name= e.g. 'krea ref') with identity-stripped pose/framing cues."""
+    raw = str(req.query.get("id") or "").strip()
+    name_hint = str(req.query.get("name") or "").strip()
+    limit = max(1, min(96, int(req.query.get("limit") or 48)))
+    cid = None
+    cname = ""
+    if raw:
+        m = COLLECTION_LINK.search(raw) or re.fullmatch(r"\s*(\d+)\s*", raw)
+        if not m:
+            return web.json_response({"error": "Pick a collection, or paste a link like https://civitai.com/collections/12345"}, status=400)
+        cid = int(m.group(1))
+    else:
+        d_cols = await civitai_trpc("collection.getAllUser", {"permissions": ["VIEW", "ADD", "MANAGE"], "contributingOnly": True})
+        cols = []
+        for c in _items_of(d_cols):
+            src = c.get("collection") if isinstance(c.get("collection"), dict) else c
+            if not src.get("id"):
+                continue
+            ctype = str(src.get("type") or "Image")
+            if ctype in ("Model", "Article"):
+                continue
+            cols.append({"id": int(src["id"]), "name": str(src.get("name") or "Untitled"), "type": ctype})
+        if not cols:
+            return web.json_response({"error": "No saved CivitAI image collections found — save posts into a collection on CivitAI first"}, status=404)
+        want = name_hint.lower()
+        hit = next((c for c in cols if want and want in c["name"].lower()), None)
+        if not hit and want:
+            words = [w for w in re.split(r"[\s_-]+", want) if w]
+            hit = next((c for c in cols if words and all(w in c["name"].lower() for w in words)), None)
+        pick = hit or cols[0]
+        cid, cname = pick["id"], pick["name"]
+
+    raw_items, cursor = [], None
+    for _ in range(3):
+        page, cursor = await _collection_raw(cid, cursor)
+        raw_items += [i for i in page if isinstance(i, dict) and i.get("id") and i.get("url") and i.get("type") != "video"]
+        if not page or cursor in (None, "") or len(raw_items) >= limit:
+            break
+    if not raw_items:
+        raise web.HTTPBadGateway(text=json.dumps({"error": "CivitAI returned no images for this collection — check your key or collection access"}), content_type="application/json")
+
+    sem = asyncio.Semaphore(6)
+    async def meta_of(i):
+        mm = i.get("meta") if isinstance(i.get("meta"), dict) else {}
+        if mm.get("prompt") or i.get("hasMeta") is False:
+            return i, mm
+        async with sem:
+            return i, {**mm, **(await _gen_meta(int(i["id"])))}
+
+    pairs = await asyncio.gather(*(meta_of(i) for i in raw_items[:limit]), return_exceptions=True)
+    out = []
+    for pair in pairs:
+        if not isinstance(pair, tuple):
+            continue
+        item, mm = pair
+        raw_prompt = str((mm or {}).get("prompt") or "").strip() if isinstance(mm, dict) else ""
+        if raw_prompt and not _minor_ok(raw_prompt):
+            continue
+        cleaned = _strip_prompt_identity(raw_prompt) if raw_prompt else ""
+        _, _, tags = _classify_blueprint(cleaned, _explicit(item)) if cleaned else (1, "sfw", [])
+        tags = [t for t in tags if t != "video_ready"]
+        out.append({
+            "id": item["id"],
+            "thumb": _pic_link(item, 360),
+            "url": _pic_link(item, 1200),
+            "explicit": _explicit(item),
+            "prompt": cleaned,
+            "tags": tags,
+            "width": item.get("width"),
+            "height": item.get("height"),
+        })
+    return web.json_response({"id": cid, "name": cname, "items": out})
+
+
 WF_HAS: dict[int, bool] = {}
 
 
@@ -7837,7 +7912,7 @@ def main():
         web.get("/studio-api/civitai/search", civitai_search), web.get("/studio-api/civitai/model/{id}", civitai_model),
         web.get("/studio-api/civitai/images", civitai_images), web.get("/studio-api/civitai/workflows", civitai_workflows), web.post("/studio-api/civitai/workflows/zip", civitai_workflows_zip),
         web.get("/studio-api/civitai/image", civitai_image), web.get("/studio-api/civitai/media", civitai_media), web.get("/studio-api/civitai/pic", civitai_pic),
-        web.get("/studio-api/civitai/collections", civitai_collections), web.get("/studio-api/civitai/debug", civitai_debug), web.get("/studio-api/civitai/collection", civitai_collection), web.get("/studio-api/civitai/collection-summary", civitai_collection_summary), web.get("/studio-api/civitai/collection-models", civitai_collection_models), web.post("/studio-api/civitai/fetch-media", civitai_fetch_media),
+        web.get("/studio-api/civitai/collections", civitai_collections), web.get("/studio-api/civitai/debug", civitai_debug), web.get("/studio-api/civitai/collection", civitai_collection), web.get("/studio-api/civitai/collection-poses", civitai_collection_poses), web.get("/studio-api/civitai/collection-summary", civitai_collection_summary), web.get("/studio-api/civitai/collection-models", civitai_collection_models), web.post("/studio-api/civitai/fetch-media", civitai_fetch_media),
         web.post("/studio-api/civitai/export-blueprints", civitai_export_blueprints), web.get("/studio-api/blueprints", blueprints_get), web.put("/studio-api/blueprints", blueprints_put),
         web.post("/studio-api/notify/watch", notify_watch), web.post("/studio-api/notify/test", notify_test),
         web.get("/studio-api/packs", packs_list), web.post("/studio-api/packs", packs_add), web.put("/studio-api/packs/active", packs_activate),

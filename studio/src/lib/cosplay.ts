@@ -36,12 +36,18 @@ export interface CosItem {
   lora?: Candidate | null;
   loraFile?: LoraPick | null;
 }
-export interface Shot { brief: string; pose: string; prompt: string; ref?: import("./posewear").PwPick }
+export interface Shot { brief: string; pose: string; prompt: string; ref?: import("./posewear").PwPick; /** keep ref as pose/framing inspo in words only without Krea 2 depth lock */ noControl?: boolean }
 export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; auto: boolean; minCollected: number; takes: number;
   /** LoRAs on every cosplay picture (a realism or skin LoRA, say) */
   loras: LoraPick[];
-  /** where the poses come from: the writer's mix, or your PoseWear picks (copied through their depth) */
-  poses: "mix" | "posewear" | "library";
+  /** where the poses come from: PoseWear depth library, your PoseWear picks, your saved CivitAI collection (e.g. "krea ref"), or words only */
+  poses: "mix" | "posewear" | "library" | "civitai";
+  /** selected CivitAI collection id for poses === "civitai" (blank auto-matches "krea ref") */
+  civitCollectionId?: string;
+  /** display name of the matched/selected CivitAI collection */
+  civitCollectionName?: string;
+  /** when poses === "civitai": true = copy body position via Krea 2 depth estimation; false = pose & framing inspo in words only */
+  civitDepth?: boolean;
   /** read the character LoRA's own Krea 2 posts for its costume wording */
   posts: boolean;
   collapsed: boolean;
@@ -157,38 +163,38 @@ export async function findLoras(it: CosItem): Promise<Candidate[]> {
 }
 
 // ---- variety: every picture in a batch gets its own camera angle, pose and place (none repeated until the lists run out) ----
-const ANGLES = ["eye-level full-body shot, straight on", "three-quarter view from slightly below, full body", "side profile, medium shot", "from behind, she looks back over her shoulder",
-  "low angle looking up at her, dramatic", "high angle from above, she looks up at the lens", "close-up portrait, head and shoulders, 85 mm", "waist-up medium shot", "wide environmental shot, she is small in the frame",
-  "tilted dutch-angle action shot", "candid moment mid-movement, 35 mm", "seated, camera at her eye level", "knee-up shot, slightly off-centre"];
-const POSES = ["standing confidently, one hand on her hip", "walking toward the camera mid-stride", "sitting on steps, leaning forward on her knees", "leaning back against a wall, arms crossed",
-  "the character's signature action pose with her prop", "kneeling on one knee", "turning, the costume and wig in motion", "reaching one hand toward the lens", "crouching low, ready to spring",
-  "sitting sideways on a chair, legs crossed", "laughing, playing with a strand of her wig", "arms raised, stretching", "resting her chin on her hand, thoughtful", "back to a railing, elbows on it"];
-const PLACES = ["a lived-in bedroom with an unmade bed and warm bedside lamp", "a bedroom full-length mirror with clothes draped on a chair", "a hotel room bed with warm lamp light and drawn curtains",
-  "a tiled bathroom mirror with soft overhead vanity light", "a cozy apartment living room couch by a window", "a convention hallway with carpeted floor and overhead fluorescents",
-  "a hotel corridor with warm wall sconces", "a bare concrete parking-garage stairwell in sodium light", "a rooftop deck at dusk with apartment buildings behind", "a dim city sidewalk at night outside a convenience store",
-  "a casual apartment kitchen counter in late afternoon window light", "a dimly lit karaoke room with subtle coloured LEDs", "a quiet laundromat at night with fluorescent glow",
-  "a small balcony at golden hour overlooking neighborhood roofs", "a cramped gaming/desk room with warm monitor glow", "a booth inside a quiet late-night diner",
-  "a hallway doorway in a lived-in apartment", "a cluttered dressing room corner with a ring lamp off to the side", "a backseat of a parked car at night under streetlamps", "a plain apartment wall with subtle afternoon shadows"];
-/** Every shot stays grounded in ordinary, everyday real-world cosplayer locations (never fantasy/CGI sets) */
-const WORLD = "an ordinary, grounded real-world place where a real cosplayer actually shoots photos (a lived-in bedroom, hotel room, bathroom mirror, apartment couch, convention hallway, parking stairwell, or night sidewalk) — pick a different everyday spot per shot, NEVER a fantasy castle, shrine, spaceship, or CGI movie backdrop";
-const CLOSE = "candid close-up portrait, head and shoulders, 35 mm / smartphone lens, natural skin texture, costume collar and hair in real indoor light";
+const ANGLES = ["casual eye-level full-body smartphone photo, natural framing", "relaxed three-quarter view taken by a friend on 35 mm, full body", "candid medium side-angle shot, natural posture", "from behind, she glances back over her shoulder at the camera",
+  "relaxed low-angle full-body snapshot looking slightly up at her", "slightly high-angle candid shot, she looks up at the lens", "arm's-length phone selfie angle, slight natural tilt", "waist-up candid medium shot, casual 35 mm lens", "environmental medium-wide candid photo showing her quiet surroundings",
+  "mirror reflection shot taken casually on a phone", "candid moment mid-movement, handheld 35 mm", "seated, camera at her eye level, casual friend-taken snapshot", "knee-up off-centre candid photo in natural ambient light"];
+const POSES = ["standing relaxed, one hand resting on her hip", "mid-step walking casually toward the camera", "sitting on stone or wooden steps, leaning slightly forward", "leaning back casually against a wall or railing, arms loose or crossed",
+  "a natural, unforced take on the character's signature stance with her prop", "kneeling or perched casually on a ledge, weight shifted to one side", "turning mid-motion, her hair and fabric shifting naturally", "resting one hand against a doorframe or railing, glancing over", "crouching casually, resting an elbow on her knee",
+  "sitting sideways on a chair or bench, legs crossed", "caught in a relaxed half-smile, brushing a strand of hair back", "stretching casually, one arm raised", "resting her chin lightly on her hand, looking into the lens", "elbows leaning back on a railing, looking at the camera"];
+const PLACES = ["a weathered stone courtyard under quiet overcast daylight", "an old wooden harbour pier at calm, muted dusk", "shaded mossy stone steps beside an old garden wall",
+  "a dim, quiet timber-walled study by a single daylight window", "a quiet coastal cliff path under soft grey sky", "a narrow cobblestone side lane in cool afternoon shade",
+  "a quiet botanical greenhouse corner with muted daylight", "a worn rustic wooden terrace overlooking distant hills in soft mist", "a lived-in bedroom by a window with soft natural daylight",
+  "a quiet apartment living room couch with warm lamp light", "a full-length mirror in a calm, lived-in room", "a quiet hotel room armchair with drawn sheer curtains",
+  "a plain concrete stairwell with simple daylight from a landing window", "a quiet rooftop deck at muted dusk with simple city roofs behind", "a calm brick side street in soft afternoon shade",
+  "a quiet dim diner booth by a window", "a small wooden balcony at soft late-afternoon light", "a carpeted convention side corridor with plain overhead lighting"];
+/** Adaptive to each character's own world — fantastical/themed OR everyday real-world — never repetitive generic bedrooms, always calm with low background light noise */
+const WORLD = "a specific, real photographable place adapted to this character's own world and vibe (fantastical/historic-inspired like weathered stone, old wood, coastal mist, or quiet shrine steps — or a lived-in modern room/street if modern) — never repeated across shots or defaulted to the same generic bedroom, always calm and uncluttered with low background light noise, shot like a down-to-earth candid phone photo, friend-taken 35 mm snapshot, or occasional phone selfie right there";
+const CLOSE = "candid close-up portrait, head and shoulders, casual phone camera or 35 mm lens, natural unretouched skin, quiet low-noise light matching her setting";
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 /** a dealer of shots for one run: angle, pose and place each walk their own shuffled list, so neighbours never match.
  *  Each character's first shot is a close-up; every other shot is set in the character's own world */
 type PwPick = import("./posewear").PwPick;
-export interface Brief { brief: string; ref?: PwPick; options?: PwPick[] }
+export interface Brief { brief: string; ref?: PwPick; options?: PwPick[]; refSource?: "posewear" | "civitai" }
 /** a dealer of shots for one run. Angles and generic poses walk their own shuffled lists; every place is from the
- *  character's own world (the writer names them). With the PoseWear library, each character gets 8 poses no other
+ *  character's own world (the writer names them). With PoseWear or saved CivitAI refs, each character gets 8 poses no other
  *  character in the run gets, and the writer picks the ones that suit her — so no pose repeats across the batch */
-function dealer(posePicks: PwPick[], library: PwPick[]) {
+function dealer(posePicks: PwPick[], library: PwPick[], refSource: "posewear" | "civitai" = "posewear") {
   const A = shuffle(ANGLES.filter((a) => !/close-up/.test(a))), P = shuffle(POSES), R = shuffle(posePicks);
   let i = 0, cur = 0;
   const OPTS = 8;
-  return (k: number, shared?: PwPick[]): Brief => {
+  return (k: number, shared?: PwPick[], totalTakes = 3): Brief => {
     const n = i++;
-    if (k === 0) return { brief: `ANGLE: ${CLOSE} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
-    if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${WORLD}`, ref }; }
-    if (library.length && shared) return { brief: `POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${WORLD}`, options: shared };
+    if (k === 0 && !(totalTakes === 1 && (R.length || (library.length && shared)))) return { brief: `ANGLE: ${CLOSE} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
+    if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${WORLD}`, ref, refSource }; }
+    if (library.length && shared) return { brief: `POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${WORLD}`, options: shared, refSource };
     void cur; void OPTS;
     return { brief: `ANGLE: ${A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
   };
@@ -215,7 +221,7 @@ export function cleanHair(p: string): string {
 const STOP = new Set(["with", "from", "under", "behind", "other", "their", "colour", "costume", "blurred", "light", "lights", "pick", "one", "the", "and"]);
 function withSetting(prompt: string, brief: string): string {
   const place = /SETTING: ([^·]+)/.exec(brief)?.[1]?.trim();
-  if (!place || place.startsWith("a specific place")) return prompt;
+  if (!place || place.startsWith("a specific")) return prompt;
   const words = place.toLowerCase().match(/[a-z]{4,}/g)?.filter((w) => !STOP.has(w)) ?? [];
   const low = prompt.toLowerCase();
   return words.some((w) => low.includes(w)) ? prompt : `${prompt.replace(/\s*$/, "")} Set in ${place}, the place clearly visible behind her.`;
@@ -247,12 +253,16 @@ async function lorasPosts(it: CosItem): Promise<{ text: string; pics: string[] }
 const usableNotes = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).filter((x) => !minorWords(x).length).join(" ").trim();
 
 /** step 4: the writer's adult check, costume and one prompt per shot */
-async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: Brief[], posts: string, library: string, locked: string, libNames: Set<string>, refPics: string[] = [], ckNames: Set<string> = new Set()): Promise<Partial<CosItem>> {
+async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs: Brief[], posts: string, library: string, locked: string, libNames: Set<string>, refPics: string[] = [], ckNames: Set<string> = new Set(), noControl = false): Promise<Partial<CosItem>> {
   const charT = (picksOf(it) ?? []).map((l) => l.trigger).filter(Boolean).join(", ");
   const otherT = (it.extra ?? []).map((l) => l.trigger ?? "").filter(Boolean).join(", ");
   const triggers = [charT && `CHARACTER (start of the prompt): ${charT}`, otherT && `OTHER (woven into her body / the photo's look): ${otherT}`].filter(Boolean).join(" · ");
-  const opts = briefs.find((b) => b.options?.length)?.options ?? [];
-  const shotsText = (opts.length ? `HER POSE OPTIONS (real pose references: the picture copies the chosen one's body position exactly — pick the ones that suit her personality and the place; never two shots with the same number):\n${opts.map((p, i) => `  ${i + 1}. ${p.words}${p.cat ? ` [${p.cat}]` : ""}`).join("\n")}\n\n` : "")
+  const optBrief = briefs.find((b) => b.options?.length);
+  const opts = optBrief?.options ?? [];
+  const optsHeader = optBrief?.refSource === "civitai"
+    ? "HER POSE OPTIONS (from your saved CivitAI reference collection — borrow ONLY the body pose, gesture, and candid camera framing; NEVER copy the original post's person, outfit, noisy lights, or background; pick the ones that suit her personality and place; never two shots with the same number):"
+    : "HER POSE OPTIONS (real pose references: the picture copies the chosen one's body position exactly — pick the ones that suit her personality and the place; never two shots with the same number):";
+  const shotsText = (opts.length ? `${optsHeader}\n${opts.map((p, i) => `  ${i + 1}. ${p.words}${p.cat ? ` [${p.cat}]` : ""}`).join("\n")}\n\n` : "")
     + briefs.map((b, i) => `${i + 1}. ${b.brief}`).join("\n");
   const ask = () => runWriter("cosplay", { taste, posts, library, locked, shots: shotsText, character: it.name, series: it.series || "(not given)",
     cosplayer: cosplayer || `(none given: an adult woman, about 25 years old${useCosplay.getState().opts.look?.trim() ? `, ${useCosplay.getState().opts.look.trim()} — vary her face, hair and build from shot to shot within that` : ""})`, triggers: triggers || "(none)", notes: (it.notes && usableNotes(it.notes)) || "(nothing found — use what you know of the character)" },
@@ -277,7 +287,7 @@ async function writePrompt(it: CosItem, cosplayer: string, taste: string, briefs
   };
   const shots: Shot[] = got.filter((x) => x?.prompt).map((x, i) => { const g = x as { pose?: string; prompt?: string; pose_id?: unknown };
     const ref = refFor(briefs[i], g.pose_id);
-    return { brief: ref && briefs[i]?.options ? `POSE: ${ref.title} · SETTING: her world` : briefs[i]?.brief ?? "", pose: String(g.pose ?? ""), prompt: cleanHair(withSetting(String(g.prompt), briefs[i]?.brief ?? "")), ref }; });
+    return { brief: ref && briefs[i]?.options ? `POSE: ${ref.title} · SETTING: her world` : briefs[i]?.brief ?? "", pose: String(g.pose ?? ""), prompt: cleanHair(withSetting(String(g.prompt), briefs[i]?.brief ?? "")), ref, ...(noControl && ref ? { noControl: true } : {}) }; });
   if (!shots.length) throw new Error("The writer answered without prompts — try again");
   if (shots.some((x) => minorWords(x.prompt).length)) return { status: "skipped", why: "A prompt came back with under-18 words — not used" };
   // the writer's LoRA picks: only names from your library, strengths kept sensible
@@ -310,9 +320,10 @@ export async function researchAll(cosplayer: string, only?: string) {
   const { posePicks } = await import("./posewear");
   const picksNow = st.opts.poses === "posewear" ? posePicks() : [];
   if (st.opts.poses === "posewear" && !picksNow.length) throw new Error("Poses are set to your PoseWear picks, but none are picked — Browse PoseWear first");
-  // the PoseWear library (depth poses: Krea 2 copies them exactly): one person, your NSFW switch, never your hidden ones,
-  // your starred ones first, the rest shuffled — and the kind of framing a cosplay photo uses
+  // the PoseWear library (depth poses) OR your saved CivitAI reference collection (e.g. "krea ref")
   let poseLib: PwPick[] = [];
+  let refSource: "posewear" | "civitai" = "posewear";
+  let noControl = false;
   if (st.opts.poses === "library") {
     const pw = await import("./posewear");
     try {
@@ -321,8 +332,48 @@ export async function researchAll(cosplayer: string, only?: string) {
       const pick = (x: (typeof items)[number]) => pw.pickOf(x, Math.floor(Math.random() * Math.max(1, x.angles?.length ?? 1)));
       poseLib = [...shuffle(items.filter((x) => ps.favs[x.key])).map(pick), ...shuffle(items.filter((x) => !ps.favs[x.key])).map(pick)];
     } catch (e) { (await import("./jobs")).useJobs.getState().toast(`PoseWear library didn't load (${(e as Error).message}) — poses are written in words this time`, "bad", "batch"); }
+  } else if (st.opts.poses === "civitai") {
+    refSource = "civitai";
+    noControl = st.opts.civitDepth === false;
+    try {
+      const [{ civitCollectionPoses }, { partsOf }] = await Promise.all([import("./api"), import("./inspo")]);
+      const res = await civitCollectionPoses({ id: st.opts.civitCollectionId || undefined, name: st.opts.civitCollectionId ? undefined : "krea ref", limit: 64 });
+      if (!st.opts.civitCollectionId && res.id) {
+        useCosplay.getState().set({ opts: { ...useCosplay.getState().opts, civitCollectionId: String(res.id), civitCollectionName: res.name || st.opts.civitCollectionName } });
+      }
+      const mapped = await Promise.all(res.items.map(async (item): Promise<PwPick> => {
+        const extracted = item.prompt ? (await partsOf(item.prompt).catch(() => ({ pose: "", place: "" }))).pose : "";
+        const tagText = item.tags.length ? item.tags.map((t) => t.replace(/_/g, " ")).join(", ") : "";
+        const words = (extracted || item.prompt.slice(0, 220) || tagText || "candid pose and framing matching the saved CivitAI reference").trim();
+        return {
+          key: `civitai:${item.id}`,
+          lib: "poses",
+          title: `${res.name || st.opts.civitCollectionName || "CivitAI ref"} #${item.id}`,
+          words,
+          thumb: item.thumb,
+          image: item.url,
+          depth: false,
+          cat: item.tags.slice(0, 2).map((t) => t.replace(/_/g, " ")).join(" · ") || "civitai ref",
+        };
+      }));
+      // prefer items with descriptive pose wording first, shuffled so every character gets fresh non-repeating pose inspo
+      const withWords = mapped.filter((x) => !x.words.startsWith("candid pose and framing"));
+      const bare = mapped.filter((x) => x.words.startsWith("candid pose and framing"));
+      poseLib = [...shuffle(withWords), ...shuffle(bare)];
+      if (!poseLib.length) throw new Error("No usable images in that CivitAI collection");
+    } catch (e) {
+      // fallback to locally harvested CivitAI poses in useInspo if present
+      const { useInspo } = await import("./inspo");
+      const saved = useInspo.getState().sets.filter((s) => s.kind === "pose" && !s.id.startsWith("poses-")).flatMap((s) => s.items);
+      if (saved.length) {
+        poseLib = shuffle(saved).map((it): PwPick => ({ key: `inspo:${it.id}`, lib: "poses", title: "Saved CivitAI pose", words: it.text, thumb: it.thumb ?? "", image: it.url || it.thumb || "", depth: false, cat: "saved pose" }));
+        if (poseLib.every((x) => !x.image)) noControl = true;
+      } else {
+        (await import("./jobs")).useJobs.getState().toast(`CivitAI pose refs didn't load (${(e as Error).message}) — poses are written in words this time`, "bad", "batch");
+      }
+    }
   }
-  const deal = dealer(picksNow, poseLib);
+  const deal = dealer(picksNow, poseLib, refSource);
   const libAt = { i: 0 };
   // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
   let library = "(not used)", libNames = new Set<string>(), ckNames = new Set<string>();
@@ -358,7 +409,8 @@ export async function researchAll(cosplayer: string, only?: string) {
       const refPics = (await Promise.all(lp.pics.map((u) => fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
         .then((r) => (r.ok ? r.json() : null)).then((d) => d?.name as string | undefined).catch(() => undefined)))).filter((x): x is string => !!x);
       const shared = poseLib.length ? poseOptions(poseLib, libAt, 8) : undefined;
-      const briefs = Array.from({ length: Math.max(1, o.takes) }, (_, k) => deal(k, shared));
+      const totalTakes = Math.max(1, o.takes);
+      const briefs = Array.from({ length: totalTakes }, (_, k) => deal(k, shared, totalTakes));
       // your locked LoRAs for her (and every picture): the writer works around them and keeps their strength
       const mine = [...(cur.extra ?? []), ...(cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name])];
       const lockedHere = [locked !== "(none)" ? locked : "", ...mine.map((l) => `${l.name} @${l.strength}${cur.aiLocked?.[l.name] ? " (locked)" : " (on, strength may be lowered)"}`)].filter(Boolean).join(", ") || "(none)";
@@ -366,7 +418,7 @@ export async function researchAll(cosplayer: string, only?: string) {
       const ckFixed = cur.ckLocked || bck?.mode !== "auto"; // only "DeepSeek picks one for each character" lets it choose
       const ckHere = ckFixed ? new Set<string>() : ckNames;
       const lib = ckFixed ? library.split("\nCHECKPOINTS")[0] : library;
-      const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere);
+      const w = await writePrompt(cur, cosplayer, taste, briefs, posts, lib, lockedHere, libNames, refPics, ckHere, noControl);
       // a rewrite keeps what you locked: locked LoRAs first (your strength), then its new picks; your checkpoint stays
       const keep = (cur.ai ?? []).filter((l) => cur.aiLocked?.[l.name]);
       if (w.ai) w.ai = [...keep, ...w.ai.filter((l) => !keep.some((k) => k.name === l.name) && !(cur.extra ?? []).some((k) => k.name === l.name))];
@@ -466,7 +518,7 @@ export async function toBatch(onStep?: (m: string) => void): Promise<number> {
       let prompt = cleanHair(sh.prompt);
       if (rest.length) { const m = /^(.+?[.!?])\s+(.*)$/s.exec(prompt); prompt = m ? `${m[1]} Her figure and look: ${rest.join(", ")}. ${m[2]}` : `${prompt} ${rest.join(", ")}.`; }
       if (lead.length) prompt = `${lead.join(", ")}, ${prompt}`;
-      const control = sh.ref ? await controlFor(sh.ref).catch(() => undefined) : undefined;
+      const control = sh.ref && !sh.noControl && sh.ref.image ? await controlFor(sh.ref).catch(() => undefined) : undefined;
       const idea = `Cosplay · ${it.name}${it.series ? ` (${it.series})` : ""}${shots.length > 1 ? ` · ${i + 1}/${shots.length}` : ""}`;
       if (waiting.has(idea)) continue;
       // your own pick for her (locked) always; DeepSeek's only when the batch's Checkpoint says it may pick

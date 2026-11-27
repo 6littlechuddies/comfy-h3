@@ -226,12 +226,21 @@ export interface WorkflowSummary {
 }
 export interface CivitCollection { id: number; name: string; type: string; description: string }
 export interface CollectionItem { id: number; thumb: string; url: string; video: boolean; explicit: boolean; width?: number; height?: number; has_prompt: boolean | null; has_meta: boolean | null; has_workflow?: boolean | null }
+export interface CivitPoseItem { id: number; thumb: string; url: string; explicit: boolean; prompt: string; tags: string[]; width?: number; height?: number }
 /** which CivitAI pictures carry a ComfyUI workflow: {id: true/false/null (couldn't tell)} */
 export const civitWorkflows = async (ids: number[]) => j<Record<string, boolean | null>>(await fetch(`/studio-api/civitai/workflows?ids=${ids.join(",")}`));
 export const civitCollections = async () => j<{ items: CivitCollection[] }>(await civFetch("/studio-api/civitai/collections"));
 export async function civitCollection(id: string, cursor?: string | null) {
   const qs = new URLSearchParams({ id }); if (cursor) qs.set("cursor", cursor);
   return j<{ items: CollectionItem[]; next: string | null }>(await civFetch(`/studio-api/civitai/collection?${qs}`));
+}
+/** saved pictures from a CivitAI collection (e.g. "krea ref") with cleaned pose/framing cues for Cosplay pose inspo */
+export async function civitCollectionPoses(opts: { id?: string; name?: string; limit?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.id) qs.set("id", opts.id);
+  if (opts.name) qs.set("name", opts.name);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  return j<{ id: number; name: string; items: CivitPoseItem[] }>(await civFetch(`/studio-api/civitai/collection-poses?${qs}`));
 }
 /** the LoRAs saved in one of your model collections, as Browse LoRAs cards */
 export async function civitCollectionModels(id: number, cursor?: string | null) {

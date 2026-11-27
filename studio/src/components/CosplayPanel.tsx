@@ -1,13 +1,13 @@
 // Batch → Cosplay: paste characters, research them (adult check, costume, LoRAs, prompt), approve LoRAs, add to the batch.
 // Layout: the drawer has four folding sections (who wears it · LoRAs & checkpoint · shots & poses · learned taste); the main
 // card is the list — one row per character with its status and chips, opening into tabs (Pictures · LoRAs · Look & checkpoint).
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { addList, approve, findLoras, picksOf, researchAll, toBatch, useCosplay, type Candidate, type CosItem } from "../lib/cosplay";
 import { usePoseWear } from "../lib/posewear";
 import { isAdult, looks, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
-import { viewUrl } from "../lib/api";
+import { civitCollections, viewUrl, type CivitCollection } from "../lib/api";
 import { Btn, DropSelect, Icon, LoraList, Seg, cx } from "./ui";
 import { CheckpointPicker } from "./Checkpoint";
 import { examples, useBank } from "../lib/promptBank";
@@ -76,6 +76,22 @@ export function CosplayOptions() {
   const nPoses = usePoseWear((s) => s.picks.filter((p) => p.lib === "poses" || p.lib === "depths").length);
   const nLocked = Object.keys(o.lockedAll ?? {}).filter((n) => (o.loras ?? []).some((l) => l.name === n)).length;
   const who = o.cosplayer === "one" ? chars.find((c) => c.id === o.charId)?.name ?? "pick one" : o.look?.trim() || "a new woman each";
+  const [civitCols, setCivitCols] = useState<CivitCollection[] | null>(null);
+  const [civitErr, setCivitErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (o.poses !== "civitai" || civitCols !== null) return;
+    civitCollections()
+      .then((r) => {
+        const imgs = r.items.filter((c) => c.type !== "Model" && c.type !== "Article");
+        setCivitCols(imgs);
+        setCivitErr(null);
+        if (!o.civitCollectionId && imgs.length) {
+          const hit = imgs.find((c) => /krea/i.test(c.name) && /ref/i.test(c.name)) ?? imgs.find((c) => /krea/i.test(c.name)) ?? imgs[0];
+          if (hit) set({ civitCollectionId: String(hit.id), civitCollectionName: hit.name });
+        }
+      })
+      .catch((e) => { setCivitCols([]); setCivitErr((e as Error).message); });
+  }, [o.poses]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-3">
       <Section first id="who" title="Who wears it" summary={who}>
@@ -102,13 +118,42 @@ export function CosplayOptions() {
           locks={o.lockedAll ?? {}} onLock={(n, on) => { const m = { ...(o.lockedAll ?? {}) }; if (on) m[n] = true; else delete m[n]; set({ lockedAll: m }); }} />
       </Section>
 
-      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${o.poses === "posewear" ? `${nPoses} picked poses` : o.poses === "mix" ? "poses in words" : "PoseWear auto"}`}>
+      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${o.poses === "civitai" ? (o.civitCollectionName || "CivitAI refs") : o.poses === "posewear" ? `${nPoses} picked poses` : o.poses === "mix" ? "poses in words" : "PoseWear auto"}`}>
         <label className="flex items-center justify-between gap-2 text-[13px]">Pictures per character
           <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
-        <p className="-mt-2 text-[11.5px] leading-snug text-dim">The first is a close-up; every one gets its own angle, pose and place.</p>
-        <Seg wrap value={o.poses ?? "library"} onChange={(v) => set({ poses: v })} options={[{ value: "library", label: "PoseWear · auto" }, { value: "posewear", label: `My picks${nPoses ? ` · ${nPoses}` : ""}` }, { value: "mix", label: "Words only" }]} />
-        <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{(o.poses ?? "library") === "library" ? "DeepSeek picks poses from the PoseWear depth library that suit each character — no pose used twice in a batch (your ★ first, your hidden ones never). Krea 2 copies each one's body position." : o.poses === "posewear" ? (nPoses ? "Each picture takes the next of your picks; Krea 2 copies its body position from its depth." : "No poses picked yet.") : "The writer describes the poses in words (nothing copied)."}</p>
-        <button onClick={() => import("./PoseWear").then(({ openPoseWear }) => openPoseWear("many", "depths"))} className="press btn-raised flex h-9 items-center justify-center gap-1.5 text-[13px]"><Icon name="user" size={14} className="text-muted" />Browse poses</button>
+        <p className="-mt-2 text-[11.5px] leading-snug text-dim">The first is a close-up; every one gets its own angle, pose and adaptive low-noise setting.</p>
+        <Seg wrap value={o.poses ?? "library"} onChange={(v) => set({ poses: v })} options={[{ value: "library", label: "PoseWear · auto" }, { value: "civitai", label: "CivitAI refs" }, { value: "posewear", label: `My picks${nPoses ? ` · ${nPoses}` : ""}` }, { value: "mix", label: "Words only" }]} />
+        <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{(o.poses ?? "library") === "library"
+          ? "DeepSeek picks poses from the PoseWear depth library that suit each character — no pose used twice in a batch (your ★ first, your hidden ones never). Krea 2 copies each one's body position."
+          : o.poses === "civitai"
+            ? "Pulls pose & framing inspo directly from your saved CivitAI collection (auto-matches “krea ref”) — borrows only the pose/angle, never the original person or background."
+            : o.poses === "posewear"
+              ? (nPoses ? "Each picture takes the next of your picks; Krea 2 copies its body position from its depth." : "No poses picked yet.")
+              : "The writer describes the poses in words (nothing copied)."}</p>
+        {o.poses === "civitai" ? (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11.5px] text-dim">Saved CivitAI collection</span>
+              <DropSelect
+                value={o.civitCollectionId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const found = civitCols?.find((c) => String(c.id) === id);
+                  set({ civitCollectionId: id || undefined, civitCollectionName: found?.name });
+                }}
+                className="inset h-9 border px-2 text-[12.5px]"
+              >
+                <option value="">{civitCols === null ? "Loading collections (auto: krea ref)…" : "Auto-match “krea ref”"}</option>
+                {(civitCols ?? []).map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+              </DropSelect>
+            </label>
+            {civitErr && <p className="text-[11px] text-bad">{civitErr}</p>}
+            <Toggle on={o.civitDepth !== false} set={(v) => set({ civitDepth: v })} title="Copy body position (depth)" sub="On: Krea 2 estimates depth from your saved CivitAI ref post. Off: pose & framing inspiration in words only." />
+            <button onClick={() => import("./ImageImport").then(({ openImageImport }) => openImageImport("", "collections"))} className="press btn-raised flex h-9 items-center justify-center gap-1.5 text-[13px]"><Icon name="image" size={14} className="text-muted" />Browse CivitAI collections</button>
+          </div>
+        ) : (
+          <button onClick={() => import("./PoseWear").then(({ openPoseWear }) => openPoseWear("many", "depths"))} className="press btn-raised flex h-9 items-center justify-center gap-1.5 text-[13px]"><Icon name="user" size={14} className="text-muted" />Browse poses</button>
+        )}
       </Section>
 
       <Section id="taste" title="Learned taste"><Learned /></Section>

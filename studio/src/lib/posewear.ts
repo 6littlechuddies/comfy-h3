@@ -80,8 +80,13 @@ const fetched = new Map<string, Promise<string>>();
 export function controlFor(p: PwPick, strength = usePoseWear.getState().strength): Promise<{ image: string; strength: number; estimate: boolean }> {
   let f = fetched.get(p.image);
   if (!f) {
-    f = fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: p.image }) })
-      .then(async (r) => { if (!r.ok) throw new Error(`Couldn't get the pose picture (${(await r.text()).slice(0, 120)})`); return (await r.json()).name as string; });
+    if (p.image.startsWith("/studio-api/civitai/") || /civitai\.(?:com|red|green)/i.test(p.image)) {
+      const cid = /^civitai:(\d+)/.exec(p.key)?.[1] ?? /[?&]id=(\d+)/.exec(p.image)?.[1];
+      f = import("./api").then(({ civitFetchMedia }) => civitFetchMedia(p.image, cid ? Number(cid) : 0)).then((r) => r.name);
+    } else {
+      f = fetch("/studio-api/fetch-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: p.image }) })
+        .then(async (r) => { if (!r.ok) throw new Error(`Couldn't get the pose picture (${(await r.text()).slice(0, 120)})`); return (await r.json()).name as string; });
+    }
     f.catch(() => fetched.delete(p.image));
     fetched.set(p.image, f);
   }
