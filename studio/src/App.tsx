@@ -1008,13 +1008,14 @@ function DriveWarn() {
   const kindOf = (e: string) => e.replace(/[\d/:.]+/g, "").slice(0, 160);
   const [hid, setHid] = useState(() => { try { return sessionStorage.getItem("h3.drivewarn.hid") ?? ""; } catch { return ""; } });
   if (!err || hid === kindOf(err)) return null;
-  const full = /quota|full/i.test(err);
+  const rateLimited = /rate_limit_exceeded|ratelimitexceeded|userratelimitexceeded|quota_unit|1\/min/i.test(err);
+  const full = !rateLimited && /storageQuotaExceeded|drive is full|insufficient storage|no space left|storage (is )?full/i.test(err);
   return createPortal(
-    <div className="fixed inset-x-0 bottom-0 z-[94] flex items-center gap-3 border-t border-bad bg-[#2a0d0b] px-4 py-2 text-[12.5px]">
-      <span className="font-bold text-bad">{full ? "YOUR GOOGLE DRIVE IS FULL" : "BACKUP TO YOUR DRIVE FAILED"}</span>
-      <span className="min-w-0 flex-1 truncate text-ink/80" title={err}>{full ? "Nothing new is being saved — characters, names and profiles made on this rental are only here. Free space (Storage → empty the drive's trash, prune exports, delete old results) or add storage, then ⋯ → Send to drive now." : err}</span>
+    <div className={cx("fixed inset-x-0 bottom-0 z-[94] flex items-center gap-3 border-t px-4 py-2 text-[12.5px]", rateLimited ? "border-accent/60 bg-panel" : "border-bad bg-[#2a0d0b]")}>
+      <span className={cx("font-bold", rateLimited ? "text-accent" : "text-bad")}>{full ? "YOUR GOOGLE DRIVE IS FULL" : rateLimited ? "GOOGLE DRIVE RATE-LIMITED" : "BACKUP TO YOUR DRIVE FAILED"}</span>
+      <span className="min-w-0 flex-1 truncate text-ink/80" title={err}>{full ? "Nothing new is being saved — characters, names and profiles made on this rental are only here. Free space (Storage → empty the drive's trash, prune exports, delete old results) or add storage, then ⋯ → Send to drive now." : rateLimited ? "Google Drive briefly throttled API requests (your Drive is NOT full). Backups automatically retry on the next cycle or when you click Try again." : err}</span>
       <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => import("./components/Storage").then((m) => m.openStorage()).catch(() => {})}>Storage</button>
-      <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => fetch("/studio-api/proton?force=1", { method: "POST" }).then(() => useJobs.getState().toast("Trying the drive again…", "info"))}>Try again</button>
+      <button className="press border border-line px-2.5 py-1 text-ink hover:border-accent" onClick={() => { fetch("/studio-api/proton?force=1", { method: "POST" }).then(() => useJobs.getState().toast("Trying the drive again…", "info")); setTimeout(() => fetch("/studio-api/proton").then((r) => r.json()).then((d) => setErr(d?.on && d.state === "error" ? String(d.error || "") : "")).catch(() => {}), 8000); }}>Try again</button>
       <button aria-label="Hide" title="Hide (it comes back if a different problem shows up — Storage still shows it)" className="press px-1.5 text-[16px] leading-none text-muted hover:text-ink"
         onClick={() => { const k = kindOf(err); setHid(k); try { sessionStorage.setItem("h3.drivewarn.hid", k); } catch { /* private mode */ } }}>×</button>
     </div>, document.body);
