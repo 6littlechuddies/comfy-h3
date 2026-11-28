@@ -343,16 +343,38 @@ export const importNote = (r: { added: number; updated: number; kept_newer?: num
     r.refused.length && `${r.refused.length} refused (age under 18): ${r.refused.slice(0, 3).join(", ")}`].filter(Boolean).join(" · ") || "Nothing new in that file";
 
 /** put a finished picture into one of their site sets (made if missing), e.g. "Beach at dusk" · premium */
-export function addToSiteSet(charId: string, title: string, tier: "free" | "premium", file: FileRef) {
+export function addToSiteSet(
+  charId: string,
+  title: string,
+  tier: "free" | "premium",
+  file: FileRef,
+  opts?: { setKey?: string; rating?: "sfw" | "suggestive" | "explicit" },
+) {
   const st = useCharacters.getState();
   const c = st.list.find((x) => x.id === charId);
   if (!c) return;
   const sets = [...(c.site?.sets ?? [])];
-  let i = sets.findIndex((x) => x.tier === tier && x.title.toLowerCase() === title.toLowerCase());
-  if (i < 0) { sets.push({ set_key: `${tier}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "set"}-${Date.now().toString(36)}`, title, description: "", tier, rating: tier === "premium" ? "suggestive" : "sfw", items: [] }); i = sets.length - 1; }
+  let i = opts?.setKey ? sets.findIndex((x) => x.set_key === opts.setKey) : -1;
+  if (i < 0) i = sets.findIndex((x) => x.tier === tier && x.title.toLowerCase() === title.toLowerCase() && (!opts?.setKey || x.set_key === opts.setKey));
+  if (i < 0) {
+    const key = opts?.setKey || `${tier}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "set"}-${Date.now().toString(36)}`;
+    sets.push({ set_key: key, title, description: "", tier, rating: opts?.rating ?? (tier === "premium" ? "suggestive" : "sfw"), items: [] });
+    i = sets.length - 1;
+  }
   if (sets[i].items.some((x) => x.filename === file.filename && x.subfolder === file.subfolder)) return;
   sets[i] = { ...sets[i], items: [...sets[i].items, { ...file }] };
   st.save({ ...c, site: { ...c.site, sets } });
+}
+
+/** remove older sets whose set_key contains any of the given tags (e.g. "v9-selfies") before regenerating those exact packs */
+export function replaceSiteSetsByTag(charId: string, setTags: string[]) {
+  if (!setTags.length) return;
+  const st = useCharacters.getState();
+  const c = st.list.find((x) => x.id === charId);
+  const existing = c?.site?.sets;
+  if (!c || !existing?.length) return;
+  const next = existing.filter((s) => !setTags.some((tag) => (s.set_key || "").includes(`-${tag}-`) || (s.set_key || "").endsWith(`-${tag}`)));
+  if (next.length !== existing.length) st.save({ ...c, site: { ...c.site, sets: next } });
 }
 
 /** the picture that shows their face best: your pick on their identity card, else the face close-up, else the front */

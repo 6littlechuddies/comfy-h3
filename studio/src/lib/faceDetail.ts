@@ -92,8 +92,8 @@ useJobs.subscribe((s, prev) => {
       for (const out of outs) {
         try {
           const sharp = await sharpenFace(out, { tab: j.tab, character: c, strength: fix.strength, label: "Sharpening the face", prefix: `studio/${j.tab}/face` });
-          const to = j.meta?.toSet as { charId: string; title: string; tier: "free" | "premium" } | undefined;
-          if (to) addToSiteSet(to.charId, to.title, to.tier, sharp ?? out);
+          const to = j.meta?.toSet as { charId: string; title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" } | undefined;
+          if (to) addToSiteSet(to.charId, to.title, to.tier, sharp ?? out, { setKey: to.setKey, rating: to.rating });
         }
         catch (e) { useJobs.getState().toast(`Face pass: ${(e as Error).message}`, "bad", j.tab); break; }
       }
@@ -122,9 +122,9 @@ export async function selectByWords(name: string, words: string, grow = 16, quie
 /** content plan pictures without the face pass: straight into their site set when they're done */
 useJobs.subscribe((s, prev) => {
   for (const j of s.jobs) {
-    const to = j.meta?.toSet as { charId: string; title: string; tier: "free" | "premium" } | undefined;
+    const to = j.meta?.toSet as { charId: string; title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" } | undefined;
     if (!to || j.meta?.faceFix || j.status !== "done" || prev.jobs.find((x) => x.id === j.id)?.status === "done") continue;
-    for (const out of j.outputs.filter((x) => x.kind === "image" && x.type === "output")) addToSiteSet(to.charId, to.title, to.tier, out);
+    for (const out of j.outputs.filter((x) => x.kind === "image" && x.type === "output")) addToSiteSet(to.charId, to.title, to.tier, out, { setKey: to.setKey, rating: to.rating });
   }
 });
 
