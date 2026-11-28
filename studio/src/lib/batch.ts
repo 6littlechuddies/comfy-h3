@@ -52,11 +52,13 @@ export interface Row {
     /** V4: light realism LoRA for Pass 2 body polish on clothed/lingerie shots (empty on FinePorn/nude shots) */
     polishLoras?: import("./graphs").LoraPick[];
   };
-  /** V7 Cover-Art 6-Pack row: high-res 896×1344 → 1.4× pixel refine (1256×1880) on Krea 2 Turbo or DesireX (dry-matte skin) */
+  /** V8 Cover-Art 8-Pack row: high-res 896×1344 → 1.4× pixel refine (1256×1880) on Krea 2 Turbo or DesireX (with optional Krea 2 Pass-2 speck-free finish) */
   cover?: {
     style: string;
     engine: string;
     unet?: string;
+    refineUnet?: string;
+    refineLoras?: import("./graphs").LoraPick[];
     steps: number;
     prefix: string;
     label?: string;
@@ -492,6 +494,8 @@ export async function queueAll(only?: string[]): Promise<number> {
             buildCoverHero({
               prompt,
               unet: cv.unet,
+              refineUnet: cv.refineUnet,
+              refineLoras: cv.refineLoras,
               loras,
               steps: cv.steps,
               seed: newSeed(),
