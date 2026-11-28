@@ -2,10 +2,10 @@
 // Explicit Solo, Voyeur / Cuckold Corner POV). Lets you select any adult character(s) — brand-new uploads OR existing
 // linked UrGF characters — and pick exactly which of the 5 sets to generate.
 import { pickFreshBlueprints, type BlueprintBankId } from "./blueprints";
-import { listLoras, objectInfo, toInput, type FileRef } from "./api";
+import { comboOptions, listLoras, objectInfo, toInput, type FileRef } from "./api";
 import { newGroup, newRow, queueAll, useBatch, type Row } from "./batch";
 import { type Character } from "./characters";
-import { buildMasterPackCutout, type ApiGraph, type LoraPick } from "./graphs";
+import { buildMasterPackCutout, buildMasterPackNudeCutout, type ApiGraph, type LoraPick } from "./graphs";
 import { useJobs, waitForJob } from "./jobs";
 import { looseJson } from "./looseJson";
 import { M } from "./models";
@@ -41,10 +41,15 @@ export interface MasterPackSpec {
 }
 
 const LORA_SNAP = "civitai/RealisticSnapshotKrea2.safetensors";
+const LORA_REALISM = "civitai/realism_engine_krea2_v3.1.safetensors";
 const LORA_SELFIE = "civitai/krea2-s3lfie-r3alism-9.safetensors";
 const LORA_PHONE = "civitai/krea-smartphone-photo-slider.safetensors";
 const LORA_NUDE = "civitai/realistic_nudes_krea2_v2.safetensors";
 const LORA_SNOFS = "civitai/snofs_krea_v1_5.safetensors";
+const PREFERRED_NUDE_UNETS = [
+  "civitai/FinePorn_V_fp8.safetensors",
+  "civitai/BSS_DesireX2_INT8_ConvRot.safetensors",
+];
 
 export const MASTER_PACKS: MasterPackSpec[] = [
   {
@@ -55,15 +60,15 @@ export const MASTER_PACKS: MasterPackSpec[] = [
     tier: "free",
     rating: "sfw",
     shots: 4,
-    refBoost: 1.42,
-    loras: [[LORA_SELFIE, 0.35], [LORA_PHONE, 0.45]],
+    refBoost: 1.45,
+    loras: [[LORA_SELFIE, 0.35], [LORA_PHONE, 0.35]],
     hint: "Free · SFW · 4 arm's-length selfies (kissy, shower towel, oversized tee, lying flirty)",
     promptSpec:
-      "selfies (4 authentic arm's-length selfies she snapped herself — exact framing!):\n" +
-      "- s1: High-angle arm's-length close-up selfie looking up through her lashes blowing a playful kiss (kissy lips), wearing black lace lingerie or low-cut top.\n" +
-      "- s2: Casual arm's-length selfie biting her lower lip softly, wrapped loosely in a bath towel with damp hair right out of the shower.\n" +
-      "- s3: Cheeky arm's-length selfie with her tongue slightly sticking out and a wicked smirk, wearing only an oversized t-shirt with knees drawn up showing bare thighs.\n" +
-      "- s4: Lying on her stomach propped up on her elbows, intimate arm's-length angle looking straight into the lens with a flirty smile (or stretching both arms overhead).",
+      "selfies (4 authentic arm's-length front-camera POV selfies she snapped herself looking directly into the lens with empty hands visible — NO phone visible inside the frame!):\n" +
+      "- s1: High-angle arm's-length front-camera POV close-up looking up through her lashes blowing a playful kiss (kissy lips), wearing solely a delicate black lace bralette or low-cut top on bare shoulders, both hands relaxed out of frame or brushing hair (never holding a phone).\n" +
+      "- s2: Casual arm's-length front-camera POV biting her lower lip softly, wrapped loosely in a bath towel tucked low across bare chest with damp hair right out of the shower, empty fingers holding the towel edge.\n" +
+      "- s3: Cheeky arm's-length front-camera POV with her tongue slightly sticking out and a wicked smirk, wearing only an oversized t-shirt on bare skin with knees drawn up showing bare thighs.\n" +
+      "- s4: Lying on her stomach propped up on her elbows, intimate arm's-length front-camera POV looking straight into the lens with a flirty smile (empty hands resting under chin or on pillow).",
   },
   {
     key: "lingerie_thighs",
@@ -336,7 +341,7 @@ export function buildMasterPackPlanPrompt(c: Character, selectedKeys: MasterPack
     (freshCues ? `FRESH NON-REPEATING CAMERA & POSE INSPIRATION FOR THIS RUN (borrow distinct camera heights, angles, hand placement, and warm lighting from these so every shot feels fresh and unrepetitive — adapt strictly to ${disp}'s own room & body):\n${freshCues}\n\n` : "") +
     "CAMERA & VISUAL STYLE (CRITICAL — RAW AMATEUR HANDHELD LOOK, NOT PROFESSIONALLY SHOT!):\n" +
     "Every single shot MUST look like a real, raw, candid amateur phone photo she snapped herself or a partner snapped handheld in the moment — arm's-length outstretched angles, low-hip upward angles, bird's-eye slightly-from-above angles, tilted raw bedroom/home lighting, authentic candid iPhone/digicam snap feel, natural imperfect skin & room lighting (NEVER glossy DSLR studio lighting, NEVER repetitive straight-on standing poses!).\n\n" +
-    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
+    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Describe eye color naturally in ambient room shadows (never glowing, luminous, or neon irises). For front-camera arm's-length selfies keep her hands empty or resting on hair/clothing (never holding a phone unless it is a mirror selfie). Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
   );
 }
 
@@ -354,6 +359,21 @@ function resolvePackLoras(specs: [string, number][], installed: string[]): LoraP
     if (base) out.push({ name: base, strength });
   }
   return out;
+}
+
+/** Pick the first installed preferred diffusion UNET (e.g. FinePorn_V_fp8 > BSS_DesireX2_INT8_ConvRot) */
+function pickInstalledUnet(candidates: string[], installed: string[]): string | undefined {
+  if (!installed.length) return undefined;
+  const norm = (x: string) => x.replace(/\\/g, "/");
+  const byExact = new Map(installed.map((x) => [norm(x).toLowerCase(), x]));
+  const byBase = new Map(installed.map((x) => [norm(x).split("/").pop()!.toLowerCase(), x]));
+  for (const want of candidates) {
+    const exact = byExact.get(norm(want).toLowerCase());
+    if (exact) return exact;
+    const base = byBase.get(norm(want).split("/").pop()!.toLowerCase());
+    if (base) return base;
+  }
+  return undefined;
 }
 
 /** Run the V9 planner through Studio's job pipeline (auto-routes to DeepSeek when enabled, else local 27B writer) */
@@ -420,6 +440,33 @@ async function prepareCutout(c: Character, faceMode: boolean, hasFaceSegment: bo
   return prepareCutoutFromInput(staged.name, disp, slug, c.id, faceMode, hasFaceSegment);
 }
 
+/** V4 1-time In-Place Nude Body #808080 Cutout directly on the Gen-0 clothed cutout (keeps huge Gen-0 face & curves locked, 0% wardrobe bleed) */
+async function prepareInPlaceNudeCutout(
+  clothedCutoutInp: string,
+  label: string,
+  slug: string,
+  project: string | null,
+  stripDesc: string | undefined,
+  nudeUnet: string,
+): Promise<string | null> {
+  try {
+    const g = buildMasterPackNudeCutout({
+      clothedCutoutImage: clothedCutoutInp,
+      stripDesc,
+      unet: nudeUnet,
+      seed: newSeed(),
+      prefix: `studio/_work/v9_nude_inplace_${slug}`,
+    });
+    const job = await useJobs.getState().run("batch", `V4 in-place nude cutout · ${label}`, g, "cutout:v9:nude", { quiet: true, front: true, noTray: true, no4k: true, project });
+    const done = await waitForJob(job.id);
+    const out = done.outputs.find((x) => x.kind === "image" && x.type === "output");
+    if (out) return (await toInput(out)).name;
+  } catch {
+    // Graceful fallback to clothed cutout if General Edit V2 or nude UNET fails
+  }
+  return null;
+}
+
 /** Build a temporary synthetic character profile from a standalone dropped photo (never saved to Characters!) */
 export function quickPhotoCharacter(media: Media, vibe = ""): Character {
   const cleanLabel = (media.label || "Quick photo").replace(/\.[^.]+$/, "").trim().slice(0, 36) || "Quick photo";
@@ -458,6 +505,8 @@ export interface MasterPackOpts {
   saveToLocalSets: boolean;
   replaceExisting: boolean;
   faceOnlyCutout: boolean;
+  /** V4 Gen-0 Face-Lock & Zero-Bleed pipeline (in-place General Edit V2 nude cutout + 1.4× pixel polish + SAM 3 1024px face lock; default true) */
+  v4FaceLock?: boolean;
   review: boolean;
 }
 
@@ -476,12 +525,19 @@ export async function planAndQueueMasterPack(
   if (!targets.length) throw new Error("Attach a photo or pick at least one character");
   if (!selected.length) throw new Error("Pick at least one V9 set to build");
 
-  onStep("Checking installed LoRAs & nodes…");
-  const [installedLoras, faceSegInfo] = await Promise.all([
+  const v4On = opts.v4FaceLock !== false;
+  onStep("Checking installed models, LoRAs & SAM 3…");
+  const [installedLoras, installedUnets, faceSegInfo, sam3Info] = await Promise.all([
     listLoras().catch(() => [] as string[]),
+    comboOptions("UNETLoader", "unet_name").catch(() => [] as string[]),
     objectInfo("FaceSegment").catch(() => null),
+    objectInfo("SAM3_Detect").catch(() => null),
   ]);
   const hasFaceSegment = !!faceSegInfo;
+  const hasSam3 = !!sam3Info;
+  const hasGenEditV2 = installedLoras.some((l) => l.replace(/\\/g, "/").toLowerCase().endsWith("krea2_general_edit_v2.safetensors"));
+  const autoNudeUnet = pickInstalledUnet(PREFERRED_NUDE_UNETS, installedUnets);
+  const polishRealismLoras = resolvePackLoras([[LORA_REALISM, 0.35]], installedLoras);
   const resolvedByPack = new Map<MasterPackKey, LoraPick[]>(
     selected.map((p) => [p.key, resolvePackLoras(p.loras, installedLoras)]),
   );
@@ -511,7 +567,7 @@ export async function planAndQueueMasterPack(
   const runTs = Math.floor(Date.now() / 1000);
   const rowsToAdd: Partial<Row>[] = [];
   let setCount = 0;
-  const group = newGroup(`V9 Master Pack (${selected.length} sets)`);
+  const group = newGroup(`V9 Master Pack (${selected.length} sets${v4On ? " · V4" : ""})`);
 
   for (let i = 0; i < targets.length; i++) {
     const plan = plans[i];
@@ -519,15 +575,23 @@ export async function planAndQueueMasterPack(
     const t = targets[i];
     const disp = t.c.site?.name || t.c.name;
     const slug = disp.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || (t.kind === "quick" ? "quick" : t.c.id);
-    onStep(`Preparing cutout (${i + 1}/${targets.length}: ${disp})…`);
-    let cutoutImage: string;
+    onStep(`Preparing Gen-0 cutout (${i + 1}/${targets.length}: ${disp})…`);
+    let clothedCutout: string;
     try {
-      cutoutImage = t.kind === "quick"
+      clothedCutout = t.kind === "quick"
         ? await prepareCutoutFromInput(t.media.name, disp, slug, null, opts.faceOnlyCutout, hasFaceSegment)
         : await prepareCutout(t.c, opts.faceOnlyCutout, hasFaceSegment);
     } catch (e) {
       failed.push(`${disp}: ${(e as Error).message}`);
       continue;
+    }
+
+    // V4: build 1-time pixel-aligned In-Place Nude Body Cutout directly on Gen-0 clothed cutout (0% wardrobe bleed, 100% Gen-0 face/bust)
+    let nudeCutout: string | null = null;
+    if (v4On && !opts.faceOnlyCutout && hasGenEditV2 && autoNudeUnet) {
+      onStep(`Preparing V4 in-place nude cutout (${i + 1}/${targets.length}: ${disp})…`);
+      const stripDesc = t.c.outfit?.trim() ? `${t.c.outfit.trim()}, plus any harness, gloves, tie, bra, panties, stockings, and accessories` : undefined;
+      nudeCutout = await prepareInPlaceNudeCutout(clothedCutout, disp, slug, t.kind === "char" ? t.c.id : null, stripDesc, autoNudeUnet);
     }
 
     const { anchor: bodyAnchor } = bodyDescFor(t.c);
@@ -539,6 +603,11 @@ export async function planAndQueueMasterPack(
       const setKey = `${pack.tier}-${pack.setTag}-${runTs}`;
       const packLoras = resolvedByPack.get(pack.key) ?? [];
       shots.forEach((shotPrompt, sIdx) => {
+        // Keep Gen-0 clothed cutout ONLY for cosplay_strip shot 1 (full signature costume); use in-place nude cutout everywhere else for 0% clothing bleed!
+        const keepClothedCosplay = pack.key === "cosplay_strip" && sIdx === 0;
+        const shotCutout = !keepClothedCosplay && nudeCutout ? nudeCutout : clothedCutout;
+        const isNudeOrLift = pack.rating === "explicit" && !keepClothedCosplay;
+        const shotAutoNudeUnet = v4On && isNudeOrLift ? autoNudeUnet : undefined;
         rowsToAdd.push({
           ...(t.kind === "char" ? { charId: t.c.id } : { noStar: true }),
           idea: `V9 ${pack.shortLabel} · ${sIdx + 1}/${shots.length}`,
@@ -551,13 +620,18 @@ export async function planAndQueueMasterPack(
           v9: {
             packKey: pack.key,
             packTag: pack.setTag,
-            cutoutImage,
-            refBoost: pack.refBoost,
+            cutoutImage: shotCutout,
+            gen0FaceRef: clothedCutout,
+            refBoost: v4On ? Math.max(pack.refBoost, 1.45) : pack.refBoost,
             bodyAnchor,
             prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
             nudeFraming: pack.nudeFraming,
             replaceExisting: stageToSite && opts.replaceExisting,
             label: disp,
+            bodyPolish: v4On,
+            faceLock: v4On && hasSam3,
+            autoNudeUnet: shotAutoNudeUnet,
+            polishLoras: isNudeOrLift ? [] : polishRealismLoras,
           },
         });
       });

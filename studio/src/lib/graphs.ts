@@ -304,6 +304,53 @@ export function buildMasterPackCutout(image: string, prefix: string, mode: "bire
   return g.graph;
 }
 
+export interface MasterPackNudeCutoutOpts {
+  /** Gen-0 clothed #808080 cutout (keeps huge untouched Gen-0 face & full curves pixel-aligned) */
+  clothedCutoutImage: string;
+  /** Optional description of garments/accessories to remove in place */
+  stripDesc?: string;
+  /** Preferred NSFW UNET (e.g. FinePorn_V_fp8 / BSS_DesireX2_INT8_ConvRot); falls back to stock Krea 2 Turbo */
+  unet?: string;
+  seed: number;
+  prefix: string;
+}
+
+/** V4 1-time In-Place Nude Body #808080 Cutout (krea2_general_edit_v2, ref_boost=1.0, 8 steps -> BiRefNet HR-matting):
+ *  strips ONLY clothes/straps/gloves directly on the Gen-0 clothed cutout so face, makeup, eye color & full bust stay
+ *  100% pixel-aligned with zero clothing left to bleed under towels, corsets, slip dresses, or lifted shirts. */
+export function buildMasterPackNudeCutout(p: MasterPackNudeCutoutOpts): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
+  let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: M.kreaGeneralV2, strength_model: 1 }));
+  model = fastAttn(g, model);
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const ref = g.add("LoadImage", { image: p.clothedCutoutImage });
+  const sc = g.add("ImageScaleToTotalPixels", { image: o(ref), upscale_method: "lanczos", megapixels: 1.0, resolution_steps: 16 });
+  const lat = g.add("VAEEncode", { pixels: o(sc), vae: o(vae) });
+  const patched = g.add("Krea2EditModelPatch", {
+    model, source_latent: o(lat), ref_boost: 1, ref_boost_a: 1, fit_mode: "fit",
+    vae: o(vae), source_image: o(sc), target_latent: o(lat),
+  });
+  const strip = p.stripDesc?.trim() || "all of her clothing, top, bra, straps, harness, gloves, necklace, skirt, and accessories";
+  const prompt =
+    `Completely undress this exact adult woman in place: remove ${strip} completely so she is completely naked ` +
+    `with bare shoulders, bare neck, full natural bare breasts with realistic nipples, bare midriff, bare hips, ` +
+    `bare arms, and bare hands, wearing zero clothing, zero gloves, zero straps, zero necklaces, and zero accessories. ` +
+    `Keep her exact face, natural eye color, eyebrows, makeup, freckles, lips, expression, hairstyle, head angle, pose, framing, ` +
+    `full natural bust proportions, soft lighting, and plain neutral grey studio background completely unchanged.`;
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt, grounding_px: 768, system_prompt: "", image: o(sc) });
+  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(sc) });
+  const ks = g.add("KSampler", {
+    model: o(patched), seed: p.seed, steps: 8, cfg: 1, sampler_name: "euler", scheduler: "simple",
+    positive: o(pos), negative: o(neg), latent_image: o(lat), denoise: 1,
+  });
+  const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
+  const cut = matte(g, o(dec), "Color", "#808080");
+  g.add("SaveImage", { images: o(cut), filename_prefix: p.prefix }, "result");
+  return g.graph;
+}
+
 export interface MasterPackShotOpts {
   cutoutImage: string;
   instruction: string;
@@ -315,10 +362,13 @@ export interface MasterPackShotOpts {
   loras?: LoraPick[];
   bodyAnchor?: string;
   nudeFraming?: boolean;
+  /** V4 Pixel-Space 1.4× Lanczos body/fabric polish on the same UNET (NO Edit V2 LoRA, denoise 0.14, 4 steps -> 1160×1696) */
+  bodyPolish?: { scale?: number; denoise?: number; steps?: number; loras?: LoraPick[] } | false;
 }
 
-/** V9 Master Pack shot: exact verified 8-step Krea 2 Identity Edit V2 recipe (832×1216 canvas, 0.75 MP cutout ref,
- *  exact ref_boost 1.38–1.42 without halving, fast INT8 attention, CFG 1 euler/simple — zero over-step fizz). */
+/** V9 Master Pack shot: verified 8-step Krea 2 Identity Edit V2 recipe (832×1216 canvas, 0.75 MP cutout ref,
+ *  exact ref_boost 1.38–1.50 without halving, fast INT8 attention, CFG 1 euler/simple) + optional V4 pixel-space
+ *  1.4× Lanczos 4-step body/fabric polish (1160×1696, zero latent halos, zero face drift). */
 export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
@@ -344,13 +394,33 @@ export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
   const cleanInst = p.instruction.trim().replace(/^[a-z]\d+\s*[:\-]\s*/i, "");
   const bodyClause = p.bodyAnchor?.trim() || "her exact natural bust, narrow waist, and hip proportions from the reference picture";
   const wrapped = p.nudeFraming
-    ? `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and natural hourglass proportions, completely naked: ${cleanInst}`
-    : `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and ${bodyClause}, dressed solely in the single outfit described below worn directly against bare skin (or completely nude when described): ${cleanInst}`;
+    ? `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, natural eye color in ambient light, makeup, hair, skin tone, and natural hourglass proportions, completely naked: ${cleanInst}`
+    : `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, natural eye color in ambient light, makeup, hair, skin tone, and ${bodyClause}, dressed solely in the single outfit described below worn directly against bare skin (or completely nude when described): ${cleanInst}`;
   const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: wrapped, grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
   const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
   const ks = g.add("KSampler", { model: o(patched), seed: p.seed, steps: 8, cfg: 1, sampler_name: "euler", scheduler: "simple", positive: o(pos), negative: o(neg), latent_image: o(target), denoise: 1 });
-  const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
-  g.add("SaveImage", { images: o(dec), filename_prefix: p.prefix }, "result");
+  let outImg: Link = o(g.add("VAEDecode", { samples: o(ks), vae: o(vae) }));
+  if (p.bodyPolish) {
+    const scale = p.bodyPolish.scale ?? 1.4;
+    const denoise = p.bodyPolish.denoise ?? 0.14;
+    const steps = p.bodyPolish.steps ?? 4;
+    const big = g.add("ImageScaleBy", { image: outImg, upscale_method: "lanczos", scale_by: scale });
+    const enc2 = g.add("VAEEncode", { pixels: o(big), vae: o(vae) });
+    let m2: Link = o(unet);
+    for (const l of activeLoras(p.bodyPolish.loras ?? [])) {
+      m2 = o(g.add("LoraLoaderModelOnly", { model: m2, lora_name: l.name, strength_model: l.strength }));
+    }
+    m2 = fastAttn(g, m2);
+    const refineText = `Candid unretouched real photograph: ${cleanInst} Natural skin pores, realistic fabric texture, muted ambient shadows on eyes, authentic 35mm photography.`;
+    const pos2 = g.add("CLIPTextEncode", { text: refineText, clip: o(clip) });
+    const neg2 = g.add("ConditioningZeroOut", { conditioning: o(pos2) });
+    const ks2 = g.add("KSampler", {
+      model: m2, seed: p.seed + 7, steps, cfg: 1, sampler_name: "euler", scheduler: "simple",
+      positive: o(pos2), negative: o(neg2), latent_image: o(enc2), denoise,
+    });
+    outImg = o(g.add("VAEDecode", { samples: o(ks2), vae: o(vae) }));
+  }
+  g.add("SaveImage", { images: outImg, filename_prefix: p.prefix }, "result");
   return g.graph;
 }
 

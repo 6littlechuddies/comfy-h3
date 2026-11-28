@@ -30,8 +30,28 @@ export interface Row {
   /** content plan rows: their own star (instead of the batch's), the site set the pictures go into, and the face pass */
   charId?: string;
   toSet?: { title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" };
-  /** V9 Master Pack row: exact Krea 2 Identity Edit V2 settings (pre-cut cutout ref, ref_boost, pack LoRAs, nude framing; works with or without a saved character) */
-  v9?: { packKey: string; packTag: string; cutoutImage: string; refBoost: number; bodyAnchor: string; prefix: string; nudeFraming?: boolean; replaceExisting?: boolean; label?: string };
+  /** V9 Master Pack row: Krea 2 Identity Edit V2 settings + V4 Gen-0 Face-Lock (in-place nude cutout, 1.4× pixel polish, SAM 3 face lock, auto nude UNET) */
+  v9?: {
+    packKey: string;
+    packTag: string;
+    cutoutImage: string;
+    refBoost: number;
+    bodyAnchor: string;
+    prefix: string;
+    nudeFraming?: boolean;
+    replaceExisting?: boolean;
+    label?: string;
+    /** V4: untouched Gen-0 hero cutout filename for SAM 3 1024px face-lock pass */
+    gen0FaceRef?: string;
+    /** V4: 1.4× Lanczos pixel-space 4-step body/fabric polish (1160×1696, denoise 0.14) */
+    bodyPolish?: boolean;
+    /** V4: automatic SAM 3 -> Krea 2 Turbo 1024px Gen-0 face-lock pass after Pass 1 */
+    faceLock?: boolean;
+    /** V4: auto-detected NSFW UNET (FinePorn_V_fp8 / DesireX) for nude & strip-lift shots when user hasn't forced a checkpoint */
+    autoNudeUnet?: string;
+    /** V4: light realism LoRA for Pass 2 body polish on clothed/lingerie shots (empty on FinePorn/nude shots) */
+    polishLoras?: import("./graphs").LoraPick[];
+  };
   faceFix?: boolean;
   /** a saved CivitAI scene prompt to borrow the setting, light, camera and finish from (never its person) */
   inspo?: string;
@@ -439,7 +459,7 @@ export async function queueAll(only?: string[]): Promise<number> {
   }
   for (const r of ready) {
     const rowIds: string[] = [];
-    // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 fast path (works for saved characters AND standalone quick photos)
+    // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 + V4 Gen-0 Face-Lock & 1.4× pixel body polish
     if (b.target === "image" && r.v9) {
       try {
         const c = character(r);
@@ -447,8 +467,34 @@ export async function queueAll(only?: string[]): Promise<number> {
         const v = r.v9;
         const shot = r.prompt.trim() || r.idea.trim();
         const disp = c ? (c.site?.name || c.name) : (v.label || "Quick photo");
-        const unet = await batchUnet(r.checkpoint, r.ckMine);
-        const v9Loras = mergeUniqueLoras(r.loras, b.batchLoras);
+        const explicitPick = r.ckMine || b.ck?.mode === "pick";
+        const pickedUnet = await batchUnet(r.checkpoint, r.ckMine);
+        const usingAutoNude = !explicitPick && !!v.autoNudeUnet;
+        const unet = usingAutoNude ? v.autoNudeUnet : pickedUnet;
+        // Zero-fizz rule: when auto-routing to FinePorn_V_fp8 / DesireX for nude or strip-lift shots, skip stacked pack LoRAs (keep only explicit Batch LoRAs)
+        const v9Loras = usingAutoNude ? mergeUniqueLoras(b.batchLoras) : mergeUniqueLoras(r.loras, b.batchLoras);
+        const faceLockOn = !!(v.faceLock && v.gen0FaceRef);
+        const shotPrefix = faceLockOn ? `${v.prefix}_body` : v.prefix;
+        const baseMeta = extra(r, c);
+        const jobMeta = {
+          batchRow: r.id,
+          kind: "make",
+          project: c?.id ?? null,
+          sent: { prompt: shot, character: disp, checkpoint: unet ?? "official" },
+          ...baseMeta,
+          ...(faceLockOn
+            ? {
+                faceFix: {
+                  character: c?.id ?? null,
+                  strength: 0.44,
+                  refImage: v.gen0FaceRef,
+                  prefix: v.prefix,
+                  kreaFaceLock: true,
+                  label: `V4 Face Lock · ${disp}`,
+                },
+              }
+            : {}),
+        };
         for (let t = 0; t < r.takes; t++) {
           const job = await useJobs.getState().run(
             "batch",
@@ -457,15 +503,16 @@ export async function queueAll(only?: string[]): Promise<number> {
               cutoutImage: v.cutoutImage,
               instruction: shot,
               seed: newSeed(),
-              prefix: v.prefix,
+              prefix: shotPrefix,
               refBoost: v.refBoost,
               unet,
               loras: v9Loras,
               bodyAnchor: v.bodyAnchor,
               nudeFraming: v.nudeFraming,
+              bodyPolish: v.bodyPolish ? { scale: 1.4, denoise: 0.14, steps: 4, loras: usingAutoNude ? [] : (v.polishLoras ?? []) } : false,
             }),
             "edit:krea:1:v9",
-            { batchRow: r.id, kind: "make", project: c?.id ?? null, sent: { prompt: shot, character: disp, checkpoint: unet ?? "official" }, ...extra(r, c) },
+            jobMeta,
           );
           rowIds.push(job.id); ids.push(job.id);
         }
@@ -475,11 +522,14 @@ export async function queueAll(only?: string[]): Promise<number> {
           error: undefined,
           v9: { ...v, replaceExisting: false },
           debug: {
-            path: "V9 Master Pack (Krea 2 Identity Edit V2 · 8 steps · 832×1216)",
+            path: v.bodyPolish
+              ? `V9 Master Pack V4 (Edit V2 8s → 1.4× pixel polish${faceLockOn ? " → SAM 3 Gen-0 Face Lock" : ""})`
+              : "V9 Master Pack (Krea 2 Identity Edit V2 · 8 steps · 832×1216)",
             character: disp,
             pack: v.packTag,
             checkpoint: unet ?? "official",
             reference: v.cutoutImage,
+            gen0FaceRef: v.gen0FaceRef ?? null,
             refBoost: v.refBoost,
             loras: v9Loras.map((l) => `${l.name} @${l.strength}`),
             instruction: shot.slice(0, 600),
