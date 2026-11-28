@@ -92,6 +92,11 @@ loras/minimax     https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/
 loras/minimax     https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/main/h3_character_swap_v1.5.safetensors
 # …and the speed-up it was tested with (lightx2v FL2V 8-step 768p; H3 Relay's Character Swap recipe uses it on Ref2VA at 1.0)
 loras             https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors
+# BFS Character Swap v1.1 for MiniMax H3 Ref2VA (Alissonerdx, ~80 MB; guide-latent conditioning, no SAM mask needed): high-likeness
+# single-clip character swap (≤15 s). Animate → Swap the person → Engine: BFS H3 v1.1.
+loras/BFS         https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/loras/minimax_h3_character_swap_v1.1_ref2va_fro.safetensors  minimax_h3_character_swap_v1.1_ref2va_fro.safetensors  fallback=https://civitai.com/api/download/models/3412620?fileId=3305013
+# DMD 8-step Ref2VA turbo LoRA recommended for fast BFS H3 Character Swap v1.1 previews (optional; Hero 20-step runs without it)
+loras/minimax     https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/experimental/minimax_h3_dmd_ref2va_8step_turbo_pruned.safetensors
 
 # @group qwen_full Edit chat helper, full precision (48 GB+ cards)
 # --- The same Qwen-Image-Edit-2511 in bf16 (38 GB). Only worth it on a card with 48 GB or more; the Studio uses it instead of the

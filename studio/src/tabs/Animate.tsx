@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { activePack, planWriter, useBigPlanner } from "../lib/packs";
-import { buildAnimate, buildSwap, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
+import { bfsSwapPrompt, buildAnimate, buildBfsVideoSwap, buildSwap, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
 import { longSeconds, runLong, stopLong, forgetLong, useLong, type LongRun } from "../lib/long";
 import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
 import { useJobs, type Job, type Output } from "../lib/jobs";
-import { REALISM_KEY, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { M, REALISM_KEY, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
 import { newSeed, seedFor, useSection, useSettings } from "../lib/settings";
 import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
@@ -141,20 +141,40 @@ export default function AnimateTab() {
   const bfsDl = useGroup("bfs");
   const samDl = useGroup("sam");
   const dl = useGroup("video");
+  const swapEngine = a.swapEngine ?? "bfs";
+  const swapIsBfs = swapEngine === "bfs";
   const swapVid = refs.find((r) => r.media.kind === "video");
   const swapPics = refs.filter((r) => r.media.kind === "image");
-  // the whole clip (Relay works through long videos in windows), unless you pulled its end mark in
+  // Relay runs the whole clip in windows; BFS H3 v1.1 runs up to 15 s (respecting trim start..end)
   const swapSecs = (() => {
-    if (!swapVid) return { s: 0, trimmed: false };
+    if (!swapVid) return { s: 0, start: 0, end: 0, trimmed: false, overBfsLimit: false };
     const dur = swapVid.media.duration ?? swapVid.end;
+    if (swapIsBfs) {
+      const start = Math.max(0, swapVid.start || 0);
+      const rawEnd = Math.min(dur || swapVid.end || 5, swapVid.end > start ? swapVid.end : dur || 5);
+      const span = Math.max(0.5, rawEnd - start);
+      const capped = Math.min(15, span);
+      return { s: Math.round(capped * 10) / 10, start, end: start + capped, trimmed: start > 0.05 || rawEnd < dur - 0.05, overBfsLimit: span > 15.1 };
+    }
     const trimmed = swapVid.end < Math.min(dur, 15) - 0.05;
-    return { s: Math.round((trimmed ? swapVid.end : dur) * 10) / 10, trimmed };
+    return { s: Math.round((trimmed ? swapVid.end : dur) * 10) / 10, start: 0, end: trimmed ? swapVid.end : dur, trimmed, overBfsLimit: false };
   })();
-  // the swap prompt: the default with your name / keep list / notes — or, once you've edited the whole thing (it has <Video 1>), yours as typed
+  // BFS H3 v1.1 output size: automatically matches the guide video's own aspect ratio (multiples of 32)
+  const swapVidRatio = swapVid?.media.width && swapVid?.media.height ? swapVid.media.width / swapVid.media.height : (ratio ?? 16 / 9);
+  const swapBfsSize = h3SizeFor(swapVidRatio, a.swapBfsMp ?? 0.6);
+  // Character profile -> concise Alissonerdx `{details}` list for BFS H3 v1.1 (no manual prompting needed)
   const swapChar = (() => { const id = swapPics.find((r) => r.charId)?.charId; return id ? useCharacters.getState().list.find((c) => c.id === id) ?? null : null; })();
-  const swapFull = /<Video 1>/.test(a.prompt);
-  const swapText = swapFull ? a.prompt.trim() : swapPrompt({ pictures: swapPics.length || 1, who: a.swapWho, name: (a.swapName ?? "").trim() || swapChar?.name,
-    look: swapChar?.block, keep: a.swapKeep, notes: a.prompt });
+  const swapCharDetails = (() => {
+    if (!swapChar) return "";
+    const gender = swapChar.gender === "male" ? "Male" : swapChar.gender === "female" ? "Female" : "Adult person";
+    return [gender, swapChar.ethnicity, swapChar.hair && `${swapChar.hair} hair`, swapChar.eyes && `${swapChar.eyes} eyes`, swapChar.body, swapChar.outfit, swapChar.details].filter(Boolean).join(", ");
+  })();
+  const swapFull = swapIsBfs ? /^body_swap:/i.test(a.prompt.trim()) : /<Video 1>/.test(a.prompt);
+  const swapText = swapFull
+    ? a.prompt.trim()
+    : swapIsBfs
+      ? bfsSwapPrompt({ details: swapCharDetails || swapChar?.block, who: a.swapWho, notes: a.prompt })
+      : swapPrompt({ pictures: swapPics.length || 1, who: a.swapWho, name: (a.swapName ?? "").trim() || swapChar?.name, look: swapChar?.block, keep: a.swapKeep, notes: a.prompt });
   const why = !dl.ready ? dl.why : long ? (!longParts.some((pt) => pt.text.trim()) ? "Write what happens in part 1"
       : longRun?.status === "running" ? "A long video is being made — wait, or stop it below"
       : refs.some((r) => r.media.kind === "video" || r.media.kind === "audio") ? "Long video uses pictures only — remove the clips and sounds (to follow a video, use Swap the person)"
@@ -227,7 +247,7 @@ export default function AnimateTab() {
       idea: a.prompt, seconds: a.seconds, mode: a.mode, cuts: 0, camera: "auto", text, sent: Date.now() })).catch(() => {});
     return text;
   };
-  // Swap the person (H3 Relay's Character Swap): the video is the base, the person in it becomes the character in the pictures
+  // Swap the person: either BFS H3 Character Swap v1.1 (native guide-latent, best likeness ≤15 s) or H3 Relay v1.5 (SAM 3.1 masked looping)
   const goSwap = async () => {
     if (!swapVid) return;
     setBusy(true); setTimeout(() => setBusy(false), 600);
@@ -235,6 +255,36 @@ export default function AnimateTab() {
       const oi = await fetch("/object_info/ModelAttentionBackend").then((r) => r.json()).catch(() => null);
       const kitchen = JSON.stringify(oi ?? {}).includes("comfy kitchen attention");
       const seed = seedFor(a.adv, (p) => set({ adv: { ...a.adv, ...p } }));
+      const secs = swapSecs.s;
+      if (swapIsBfs) {
+        const pics = swapPics.map((r) => r.media.name);
+        const turbo = !!a.swapBfsTurbo;
+        let turboLora: string | undefined;
+        if (turbo) {
+          const have = await (await import("../lib/api")).listLoras().catch(() => [] as string[]);
+          const norm = (x: string) => x.replace(/\\/g, "/").toLowerCase();
+          const hasDmd = have.some((x) => norm(x) === norm(M.h3BfsTurbo8));
+          const hasFl8 = have.some((x) => norm(x) === norm(M.h3TurboFl8));
+          turboLora = hasDmd ? M.h3BfsTurbo8 : hasFl8 ? M.h3TurboFl8 : M.h3BfsTurbo8;
+        }
+        const g = buildBfsVideoSwap({
+          video: swapVid.media.name, start: swapSecs.start, end: swapSecs.end,
+          hasAudio: swapVid.media.has_audio, useAudio: a.swapBfsAudio !== false,
+          pictures: pics, width: swapBfsSize.width, height: swapBfsSize.height,
+          prompt: swapText, seed, turbo, turboLora,
+          strength: a.swapBfsStrength ?? 1, cutoutRef: a.swapBfsCutout !== false,
+          lowMemDecode: a.lowMemDecode, kitchen, prefix: "studio/animate/bfs_swap",
+        });
+        await run(
+          "animate",
+          `BFS Swap v1.1 · ${secs} s · ${turbo ? "8-step fast" : "20-step hero"} · ${swapChar?.name || `${pics.length} pic${pics.length > 1 ? "s" : ""}`}`,
+          g,
+          `animate:bfs_swap:${turbo ? "turbo" : "hero"}:${Math.round(secs)}s:${a.swapBfsMp ?? 0.6}`,
+          { snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } },
+        );
+        if (swapSecs.overBfsLimit) toast("BFS H3 v1.1 runs up to 15 s at a time — rendered the first 15 s of your selection. Switch Engine to H3 Relay v1.5 for longer full clips.", "info");
+        return;
+      }
       const g = buildSwap({ video: swapVid.media.name, who: (a.swapWho ?? "").trim() || "person", pick: a.swapPick ?? "largest",
         resolution: a.swapRes ?? "768", seconds: swapSecs.trimmed ? swapVid.end : 0, prompt: swapText, seed, kitchen, prefix: "studio/animate/swap",
         pictures: await (async () => {
@@ -248,10 +298,9 @@ export default function AnimateTab() {
           } catch (e) { toast(`BFS still skipped: ${(e as Error).message} — swapping from her pictures alone`, "info"); return pics; }
         })(),
         ...(a.swapDepth && motionDl.ready ? { depth: { strength: 0.6, endAt: 0.6 } } : {}) });
-      const secs = swapSecs.s;
       await run("animate", `Swap the person · ${(a.swapWho ?? "").trim() || "person"} → ${swapPics.length} picture${swapPics.length > 1 ? "s" : ""}`, g, `animate:swap:${a.swapRes ?? "768"}:${Math.round(secs)}s`,
         { snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
-      if (swapVid.start > 0.05) toast("Swap uses the video from its start — trim the clip itself if you only want part of it", "info");
+      if (swapVid.start > 0.05) toast("H3 Relay swap uses the video from its start — trim the clip itself, or switch Engine to BFS H3 v1.1 to swap any trimmed range", "info");
     } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, "bad"); }
   };
   /** one part's words → the Plan-a-video writer (with the pictures and characters), like a normal video's plain words */
@@ -365,22 +414,55 @@ export default function AnimateTab() {
     <>
       <Chip title="Video type" value={a.mode} onChange={(v) => set({ mode: v })} options={[{ value: "swap", label: "Swap the person" }, { value: "long", label: "Long video (past 15 s)" }, { value: "ref", label: "References" }, { value: "i2v", label: "Image → video" }, { value: "fl", label: "First → last" }, { value: "loop", label: "Seamless loop" }]} />
       {swap && <>
-        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Who in the video becomes your character — plain words, e.g. “woman”, “man in a red shirt”, “dancer”">
-          Replace<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="person" aria-label="Who to replace" className="w-36 bg-transparent text-ink placeholder:text-dim focus:outline-none" />
-        </label>
-        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Your character's name, written into the prompt. If the video comes back with no swap at all, adding the name is the first thing to try">
-          Name<input value={a.swapName ?? ""} onChange={(e) => set({ swapName: e.target.value })} placeholder={swapChar?.name ?? "optional"} aria-label="Character name" disabled={swapFull} className="w-28 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
-        </label>
-        <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Things the swap should keep — comma-separated, e.g. “sunglasses, red scarf, tattoos”. If it removed something you wanted, add it here">
-          Keep<input value={a.swapKeep ?? ""} onChange={(e) => set({ swapKeep: e.target.value })} placeholder="e.g. sunglasses, tattoos" aria-label="Also keep" disabled={swapFull} className="w-40 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
-        </label>
-        <Chip title="If several match" value={a.swapPick ?? "largest"} onChange={(v) => set({ swapPick: v })} options={[{ value: "largest", label: "The biggest one" }, { value: "leftmost", label: "The one on the left" }, { value: "rightmost", label: "The one on the right" }]} />
-        <Chip title="Quality" value={a.swapRes ?? "768"} onChange={(v) => set({ swapRes: v })} options={[{ value: "768", label: "Sharp · 768p" }, { value: "480", label: "Fast · 480p" }]} />
-        <Chip title="Lock the motion" value={a.swapDepth && motionDl.ready ? 1 : 0} onChange={(v) => { if (v && !motionDl.ready) { toast(motionDl.why ?? "Copy motion from a video isn't downloaded", "info"); return; } set({ swapDepth: v === 1 }); }}
-          options={[{ value: 0, label: "Motion: from the video", hint: "she moves like the person, in her own shape" }, { value: 1, label: "Motion: locked (depth)", hint: "exact moves — and the person's outline, so for a similar build and hair" }]} />
-        <Chip title="Start from a BFS still" value={a.swapBfs && bfsDl.ready && samDl.ready ? 1 : 0} onChange={(v) => { if (v && !(bfsDl.ready && samDl.ready)) { toast((!bfsDl.ready ? bfsDl.why : samDl.why) ?? "BFS isn't downloaded", "info"); return; } set({ swapBfs: v === 1 }); }}
-          options={[{ value: 0, label: "Likeness: her pictures" }, { value: 1, label: "Likeness: + BFS still of frame 1", hint: "her head put on frame 1 first (about a minute), then given to H3 as her first picture" }]} />
-        <span className="ml-1 text-[11px] text-dim">{swapVid ? `${swapSecs.s} s · the video's own length and sound` : "add a video"}</span>
+        <Chip title="Swap engine" value={swapEngine} onChange={(v) => set({ swapEngine: v })} options={[
+          { value: "bfs", label: "Engine: BFS H3 v1.1", hint: "Alissonerdx guide-latent LoRA — best likeness, no mask halos, auto BiRefNet cutout, up to 15 s" },
+          { value: "relay", label: "Engine: H3 Relay v1.5", hint: "SAM 3.1 masked looping — for videos longer than 15 s or replacing one person in a crowd" },
+        ]} />
+        {swapIsBfs ? <>
+          <Chip title="Quality & steps" value={a.swapBfsTurbo ? 1 : 0} onChange={(v) => set({ swapBfsTurbo: v === 1 })} options={[
+            { value: 0, label: "Hero · 20 steps", hint: "Full quality (res_multistep, no turbo LoRA — sharpest skin & hands)" },
+            { value: 1, label: "Fast · 8 steps", hint: "DMD 8-step turbo LoRA — quick preview & iteration" },
+          ]} />
+          <Chip title="Size" value={a.swapBfsMp ?? 0.6} onChange={(v) => set({ swapBfsMp: v })} options={[
+            { value: 0.4, label: "Draft 0.4 MP" },
+            { value: 0.6, label: "Good 0.6 MP" },
+            { value: 0.98, label: "Full 1 MP" },
+          ]} />
+          <Chip title="Reference background" value={a.swapBfsCutout === false ? 0 : 1} onChange={(v) => set({ swapBfsCutout: v === 1 })} options={[
+            { value: 1, label: "Ref: Auto cutout", hint: "BiRefNetRMBG neutral #808080 cutout so her old room never bleeds into the video" },
+            { value: 0, label: "Ref: Original pic", hint: "Keep her reference picture background as-is" },
+          ]} />
+          <Chip title="Swap strength" value={a.swapBfsStrength ?? 1} onChange={(v) => set({ swapBfsStrength: v })} options={[
+            { value: 0.85, label: "LoRA 0.85" },
+            { value: 1, label: "LoRA 1.0" },
+            { value: 1.15, label: "LoRA 1.15" },
+          ]} />
+          <Chip title="Sound" value={a.swapBfsAudio === false ? 0 : 1} onChange={(v) => set({ swapBfsAudio: v === 1 })} options={[
+            { value: 1, label: "Sound: Guide audio" },
+            { value: 0, label: "Sound: H3 generated" },
+          ]} />
+          <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Optional: if several people appear in the clip, say which one to replace (e.g. “woman on the left”). Leave empty for solo clips.">
+            Target<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="main subject" aria-label="Target subject" disabled={swapFull} className="w-32 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+          </label>
+          <span className="ml-1 font-mono text-[11px] text-dim">{swapVid ? `${swapBfsSize.width}×${swapBfsSize.height} · ${swapSecs.s} s${swapSecs.overBfsLimit ? " (capped at 15 s)" : ""}` : "add a video"}</span>
+        </> : <>
+          <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Who in the video becomes your character — plain words, e.g. “woman”, “man in a red shirt”, “dancer”">
+            Replace<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="person" aria-label="Who to replace" className="w-36 bg-transparent text-ink placeholder:text-dim focus:outline-none" />
+          </label>
+          <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Your character's name, written into the prompt. If the video comes back with no swap at all, adding the name is the first thing to try">
+            Name<input value={a.swapName ?? ""} onChange={(e) => set({ swapName: e.target.value })} placeholder={swapChar?.name ?? "optional"} aria-label="Character name" disabled={swapFull} className="w-28 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+          </label>
+          <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Things the swap should keep — comma-separated, e.g. “sunglasses, red scarf, tattoos”. If it removed something you wanted, add it here">
+            Keep<input value={a.swapKeep ?? ""} onChange={(e) => set({ swapKeep: e.target.value })} placeholder="e.g. sunglasses, tattoos" aria-label="Also keep" disabled={swapFull} className="w-40 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+          </label>
+          <Chip title="If several match" value={a.swapPick ?? "largest"} onChange={(v) => set({ swapPick: v })} options={[{ value: "largest", label: "The biggest one" }, { value: "leftmost", label: "The one on the left" }, { value: "rightmost", label: "The one on the right" }]} />
+          <Chip title="Quality" value={a.swapRes ?? "768"} onChange={(v) => set({ swapRes: v })} options={[{ value: "768", label: "Sharp · 768p" }, { value: "480", label: "Fast · 480p" }]} />
+          <Chip title="Lock the motion" value={a.swapDepth && motionDl.ready ? 1 : 0} onChange={(v) => { if (v && !motionDl.ready) { toast(motionDl.why ?? "Copy motion from a video isn't downloaded", "info"); return; } set({ swapDepth: v === 1 }); }}
+            options={[{ value: 0, label: "Motion: from the video", hint: "she moves like the person, in her own shape" }, { value: 1, label: "Motion: locked (depth)", hint: "exact moves — and the person's outline, so for a similar build and hair" }]} />
+          <Chip title="Start from a BFS still" value={a.swapBfs && bfsDl.ready && samDl.ready ? 1 : 0} onChange={(v) => { if (v && !(bfsDl.ready && samDl.ready)) { toast((!bfsDl.ready ? bfsDl.why : samDl.why) ?? "BFS isn't downloaded", "info"); return; } set({ swapBfs: v === 1 }); }}
+            options={[{ value: 0, label: "Likeness: her pictures" }, { value: 1, label: "Likeness: + BFS still of frame 1", hint: "her head put on frame 1 first (about a minute), then given to H3 as her first picture" }]} />
+          <span className="ml-1 text-[11px] text-dim">{swapVid ? `${swapSecs.s} s · the video's own length and sound` : "add a video"}</span>
+        </>}
       </>}
       {long && <>
         <Chip title="Joins" value={a.longOverlap ?? 18} onChange={(v) => set({ longOverlap: v })} options={[{ value: 18, label: "Joins: 0.75 s overlap", hint: "Relay's default" }, { value: 35, label: "Joins: 1.5 s overlap", hint: "smoother, each part adds a little less" }, { value: 52, label: "Joins: 2.2 s overlap" }, { value: 69, label: "Joins: 2.9 s overlap" }]} />
@@ -439,8 +521,13 @@ export default function AnimateTab() {
         {long && <LongPanel parts={longParts} onChange={(p) => set({ longParts: p })} run={longRun} planning={planning} />}
         {swap && (
           <div className="border border-accent/40 bg-accent/[.05] px-3 py-2.5 text-[12.5px] leading-relaxed text-muted">
-            <b className="text-ink">Swap the person.</b> Add <b className="text-ink">one video</b> and <b className="text-ink">any pictures of your character</b> — face, outfit, accessories; they're all treated as the same character (a reference sheet counts as one picture). The video's movement, camera, background and sound stay; only the person you name above changes.
-            <span className="mt-1.5 block"><b className="text-ink">If it struggles:</b> no swap at all → add the character's <b className="text-ink">Name</b>. It removed something you wanted → add it to <b className="text-ink">Keep</b>. Anything else → <b className="text-ink">Edit the whole prompt</b> under the box.</span>
+            {swapIsBfs ? <>
+              <b className="text-ink">BFS H3 Character Swap v1.1.</b> Pick a character (or drop her picture) + add <b className="text-ink">one guide video (≤15 s)</b>. Her picture is automatically cut out onto neutral <code className="text-ink">#808080</code> grey (so her old room never bleeds in) and her look is auto-filled into the trained <code className="text-ink">body_swap:</code> prompt.
+              <span className="mt-1.5 block"><b className="text-ink">Tips:</b> Use <b className="text-ink">Hero · 20 steps</b> for final quality or <b className="text-ink">Fast · 8 steps</b> for quick tests. For clips longer than 15 s or crowds, switch <b className="text-ink">Engine → H3 Relay v1.5</b>.</span>
+            </> : <>
+              <b className="text-ink">Swap the person (H3 Relay v1.5).</b> Add <b className="text-ink">one video</b> and <b className="text-ink">any pictures of your character</b> — face, outfit, accessories; they're all treated as the same character (a reference sheet counts as one picture). The video's movement, camera, background and sound stay; only the person you name above changes.
+              <span className="mt-1.5 block"><b className="text-ink">If it struggles:</b> no swap at all → add the character's <b className="text-ink">Name</b>. It removed something you wanted → add it to <b className="text-ink">Keep</b>. Anything else → <b className="text-ink">Edit the whole prompt</b> under the box.</span>
+            </>}
           </div>
         )}
         {refsMode ? (

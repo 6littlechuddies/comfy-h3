@@ -1,7 +1,7 @@
 // Validates every Studio graph against a real ComfyUI (models can be empty dummy files):
 //   COMFY=http://127.0.0.1:18288 npx tsx scripts/test-graphs.ts
 // ComfyUI validates node types, inputs, links and combo values before queueing; we then cancel the queue.
-import { buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
+import { bfsSwapPrompt, buildBfsVideoSwap, buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
 
 const COMFY = process.env.COMFY || "http://127.0.0.1:18288";
 const s = { sampler: "euler_ancestral", scheduler: "normal", steps: 28, cfg: 5.5, seed: 123456789012345 };
@@ -22,6 +22,8 @@ const cases: [string, ApiGraph][] = [
   ["create krea 2 cfg>1 cutout", buildCreate({ ...s, sampler: "euler", scheduler: "simple", steps: 8, cfg: 2, style: "realistic", realModel: "krea2", positive: "a woman", negative: "blurry", loras: [], width: 1024, height: 1024, count: 1, cutout: true, prefix: "studio/create/k" })],
   ["create krea own checkpoint", buildCreate({ ...s, sampler: "euler", scheduler: "beta", steps: 6, cfg: 1, style: "realistic", realModel: "krea2", unet: "civitai/muse_v35_int8.safetensors", positive: "photo", negative: "", loras: [], width: 1440, height: 2560, count: 4, cutout: false, prefix: "studio/characters/x_frame" })],
   ["swap the person (H3 Relay)", buildSwap({ video: "test.mp4", pictures: ["test.png", "test2.png"], who: "woman", pick: "largest", resolution: "768", seconds: 0, prompt: "", seed: 1, kitchen: false, prefix: "studio/animate/swap" })],
+  ["swap the person (BFS H3 v1.1 hero 20-step)", buildBfsVideoSwap({ video: "test.mp4", start: 0, end: 5, hasAudio: true, useAudio: true, pictures: ["test.png"], width: 768, height: 1024, prompt: bfsSwapPrompt({ details: "Female, long black hair, brown eyes" }), seed: 1, turbo: false, cutoutRef: true, prefix: "studio/animate/bfs_swap" })],
+  ["swap the person (BFS H3 v1.1 fast 8-step silent)", buildBfsVideoSwap({ video: "test.mp4", start: 1, end: 6, hasAudio: false, useAudio: true, pictures: ["test.png"], width: 768, height: 768, prompt: bfsSwapPrompt({}), seed: 2, turbo: true, cutoutRef: false, prefix: "studio/animate/bfs_swap" })],
   ["extend 9:16 → 21:9 (Qwen 2.1 outpaint, stepwise)", buildExtend({ image: "test.png", full: { w: 1088, h: 1920 }, work: { w: 544, h: 960 }, stages: [{ w: 896, h: 960 }, { w: 1408, h: 960 }, { w: 2240, h: 960 }], prompt: "Outpaint the image", seed: 1, prefix: "studio/edit/extend" })],
   ["edit krea single", buildEdit({ ...s, sampler: "euler", scheduler: "simple", steps: 10, cfg: 1, images: ["test.png"], instruction: "change her jacket to red", negative: "", enhance: false, resolution: 1024, prefix: "studio/edit/e" })],
   ["edit krea two pictures", buildEdit({ ...s, sampler: "euler", scheduler: "simple", steps: 10, cfg: 1, images: ["test.png", "test2.png"], instruction: "put this person at the table", negative: "", enhance: false, resolution: 1024, prefix: "studio/edit/e", refBoost: 4 })],

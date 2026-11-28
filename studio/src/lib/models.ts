@@ -90,6 +90,10 @@ export const M = {
   h3TurboRef: "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
   /** Character swap LoRA v1.5 (akatz-ai): the person in a reference video becomes the character in a reference picture */
   h3Swap: "minimax/h3_character_swap_v1.5.safetensors",
+  /** BFS Character Swap v1.1 for MiniMax H3 Ref2VA (Alissonerdx): guide-latent swap LoRA (~80 MB, native H3 nodes) */
+  h3BfsSwap: "BFS/minimax_h3_character_swap_v1.1_ref2va_fro.safetensors",
+  /** DMD 8-step Ref2VA turbo LoRA for fast BFS H3 Character Swap v1.1 previews */
+  h3BfsTurbo8: "minimax/minimax_h3_dmd_ref2va_8step_turbo_pruned.safetensors",
   /** H3 Relay's swap recipe: the full-precision video VAE (also in the Video group) and the FL2V 8-step 768p turbo */
   h3VaeFp16: "minimax_h3_video_vae_fp16.safetensors",
   h3TurboFl8: "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",

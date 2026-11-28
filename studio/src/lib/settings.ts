@@ -106,7 +106,19 @@ export interface AnimateS {
   longOverlap?: 18 | 35 | 52 | 69;
   /** the first reference picture is also the video's exact first frame */
   longStart?: boolean;
-  /** Swap the person: lock the motion with each window's depth (needs "Copy motion from a video") */
+  /** Swap the person engine: "bfs" = Alissonerdx BFS H3 Character Swap v1.1 (native guide-latent, best likeness, ≤15 s); "relay" = H3 Relay v1.5 (SAM 3.1 masked looping for long/multi-person clips) */
+  swapEngine?: "bfs" | "relay";
+  /** BFS H3 Character Swap v1.1: true = Fast 8-step DMD turbo; false/unset = Hero 20-step full quality (no turbo LoRA) */
+  swapBfsTurbo?: boolean;
+  /** BFS H3 Character Swap v1.1: auto BiRefNetRMBG #808080 grey cutout on reference pictures (default true) */
+  swapBfsCutout?: boolean;
+  /** BFS H3 Character Swap v1.1 LoRA strength (default 1.0) */
+  swapBfsStrength?: number;
+  /** BFS H3 Character Swap v1.1: keep the guide video's original audio track (default true) */
+  swapBfsAudio?: boolean;
+  /** BFS H3 Character Swap v1.1: target megapixels matching guide aspect ratio (default 0.6) */
+  swapBfsMp?: number;
+  /** Swap the person (H3 Relay): lock the motion with each window's depth (needs "Copy motion from a video") */
   swapDepth?: boolean;
   /** Swap the person: put her head on frame 1 with BFS first and give H3 that still as her first picture (needs BFS + SAM 3) */
   swapBfs?: boolean;
