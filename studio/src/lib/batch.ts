@@ -30,8 +30,8 @@ export interface Row {
   /** content plan rows: their own star (instead of the batch's), the site set the pictures go into, and the face pass */
   charId?: string;
   toSet?: { title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" };
-  /** V9 Master Pack row: exact Krea 2 Identity Edit V2 settings (pre-cut cutout ref, ref_boost, pack LoRAs, nude framing) */
-  v9?: { packKey: string; packTag: string; cutoutImage: string; refBoost: number; bodyAnchor: string; prefix: string; nudeFraming?: boolean; replaceExisting?: boolean };
+  /** V9 Master Pack row: exact Krea 2 Identity Edit V2 settings (pre-cut cutout ref, ref_boost, pack LoRAs, nude framing; works with or without a saved character) */
+  v9?: { packKey: string; packTag: string; cutoutImage: string; refBoost: number; bodyAnchor: string; prefix: string; nudeFraming?: boolean; replaceExisting?: boolean; label?: string };
   faceFix?: boolean;
   /** a saved CivitAI scene prompt to borrow the setting, light, camera and finish from (never its person) */
   inspo?: string;
@@ -401,14 +401,14 @@ export async function queueAll(only?: string[]): Promise<number> {
   }
   for (const r of ready) {
     const rowIds: string[] = [];
-    // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 fast path (uses pre-cut cutout directly — zero redundant uploads)
+    // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 fast path (works for saved characters AND standalone quick photos)
     if (b.target === "image" && r.v9) {
       try {
         const c = character(r);
-        if (!c) throw new Error("Character not found (or under 18)");
+        if (r.charId && !c) throw new Error("Character not found (or under 18)");
         const v = r.v9;
         const shot = r.prompt.trim() || r.idea.trim();
-        const disp = c.site?.name || c.name;
+        const disp = c ? (c.site?.name || c.name) : (v.label || "Quick photo");
         for (let t = 0; t < r.takes; t++) {
           const job = await useJobs.getState().run(
             "batch",
@@ -424,7 +424,7 @@ export async function queueAll(only?: string[]): Promise<number> {
               nudeFraming: v.nudeFraming,
             }),
             "edit:krea:1:v9",
-            { batchRow: r.id, kind: "make", project: c.id, sent: { prompt: shot, character: disp }, ...extra(r, c) },
+            { batchRow: r.id, kind: "make", project: c?.id ?? null, sent: { prompt: shot, character: disp }, ...extra(r, c) },
           );
           rowIds.push(job.id); ids.push(job.id);
         }

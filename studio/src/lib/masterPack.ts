@@ -9,6 +9,7 @@ import { useJobs, waitForJob } from "./jobs";
 import { looseJson } from "./looseJson";
 import { M } from "./models";
 import { newSeed } from "./settings";
+import type { Media } from "./tray";
 
 export type MasterPackKey = "selfies" | "lingerie_thighs" | "boobs_ass_doggy" | "explicit_solo" | "cuckold_pov";
 
@@ -255,27 +256,72 @@ async function planCharacterPacks(c: Character, selectedKeys: MasterPackKey[]): 
   return out;
 }
 
-/** Generate a 1-time clean #808080 grey cutout for this character (BiRefNet HR-matting, or FaceSegment if faceMode) */
-async function prepareCutout(c: Character, faceMode: boolean, hasFaceSegment: boolean): Promise<string> {
-  const ref = masterPackRef(c);
-  if (!ref) throw new Error(`${c.site?.name || c.name} needs a front or cover picture first`);
-  const staged = await toInput(ref);
-  const slug = (c.site?.name || c.name || c.id).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || "char";
-  const useFace = hasFaceSegment && (faceMode || KNOWN_FACE_HAND.has((c.site?.name || c.name || "").trim().toLowerCase()));
+/** Generate a 1-time clean #808080 grey cutout from an input image name (BiRefNet HR-matting, or FaceSegment if faceMode) */
+async function prepareCutoutFromInput(
+  inputName: string,
+  label: string,
+  slug: string,
+  project: string | null,
+  faceMode: boolean,
+  hasFaceSegment: boolean,
+): Promise<string> {
+  const useFace = hasFaceSegment && (faceMode || KNOWN_FACE_HAND.has(label.trim().toLowerCase()));
   try {
-    const g = buildMasterPackCutout(staged.name, `studio/_work/v9_cutout_${slug}`, useFace ? "face" : "birefnet");
-    const job = await useJobs.getState().run("batch", `V9 cutout · ${c.site?.name || c.name}`, g, "cutout:v9", { quiet: true, front: true, noTray: true, no4k: true, project: c.id });
+    const g = buildMasterPackCutout(inputName, `studio/_work/v9_cutout_${slug}`, useFace ? "face" : "birefnet");
+    const job = await useJobs.getState().run("batch", `V9 cutout · ${label}`, g, "cutout:v9", { quiet: true, front: true, noTray: true, no4k: true, project });
     const done = await waitForJob(job.id);
     const out = done.outputs.find((x) => x.kind === "image" && x.type === "output");
     if (out) return (await toInput(out)).name;
   } catch {
-    // Graceful fallback: if cutout node fails or isn't available, keep going with the staged front image
+    // Graceful fallback: if cutout node fails or isn't available, keep going with the staged photo
   }
-  return staged.name;
+  return inputName;
+}
+
+/** Generate a 1-time clean #808080 grey cutout for a saved character */
+async function prepareCutout(c: Character, faceMode: boolean, hasFaceSegment: boolean): Promise<string> {
+  const ref = masterPackRef(c);
+  const disp = c.site?.name || c.name;
+  if (!ref) throw new Error(`${disp} needs a front or cover picture first`);
+  const staged = await toInput(ref);
+  const slug = (disp || c.id).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || "char";
+  return prepareCutoutFromInput(staged.name, disp, slug, c.id, faceMode, hasFaceSegment);
+}
+
+/** Build a temporary synthetic character profile from a standalone dropped photo (never saved to Characters!) */
+export function quickPhotoCharacter(media: Media, vibe = ""): Character {
+  const cleanLabel = (media.label || "Quick photo").replace(/\.[^.]+$/, "").trim().slice(0, 36) || "Quick photo";
+  const v = vibe.trim();
+  return {
+    id: "__quick__",
+    name: cleanLabel,
+    age: 25,
+    gender: "female",
+    style: "realistic",
+    hair: "",
+    eyes: "",
+    body: "",
+    ethnicity: "",
+    outfit: "",
+    details: v,
+    personality: v || "playful, candid, natural",
+    loras: [],
+    views: {},
+    site: { name: cleanLabel, personality: v || "playful, candid, flirty", facts: v ? { room: v } : undefined },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+export interface QuickPhotoTarget {
+  media: Media;
+  vibe?: string;
 }
 
 export interface MasterPackOpts {
   packs: MasterPackKey[];
+  /** Optional standalone photo — runs V9 Master Pack directly without creating a saved project/character */
+  quick?: QuickPhotoTarget | null;
   /** Stage finished shots locally into the character's site.sets ("Your site" staging — NEVER uploads to UrGF automatically) */
   saveToLocalSets: boolean;
   replaceExisting: boolean;
@@ -289,7 +335,13 @@ export async function planAndQueueMasterPack(
   onStep: (msg: string) => void,
 ): Promise<{ rows: number; jobs: number; sets: number; failed: string[] }> {
   const selected = MASTER_PACKS.filter((p) => opts.packs.includes(p.key));
-  if (!chars.length) throw new Error("Pick at least one character");
+  const quick = opts.quick?.media ? opts.quick : null;
+  type Target = { kind: "char"; c: Character } | { kind: "quick"; media: Media; c: Character };
+  const targets: Target[] = [
+    ...(quick ? [{ kind: "quick" as const, media: quick.media, c: quickPhotoCharacter(quick.media, quick.vibe) }] : []),
+    ...chars.map((c) => ({ kind: "char" as const, c })),
+  ];
+  if (!targets.length) throw new Error("Attach a photo or pick at least one character");
   if (!selected.length) throw new Error("Pick at least one V9 set to build");
 
   onStep("Checking installed LoRAs & nodes…");
@@ -302,21 +354,21 @@ export async function planAndQueueMasterPack(
     selected.map((p) => [p.key, resolvePackLoras(p.loras, installedLoras)]),
   );
 
-  // Plan prompts in parallel (up to 4 chars at once so DeepSeek runs fast without stalling)
-  const plans: (Record<string, string[]> | null)[] = new Array(chars.length).fill(null);
+  // Plan prompts in parallel (up to 4 targets at once so DeepSeek runs fast without stalling)
+  const plans: (Record<string, string[]> | null)[] = new Array(targets.length).fill(null);
   const failed: string[] = [];
   let planIdx = 0;
   let planDone = 0;
-  const concurrency = Math.min(4, chars.length);
+  const concurrency = Math.min(4, targets.length);
 
   await Promise.all(Array.from({ length: concurrency }, async () => {
-    while (planIdx < chars.length) {
+    while (planIdx < targets.length) {
       const i = planIdx++;
-      const c = chars[i];
-      const disp = c.site?.name || c.name;
-      onStep(`Planning V9 packs (${planDone + 1}/${chars.length}: ${disp})…`);
+      const t = targets[i];
+      const disp = t.c.site?.name || t.c.name;
+      onStep(`Planning V9 packs (${planDone + 1}/${targets.length}: ${disp})…`);
       try {
-        plans[i] = await planCharacterPacks(c, selected.map((p) => p.key));
+        plans[i] = await planCharacterPacks(t.c, selected.map((p) => p.key));
       } catch (e) {
         failed.push(`${disp}: ${(e as Error).message}`);
       }
@@ -329,22 +381,25 @@ export async function planAndQueueMasterPack(
   let setCount = 0;
   const group = newGroup(`V9 Master Pack (${selected.length} sets)`);
 
-  for (let i = 0; i < chars.length; i++) {
+  for (let i = 0; i < targets.length; i++) {
     const plan = plans[i];
     if (!plan) continue;
-    const c = chars[i];
-    const disp = c.site?.name || c.name;
-    const slug = disp.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || c.id;
-    onStep(`Preparing cutout (${i + 1}/${chars.length}: ${disp})…`);
+    const t = targets[i];
+    const disp = t.c.site?.name || t.c.name;
+    const slug = disp.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || (t.kind === "quick" ? "quick" : t.c.id);
+    onStep(`Preparing cutout (${i + 1}/${targets.length}: ${disp})…`);
     let cutoutImage: string;
     try {
-      cutoutImage = await prepareCutout(c, opts.faceOnlyCutout, hasFaceSegment);
+      cutoutImage = t.kind === "quick"
+        ? await prepareCutoutFromInput(t.media.name, disp, slug, null, opts.faceOnlyCutout, hasFaceSegment)
+        : await prepareCutout(t.c, opts.faceOnlyCutout, hasFaceSegment);
     } catch (e) {
       failed.push(`${disp}: ${(e as Error).message}`);
       continue;
     }
 
-    const { anchor: bodyAnchor } = bodyDescFor(c);
+    const { anchor: bodyAnchor } = bodyDescFor(t.c);
+    const stageToSite = t.kind === "char" && opts.saveToLocalSets;
     for (const pack of selected) {
       const shots = plan[pack.key] ?? [];
       if (!shots.length) continue;
@@ -353,14 +408,14 @@ export async function planAndQueueMasterPack(
       const packLoras = resolvedByPack.get(pack.key) ?? [];
       shots.forEach((shotPrompt, sIdx) => {
         rowsToAdd.push({
-          charId: c.id,
+          ...(t.kind === "char" ? { charId: t.c.id } : { noStar: true }),
           idea: `V9 ${pack.shortLabel} · ${sIdx + 1}/${shots.length}`,
           prompt: shotPrompt,
           status: "ready",
           takes: 1,
           loras: packLoras,
           group,
-          ...(opts.saveToLocalSets ? { toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey } } : {}),
+          ...(stageToSite ? { toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey } } : {}),
           v9: {
             packKey: pack.key,
             packTag: pack.setTag,
@@ -369,7 +424,8 @@ export async function planAndQueueMasterPack(
             bodyAnchor,
             prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
             nudeFraming: pack.nudeFraming,
-            replaceExisting: opts.saveToLocalSets && opts.replaceExisting,
+            replaceExisting: stageToSite && opts.replaceExisting,
+            label: disp,
           },
         });
       });

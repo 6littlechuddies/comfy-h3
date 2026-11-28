@@ -5,8 +5,9 @@ import { isAdult, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { useInspo } from "../lib/inspo";
 import { ALL_MASTER_PACK_KEYS, MASTER_PACKS, SOLO_MASTER_PACK_KEYS, masterPackRef, v9PackStatus, type MasterPackKey } from "../lib/masterPack";
+import type { Media } from "../lib/tray";
 import { InspoManager } from "./InspoManager";
-import { Btn, DropSelect, Seg, cx } from "./ui";
+import { Btn, DropSelect, Seg, Slot, cx } from "./ui";
 
 const THEMES = "beach at dusk\ncozy bedroom with warm lamp light\ngym with mirrors\ncity street at night with neon signs";
 const POSES = "standing, hand on hip, looking at the camera\nsitting on the edge of the bed, legs crossed\nover-the-shoulder glance, from behind\nclose-up portrait, soft smile";
@@ -182,6 +183,8 @@ function V9MasterPackBox() {
   const sel = useCharacters((s) => s.sel);
   const toast = useJobs((s) => s.toast);
   const [who, setWho] = useState<string[]>(sel ? [sel] : []);
+  const [quickMedia, setQuickMedia] = useState<Media | null>(null);
+  const [quickVibe, setQuickVibe] = useState("");
   const [packs, setPacks] = useState<MasterPackKey[]>(loadV9Sets);
   const [saveToLocalSets, setSaveToLocalSets] = useState(true);
   const [replaceExisting, setReplaceExisting] = useState(true);
@@ -198,23 +201,35 @@ function V9MasterPackBox() {
   };
 
   const pickedChars = chars.filter((c) => who.includes(c.id));
+  const targetCount = pickedChars.length + (quickMedia ? 1 : 0);
   const missingV9Ids = chars.filter((c) => v9PackStatus(c).missing.length > 0).map((c) => c.id);
   const shotsPerChar = MASTER_PACKS.filter((p) => packs.includes(p.key)).reduce((sum, p) => sum + p.shots, 0);
-  const totalPics = pickedChars.length * shotsPerChar;
-  const totalSets = pickedChars.length * packs.length;
+  const totalPics = targetCount * shotsPerChar;
+  const totalSets = targetCount * packs.length;
 
   const go = async () => {
     setBusy("Starting V9 Master Pack…");
     try {
       const { planAndQueueMasterPack } = await import("../lib/masterPack");
-      const r = await planAndQueueMasterPack(pickedChars, { packs, saveToLocalSets, replaceExisting, faceOnlyCutout, review }, setBusy);
+      const r = await planAndQueueMasterPack(
+        pickedChars,
+        {
+          packs,
+          quick: quickMedia ? { media: quickMedia, vibe: quickVibe } : null,
+          saveToLocalSets,
+          replaceExisting,
+          faceOnlyCutout,
+          review,
+        },
+        setBusy,
+      );
       const warn = r.failed.length ? ` (${r.failed.length} failed: ${r.failed[0]})` : "";
       toast(
         review
           ? `Planned ${r.rows} V9 prompts across ${r.sets} set${r.sets === 1 ? "" : "s"} — edit any row below, then press Queue.${warn}`
-          : saveToLocalSets
-            ? `Queued ${r.jobs} V9 pictures across ${r.sets} set${r.sets === 1 ? "" : "s"} — staged locally in Your site (nothing is sent to UrGF until you click Send).${warn}`
-            : `Queued ${r.jobs} V9 pictures — kept only in Batch results & Catalog (not added to Your site sets).${warn}`,
+          : pickedChars.length && saveToLocalSets
+            ? `Queued ${r.jobs} V9 pictures across ${r.sets} set${r.sets === 1 ? "" : "s"} — saved characters stage locally in Your site (nothing auto-sends to UrGF).${warn}`
+            : `Queued ${r.jobs} V9 pictures — kept only in Batch results & Catalog (no project or site sets touched).${warn}`,
         r.failed.length ? "info" : "good",
         "batch",
       );
@@ -243,8 +258,49 @@ function V9MasterPackBox() {
         </span>
       </div>
       <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
-        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — works on both new uploads and linked UrGF characters. Nothing is ever uploaded to UrGF automatically.
+        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — drop any photo directly (no project needed) or pick saved characters. Nothing is ever uploaded to UrGF automatically.
       </p>
+
+      <div className="flex items-start gap-2.5 rounded-md border border-dashed border-line bg-black/20 p-2">
+        <Slot
+          value={quickMedia}
+          onChange={setQuickMedia}
+          accept={["image"]}
+          label="Quick photo"
+          className="h-20 w-16 shrink-0"
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11.5px] font-medium text-ink">Quick photo <span className="font-normal text-dim">(no project needed)</span></span>
+            {quickMedia && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const { useWork, makeRef } = await import("../lib/work");
+                  const { useSettings } = await import("../lib/settings");
+                  const cur = useWork.getState().animateRefs.filter((r) => r.media.kind !== "image");
+                  useWork.getState().set({ animateRefs: [makeRef(quickMedia), ...cur] });
+                  useSettings.getState().set("animate", { mode: "swap", swapEngine: "bfs" } as never);
+                  useSettings.getState().setTab("animate");
+                }}
+                className="text-[11px] text-accent hover:underline"
+                title="Jump straight to 05 Animate → Swap the person (BFS H3 v1.1) with this photo"
+              >
+                Use in BFS Video →
+              </button>
+            )}
+          </div>
+          <input
+            value={quickVibe}
+            onChange={(e) => setQuickVibe(e.target.value)}
+            placeholder="Optional vibe / room (e.g. cozy dimly lit bedroom, alt goth)"
+            className="inset h-8 border px-2 text-[12px] text-ink placeholder:text-dim focus:border-accent focus:outline-none"
+          />
+          <span className="text-[10.5px] leading-snug text-dim">
+            Drop or click to attach any adult photo. Runs directly into Batch results &amp; Catalog without creating a character.
+          </span>
+        </div>
+      </div>
 
       <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
         {chars.map((c) => {
@@ -302,19 +358,23 @@ function V9MasterPackBox() {
         </div>
       </div>
 
-      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
-        <input type="checkbox" className="mt-0.5" checked={saveToLocalSets} onChange={(e) => setSaveToLocalSets(e.target.checked)} />
-        <span>Sort finished shots into local <b>Your site</b> staging sets (never auto-sends to UrGF; uncheck to keep only in Batch results &amp; Catalog)</span>
-      </label>
-      {saveToLocalSets && (
-        <label className="flex cursor-pointer items-start gap-2 pl-5 text-[12px] text-muted">
-          <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
-          <span>Replace older V9 sets of the chosen types (leaves unselected sets untouched)</span>
-        </label>
+      {pickedChars.length > 0 && (
+        <>
+          <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+            <input type="checkbox" className="mt-0.5" checked={saveToLocalSets} onChange={(e) => setSaveToLocalSets(e.target.checked)} />
+            <span>Sort saved characters' shots into local <b>Your site</b> staging sets (never auto-sends to UrGF; uncheck to keep only in Batch results &amp; Catalog)</span>
+          </label>
+          {saveToLocalSets && (
+            <label className="flex cursor-pointer items-start gap-2 pl-5 text-[12px] text-muted">
+              <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+              <span>Replace older V9 sets of the chosen types (leaves unselected sets untouched)</span>
+            </label>
+          )}
+        </>
       )}
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={faceOnlyCutout} onChange={(e) => setFaceOnlyCutout(e.target.checked)} />
-        <span>Head-only cutout (FaceSegment) — tick if her front photo has a hand or peace sign near her face</span>
+        <span>Head-only cutout (FaceSegment) — tick if the photo has a hand or peace sign near her face</span>
       </label>
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => setReview(e.target.checked)} />
@@ -324,8 +384,8 @@ function V9MasterPackBox() {
       <Btn
         kind="primary"
         onClick={go}
-        disabled={!pickedChars.length || !packs.length || !!busy}
-        why={busy ?? (!pickedChars.length ? "Pick at least one character" : "Pick at least one V9 set")}
+        disabled={!targetCount || !packs.length || !!busy}
+        why={busy ?? (!targetCount ? "Attach a quick photo or pick at least one character" : "Pick at least one V9 set")}
       >
         {busy ?? (review ? `Plan V9 prompts · ${totalPics} shots (${totalSets} sets)` : `Build & queue V9 Master Pack · ${totalPics} pictures (${totalSets} sets)`)}
       </Btn>
