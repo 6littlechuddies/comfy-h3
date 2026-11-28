@@ -2,7 +2,7 @@
 // Added by link, kept in your models library and re-downloaded on every rental (like LoRAs).
 import { useEffect, useState, type ReactNode } from "react";
 import { create } from "zustand";
-import { installLora, myModels, type LoraJob, type MyModel } from "../lib/api";
+import { fetchMissingModels, forgetModel, installLora, myModels, type LoraJob, type MyModel } from "../lib/api";
 import { useJobs } from "../lib/jobs";
 import { Btn, Help, Icon, cx, DropSelect } from "./ui";
 
@@ -10,8 +10,34 @@ const useModels = create<{ items: MyModel[]; v: number }>(() => ({ items: [], v:
 export const bumpModels = () => useModels.setState((s) => ({ v: s.v + 1 }));
 function useMyModels() {
   const v = useModels((s) => s.v);
-  useEffect(() => { myModels().then((r) => useModels.setState({ items: r.items })).catch(() => {}); }, [v]);
-  return useModels((s) => s.items);
+  const items = useModels((s) => s.items);
+  useEffect(() => {
+    let live = true;
+    const load = () => myModels().then((r) => { if (live) useModels.setState({ items: r.items }); }).catch(() => {});
+    load();
+    return () => { live = false; };
+  }, [v]);
+  // Live-poll every 4 s while any checkpoint is actively downloading so the dropdown unlocks automatically (no page reload needed)
+  const anyActive = items.some((m) => !m.here && m.downloading);
+  useEffect(() => {
+    if (!anyActive) return;
+    const t = setInterval(() => {
+      myModels().then((r) => useModels.setState({ items: r.items })).catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [anyActive]);
+  return items;
+}
+function statusSuffix(m: MyModel): string {
+  if (m.here) return "";
+  if (m.downloading) {
+    if (m.progress && m.progress > 0.01) return ` (downloading ${Math.round(m.progress * 100)}%…)`;
+    if (m.step) return ` (${m.step})`;
+    return " (downloading…)";
+  }
+  if (m.problem) return " (failed)";
+  if (m.step) return ` (${m.step})`;
+  return " (not downloaded)";
 }
 const FAMILY_OF: Record<string, string> = { anima: "anima", noob: "sdxl", krea2: "krea2", krea2raw: "krea2" };
 const OFFICIAL: Record<string, string> = { anima: "Anima base 1.0", noob: "Illustrious · NoobAI-XL 1.1", krea2: "Krea 2 Turbo", krea2raw: "Krea 2 RAW" };
@@ -35,6 +61,7 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
   const [adding, setAdding] = useState(false);
   const [link, setLink] = useState("");
   const [job, setJob] = useState<LoraJob | null>(null);
+  const [fetching, setFetching] = useState(false);
   const toast = useJobs((s) => s.toast);
   const add = async () => {
     if (!link.trim()) return;
@@ -53,6 +80,25 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
   };
   if (!fam) return null;
   const cur = mine.find((m) => m.name === value);
+  const startFetch = async (name?: string) => {
+    setFetching(true);
+    try {
+      const r = await fetchMissingModels(name);
+      bumpModels();
+      if (r.started.length) toast(`Started downloading ${r.started.length} checkpoint${r.started.length > 1 ? "s" : ""}${!r.key ? " (note: no CivitAI key set — NSFW/gated models may fail)" : ""}.`, "info");
+      else toast("Already downloading or already on disk.", "info");
+    } catch (e) { toast((e as Error).message, "bad"); }
+    finally { setFetching(false); }
+  };
+  const removeModel = async (m: MyModel) => {
+    try {
+      await forgetModel(m.name);
+      if (value === m.name) onChange("");
+      bumpModels();
+      toast(`Removed “${m.title}” from your checkpoints list.`, "info");
+    } catch (e) { toast((e as Error).message, "bad"); }
+  };
+  const missingIdle = mine.filter((m) => !m.here && !m.downloading);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
@@ -66,7 +112,7 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
           {models.map((mo) => (
             <optgroup key={mo} label={GROUP[mo] ?? mo}>
               <option value={`${mo}|`}>{OFFICIAL[mo]} (official)</option>
-              {all.filter((x) => x.family === FAMILY_OF[mo]).map((x) => <option key={x.name} value={`${mo}|${x.name}`} disabled={!x.here}>{x.title}{x.version ? ` · ${x.version}` : ""}{x.here ? "" : " (downloading…)"}</option>)}
+              {all.filter((x) => x.family === FAMILY_OF[mo]).map((x) => <option key={x.name} value={`${mo}|${x.name}`}>{x.title}{x.version ? ` · ${x.version}` : ""}{statusSuffix(x)}</option>)}
             </optgroup>
           ))}
         </DropSelect>
@@ -76,12 +122,38 @@ export function CheckpointPicker({ model, value, onChange, onModel, models = ["k
           {follow && <option value="@create">{follow}</option>}
           {extra?.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           <option value="">{OFFICIAL[model]} (official)</option>
-          {mine.map((m) => <option key={m.name} value={m.name}>{m.title}{m.version ? ` · ${m.version}` : ""}{m.here ? "" : m.problem ? " (not on this rental)" : " (downloading…)"}</option>)}
+          {mine.map((m) => <option key={m.name} value={m.name}>{m.title}{m.version ? ` · ${m.version}` : ""}{statusSuffix(m)}</option>)}
         </DropSelect>
       )}
       {value && !value.startsWith("@") && !cur && <p className="text-[11.5px] text-bad">That checkpoint isn't in your models any more — pick another.</p>}
-      {cur && !cur.here && <p className="border border-bad/40 bg-bad/5 px-2.5 py-1.5 text-[11.5px] leading-relaxed text-bad">
-        {cur.problem ? <>Not on this rental: {cur.problem}. Pictures won't start with it — pick another, or ask the creator / download it on CivitAI and add the file.</> : <>Still downloading — pictures wait for it.</>}</p>}
+      {cur && !cur.here && (
+        <div className="flex flex-col gap-1.5 border border-bad/40 bg-bad/5 px-2.5 py-2 text-[11.5px] leading-relaxed text-bad">
+          {cur.downloading ? (
+            <>
+              <span>Downloading{cur.progress && cur.progress > 0.01 ? ` · ${Math.round(cur.progress * 100)}%` : cur.step ? ` · ${cur.step}` : "…"} (pictures wait for it, or pick another checkpoint meanwhile).</span>
+              {cur.progress != null && cur.progress > 0 && (
+                <div className="h-1 w-full bg-raised2"><div className="h-full bg-accent transition-[width]" style={{ width: `${Math.round(cur.progress * 100)}%` }} /></div>
+              )}
+            </>
+          ) : cur.problem ? (
+            <span>Failed to download: {cur.problem}</span>
+          ) : cur.step ? (
+            <span>{cur.step}. Click Download now to pull it immediately, or Remove if it's a duplicate.</span>
+          ) : (
+            <span>Not downloaded on this rental yet (not queued). Click Download now to pull it from CivitAI, or Remove if it's a duplicate.</span>
+          )}
+          <div className="flex items-center gap-2 pt-0.5">
+            {!cur.downloading && <Btn small onClick={() => startFetch(cur.name)} disabled={fetching}>{cur.problem ? "Retry download" : "Download now"}</Btn>}
+            <Btn small onClick={() => removeModel(cur)} title="Remove this entry from your checkpoints list (fixes stale duplicates)">Remove</Btn>
+          </div>
+        </div>
+      )}
+      {(!cur || cur.here) && missingIdle.length > 0 && (
+        <div className="flex items-center justify-between gap-2 text-[11.5px] text-dim">
+          <span>{missingIdle.length} saved checkpoint{missingIdle.length > 1 ? "s" : ""} not downloaded on this rental</span>
+          <button type="button" onClick={() => startFetch()} disabled={fetching} className="text-accent hover:underline disabled:opacity-50">{fetching ? "Starting…" : "Download missing"}</button>
+        </div>
+      )}
       {adding && (
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">

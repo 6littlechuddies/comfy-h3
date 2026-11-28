@@ -368,7 +368,7 @@ const ckCache: { at: number; items: import("./api").MyModel[] } = { at: 0, items
 async function needCheckpoint(name: string) {
   if (Date.now() - ckCache.at > 20000) { ckCache.items = (await (await import("./api")).myModels().catch(() => ({ items: [] }))).items; ckCache.at = Date.now(); }
   const m = ckCache.items.find((x) => x.name === name);
-  if (m && !m.here) throw new Error(`Checkpoint “${m.title}” isn't on this rental${m.problem ? ` — ${m.problem}` : " yet (still downloading)"}. Pick another in Checkpoint, then Queue again.`);
+  if (m && !m.here) throw new Error(`Checkpoint “${m.title}” isn't on this rental${m.problem ? ` — ${m.problem}` : m.downloading ? " yet (still downloading)" : " yet (not downloaded — click Download now in Checkpoint)"}. Pick another in Checkpoint, then Queue again.`);
 }
 
 export async function queueAll(only?: string[]): Promise<number> {

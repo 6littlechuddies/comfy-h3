@@ -72,6 +72,7 @@ async function poll() {
       const arrived = (d.groups as Group[] ?? []).filter((g) => g.state === "done" && before.some((b) => b.id === g.id && b.state !== "done"));
       if (arrived.length) {
         forgetObjectInfo(); // ComfyUI now lists the new model files
+        import("../components/Checkpoint").then((m) => m.bumpModels()).catch(() => {});
         const { useJobs } = await import("./jobs");
         arrived.forEach((g) => useJobs.getState().toast(`${g.label} models are in — ready to use.`, "good"));
       }
