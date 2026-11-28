@@ -276,6 +276,8 @@ async function prepareCutout(c: Character, faceMode: boolean, hasFaceSegment: bo
 
 export interface MasterPackOpts {
   packs: MasterPackKey[];
+  /** Stage finished shots locally into the character's site.sets ("Your site" staging — NEVER uploads to UrGF automatically) */
+  saveToLocalSets: boolean;
   replaceExisting: boolean;
   faceOnlyCutout: boolean;
   review: boolean;
@@ -358,7 +360,7 @@ export async function planAndQueueMasterPack(
           takes: 1,
           loras: packLoras,
           group,
-          toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey },
+          ...(opts.saveToLocalSets ? { toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey } } : {}),
           v9: {
             packKey: pack.key,
             packTag: pack.setTag,
@@ -367,7 +369,7 @@ export async function planAndQueueMasterPack(
             bodyAnchor,
             prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
             nudeFraming: pack.nudeFraming,
-            replaceExisting: opts.replaceExisting,
+            replaceExisting: opts.saveToLocalSets && opts.replaceExisting,
           },
         });
       });

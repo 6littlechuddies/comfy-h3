@@ -183,6 +183,7 @@ function V9MasterPackBox() {
   const toast = useJobs((s) => s.toast);
   const [who, setWho] = useState<string[]>(sel ? [sel] : []);
   const [packs, setPacks] = useState<MasterPackKey[]>(loadV9Sets);
+  const [saveToLocalSets, setSaveToLocalSets] = useState(true);
   const [replaceExisting, setReplaceExisting] = useState(true);
   const [faceOnlyCutout, setFaceOnlyCutout] = useState(false);
   const [review, setReview] = useState(false);
@@ -206,12 +207,14 @@ function V9MasterPackBox() {
     setBusy("Starting V9 Master Pack…");
     try {
       const { planAndQueueMasterPack } = await import("../lib/masterPack");
-      const r = await planAndQueueMasterPack(pickedChars, { packs, replaceExisting, faceOnlyCutout, review }, setBusy);
+      const r = await planAndQueueMasterPack(pickedChars, { packs, saveToLocalSets, replaceExisting, faceOnlyCutout, review }, setBusy);
       const warn = r.failed.length ? ` (${r.failed.length} failed: ${r.failed[0]})` : "";
       toast(
         review
           ? `Planned ${r.rows} V9 prompts across ${r.sets} set${r.sets === 1 ? "" : "s"} — edit any row below, then press Queue.${warn}`
-          : `Queued ${r.jobs} V9 pictures across ${r.sets} set${r.sets === 1 ? "" : "s"} — finished shots land automatically in Your site.${warn}`,
+          : saveToLocalSets
+            ? `Queued ${r.jobs} V9 pictures across ${r.sets} set${r.sets === 1 ? "" : "s"} — staged locally in Your site (nothing is sent to UrGF until you click Send).${warn}`
+            : `Queued ${r.jobs} V9 pictures — kept only in Batch results & Catalog (not added to Your site sets).${warn}`,
         r.failed.length ? "info" : "good",
         "batch",
       );
@@ -240,7 +243,7 @@ function V9MasterPackBox() {
         </span>
       </div>
       <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
-        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — works on both new uploads and linked UrGF characters. Finished shots land straight in <b>Your site</b>.
+        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — works on both new uploads and linked UrGF characters. Nothing is ever uploaded to UrGF automatically.
       </p>
 
       <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
@@ -300,9 +303,15 @@ function V9MasterPackBox() {
       </div>
 
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
-        <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
-        <span>Replace older V9 sets of the chosen types (leaves unselected sets untouched)</span>
+        <input type="checkbox" className="mt-0.5" checked={saveToLocalSets} onChange={(e) => setSaveToLocalSets(e.target.checked)} />
+        <span>Sort finished shots into local <b>Your site</b> staging sets (never auto-sends to UrGF; uncheck to keep only in Batch results &amp; Catalog)</span>
       </label>
+      {saveToLocalSets && (
+        <label className="flex cursor-pointer items-start gap-2 pl-5 text-[12px] text-muted">
+          <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+          <span>Replace older V9 sets of the chosen types (leaves unselected sets untouched)</span>
+        </label>
+      )}
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={faceOnlyCutout} onChange={(e) => setFaceOnlyCutout(e.target.checked)} />
         <span>Head-only cutout (FaceSegment) — tick if her front photo has a hand or peace sign near her face</span>
