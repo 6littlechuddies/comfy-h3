@@ -1,6 +1,6 @@
 // Builds ComfyUI API-format prompts for each Studio tab.
 // Every builder here is validated against a real ComfyUI's /prompt by scripts/test-graphs.ts.
-import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
+import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, h3FramesFloor, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
 import { fastAttnOn, speedOn } from "./speed";
 
 /** Speed-ups → Faster attention: ComfyUI's INT8 attention (only when this ComfyUI has it); off = the model as it was */
@@ -1049,6 +1049,147 @@ export function swapPrompt(o: { pictures: number; who?: string; name?: string; l
     keep.length ? `Also preserve: ${keep.join(", ")}.` : "",
     (o.notes ?? "").trim().replace(/^./, (c) => c.toUpperCase()).replace(/([^.!?])$/, "$1."),
   ].filter(Boolean).join(" ");
+}
+
+/** Alissonerdx BFS H3 Character Swap v1.1 trained single-line prompt template (keep `body_swap:` at position 0!). */
+export function bfsSwapPrompt(o: { details?: string; who?: string; notes?: string; pictures?: number }): string {
+  const n = Math.max(1, Math.min(8, o.pictures ?? 1));
+  const picRef = n === 1 ? "<Picture 1>" : `${Array.from({ length: n }, (_, i) => `<Picture ${i + 1}>`).slice(0, -1).join(", ")} and <Picture ${n}>`;
+  const details = (o.details ?? "").trim().replace(/\.+$/, "") || "adult woman";
+  const who = (o.who ?? "").trim();
+  const targetClause = who && !/^person$/i.test(who)
+    ? `only the ${who} in the guide video is replaced: their face, hair, body and clothing become <Subject 1>.`
+    : "only the main subject of the guide video is replaced: its face, hair, body and clothing become <Subject 1>.";
+  const extra = (o.notes ?? "").trim();
+  const extraSentence = extra ? ` ${extra.replace(/([^.!?])$/, "$1.")}` : "";
+  return (
+    `body_swap: subject_definitions: <Subject 1> is the ${details} shown in ${picRef}, whose identity, face, head, hair or fur, skin, body shape, proportions and clothing define the character in the target video. ` +
+    `The guide video provides the scene and the performance: its background, environment, lighting, camera, framing, body pose, hand and arm movement, head rotation, gaze direction, lip movement and facial expression, frame by frame; ${targetClause} ` +
+    `summary: [video generation + reference] Replace the guide subject with <Subject 1>, keeping the scene, camera and the complete motion and performance of the guide video. ` +
+    `detailed_description: [Shot 1] <Subject 1> takes the exact place of the guide subject and moves with the same timing, body pose, gestures, head motion, gaze, speech and facial expressions, while keeping the complete identity from ${picRef}: facial structure, hair or fur, skin, body shape and clothing stay stable in every frame. ` +
+    `The background, lighting, colors and camera of the guide video are preserved. Prevent identity drift, clothing changes, texture crawling and flicker.${extraSentence}`
+  );
+}
+
+export interface BfsVideoSwapOpts {
+  video: string;
+  start: number;
+  end: number;
+  hasAudio?: boolean;
+  useAudio?: boolean;
+  pictures: string[];
+  width: number;
+  height: number;
+  prompt: string;
+  seed: number;
+  /** true = 8-step DMD turbo (euler/simple); false = 20-step full Hero quality (res_multistep/simple, no turbo LoRA) */
+  turbo: boolean;
+  /** override turbo LoRA path (e.g. fallback to h3TurboFl8 if DMD turbo isn't downloaded yet) */
+  turboLora?: string;
+  /** BFS H3 Character Swap v1.1 LoRA strength (default 1.0) */
+  strength?: number;
+  /** extra user H3 LoRAs (e.g. MysticXXX_MMH3-V4 for explicit clips) */
+  loras?: LoraPick[];
+  /** anime clip: skip realistic skin LoRA (r34l1sm) */
+  anime?: boolean;
+  /** auto-cut out reference picture(s) onto neutral #808080 grey with BiRefNetRMBG so her old background never bleeds in */
+  cutoutRef?: boolean;
+  lowMemDecode?: boolean;
+  kitchen?: boolean;
+  plain?: boolean;
+  prefix: string;
+}
+
+/** Inject realism/LoRA triggers into a BFS prompt while keeping `body_swap:` strictly at position 0. */
+function injectBfsTriggers(prompt: string, addRealism: boolean, loras: LoraPick[]): string {
+  const extra = withTriggers("", loras).replace(/,\s*$/, "").trim();
+  const prefix = [addRealism ? REALISM_TRIGGER : "", extra].filter(Boolean).join(", ");
+  if (!prefix) return prompt;
+  if (/^body_swap:\s*/i.test(prompt)) {
+    const rest = prompt.replace(/^body_swap:\s*/i, "");
+    return rest.toLowerCase().includes(prefix.toLowerCase()) ? prompt : `body_swap: ${prefix}, ${rest}`;
+  }
+  return `${prefix}, ${prompt}`;
+}
+
+/** BFS H3 Character Swap v1.1 (Alissonerdx) using 100% native ComfyUI MiniMax H3 nodes + BiRefNetRMBG #808080 cutout:
+ *  - Guide video goes straight into MiniMaxH3AddGuide(frame_idx=0) — no SAM masking required!
+ *  - Character reference goes through BiRefNetRMBG(#808080) -> 0.5 MP -> MiniMaxH3ReferenceToVideo (<Picture 1>)
+ *  - Uses full FP16 video VAE, MiniMaxH3SigmaShift(12, 3), comfy kitchen attention, r34l1sm skin realism, optional extra H3 LoRAs,
+ *    snapped-down 17k+5 frame count (zero unguided tail frames), and either 20-step Hero or 8-step DMD turbo. */
+export function buildBfsVideoSwap(p: BfsVideoSwapOpts): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: M.h3Ref, weight_dtype: "default" });
+  let model: Link = o(g.add("MiniMaxH3SigmaShift", { model: o(unet), shift_video: 12, shift_audio: 3 }));
+  if (p.kitchen !== false) model = fastAttn(g, model);
+  if (p.turbo) {
+    model = o(g.add("LoraLoaderModelOnly", { model, lora_name: p.turboLora || M.h3BfsTurbo8, strength_model: 1 }, "BFS Swap 8-step turbo"));
+  }
+  model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3BfsSwap, strength_model: p.strength ?? 1 }, "BFS H3 Character Swap v1.1"));
+  const extraLoras = activeLoras(p.loras ?? []).filter((l) => !/character_swap|dmd_ref2va_8step|ref2v_turbo|fl2v_turbo/i.test(l.name));
+  for (const l of extraLoras) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  const real = realismOn() && !p.anime && !extraLoras.some((l) => /h3-realism-people/i.test(l.name));
+  if (real) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3Realism, strength_model: 0.75 }, "Realistic skin"));
+
+  const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
+  const vvae = g.add("VAELoader", { vae_name: M.h3VaeFp16 });
+  const avae = g.add("VAELoader", { vae_name: M.h3AudioVae });
+
+  const span = Math.max(0.5, Math.min(15, (p.end || 5) - (p.start || 0)));
+  // Snap DOWN to largest 17k+5 <= clip frames so every frame has real guide video conditioning (zero tail jitter)
+  const length = h3FramesFloor(span);
+
+  // Guide video: loaded at 24 fps for the selected trim range and matched cleanly to target width×height
+  const vid = g.add("VHS_LoadVideo", {
+    video: p.video, force_rate: 24, custom_width: 0, custom_height: 0,
+    frame_load_cap: length, skip_first_frames: Math.max(0, Math.round((p.start || 0) * 24)),
+    select_every_nth: 1, format: "None",
+  }, "Guide video");
+  const guideFrames = g.add("ImageScale", { image: o(vid, 0), upscale_method: "lanczos", width: p.width, height: p.height, crop: "center" });
+
+  // Reference character picture(s): optional on-the-fly #808080 BiRefNet cutout (Alissonerdx node #868) + 0.5 MP scale (#866)
+  const refInputs: Inputs = {};
+  p.pictures.slice(0, 8).forEach((f, i) => {
+    let img: Link = o(g.add("LoadImage", { image: f }));
+    if (p.cutoutRef !== false) img = o(matte(g, img, "Color", "#808080"));
+    img = o(g.add("ImageScaleToTotalPixels", { image: img, upscale_method: "lanczos", megapixels: 0.5, resolution_steps: 16 }));
+    refInputs[`ref_images.ref_image_${i}`] = img;
+  });
+
+  const keepAudio = !!p.hasAudio && p.useAudio !== false;
+  const basePrompt = p.prompt.trim() || bfsSwapPrompt({ pictures: p.pictures.length });
+  const finalPrompt = injectBfsTriggers(basePrompt, real, extraLoras);
+  const cond = g.add("MiniMaxH3ReferenceToVideo", {
+    clip: o(clip), prompt: finalPrompt, width: p.width, height: p.height, length,
+    ref_image_size: "match", vae: o(vvae), audio_vae: o(avae), ...refInputs,
+  });
+  const guide = g.add("MiniMaxH3AddGuide", {
+    positive: o(cond, 0), latent: o(cond, 1), vae: o(vvae), image: o(guideFrames), frame_idx: 0,
+    ...(keepAudio ? { audio_vae: o(avae), audio: o(vid, 2) } : {}),
+  }, "Guide video latent");
+
+  const noise = g.add("RandomNoise", { noise_seed: p.seed });
+  const guider = g.add("BasicGuider", { model, conditioning: o(guide, 0) });
+  const sampler = g.add("KSamplerSelect", { sampler_name: p.turbo ? "euler" : "res_multistep" });
+  const sigmas = g.add("BasicScheduler", { model, scheduler: "simple", steps: p.turbo ? 8 : 20, denoise: 1 });
+  const out = g.add("SamplerCustomAdvanced", { noise: o(noise), guider: o(guider), sampler: o(sampler), sigmas: o(sigmas), latent_image: o(cond, 1) });
+
+  const sep = g.add("LTXVSeparateAVLatent", { av_latent: o(out) });
+  const frames = p.lowMemDecode
+    ? g.add("VAEDecodeTiled", { samples: o(sep, 0), vae: o(vvae), tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 })
+    : g.add("VAEDecode", { samples: o(sep, 0), vae: o(vvae) });
+
+  const it = interpOn();
+  const smooth = it.on && !p.plain ? g.add("FrameInterpolate", { interp_model: o(g.add("FrameInterpolationModelLoader", { model_name: M.rife })), images: o(frames), [it.widget]: 2 }) : null;
+  const upBy = Math.round(Math.min(4, 1920 / Math.max(p.width, p.height)) * 100) / 100;
+  const up = rtxOn() && upBy >= 1.1 && !p.plain ? g.add("RTXVideoSuperResolution", {
+    images: o(smooth ?? frames), resize_type: "scale by multiplier", "resize_type.scale": upBy,
+    quality: "HIGHBITRATE_ULTRA", strength: 1, image_encoding: "8-bit RGB",
+  }) : null;
+  const audio: Link = keepAudio ? o(vid, 2) : o(g.add("VAEDecodeAudio", { samples: o(out), vae: o(avae) }));
+  const video = g.add("CreateVideo", { images: o(up ?? smooth ?? frames), fps: smooth ? 48 : 24, audio });
+  g.add("SaveVideo", { video: o(video), filename_prefix: p.prefix, format: "auto", "format.codec": "auto" }, "result");
+  return g.graph;
 }
 
 export interface PromptRefVideo { file: string; tag: string; label: string; start: number; end: number; useSound: boolean }
