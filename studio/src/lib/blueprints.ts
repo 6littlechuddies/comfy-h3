@@ -6,6 +6,7 @@
 
 export type BlueprintBankId =
   | "upfront_portrait"
+  | "diagonal_pinup"
   | "camera_glamour"
   | "mirror_choreo"
   | "raw_selfie"
@@ -32,6 +33,7 @@ export interface BlueprintBank {
 
 export const BLUEPRINT_BANKS: BlueprintBank[] = [
   { id: "upfront_portrait", label: "Upfront Portraits & Glamour", short: "Portrait", hint: "Magnetic waist-up / chest-up close-in portraits — arms-up arches, bar/table leans, zipper/collar tease, hair sweeps" },
+  { id: "diagonal_pinup", label: "Diagonal Legs-in-Frame Pinup", short: "Diagonal", hint: "85%+ edge-to-edge rule-of-thirds cover pinups with face in upper third and thighs/legs sweeping across the lower foreground" },
   { id: "camera_glamour", label: "Camera Geometry & Glamour", short: "Glamour", hint: "Explicit shot height, 3/4 angles, men's-mag warmth, and flattering figure framing" },
   { id: "mirror_choreo", label: "Mirror & Micro-Choreography", short: "Mirror", hint: "Lived-in bedroom mirror phone selfies, hip shift, waist twist, and over-the-shoulder choreography" },
   { id: "raw_selfie", label: "Raw Smartphone & Digicam Selfies", short: "Selfies", hint: "Arm's-length phone snaps, messy-bedroom mirror selfies, low-hip angles, and late-night on-camera flash" },
@@ -60,6 +62,20 @@ export const SHOT_BLUEPRINTS: ShotBlueprint[] = [
   { id: "up16", bank: "upfront_portrait", level: 1, name: "Low-ledge cleavage lean-in", words: "early-2000s men's-magazine waist-up glamour portrait leaning slightly forward over a low wooden ledge or rail with hands resting naturally flat on the edge, warm tungsten highlight, heavy-lidded direct gaze" },
   { id: "up17", bank: "upfront_portrait", level: 0, name: "Couch-backrest chin prop", words: "cozy close-in bust-up candid kneeling behind a sofa backrest leaning both forearms across the top cushion looking straight over into the camera with a warm mischievous half-smile" },
   { id: "up18", bank: "upfront_portrait", level: 1, name: "One-arm overhead doorframe stretch", words: "thigh-up candid standing angled in a room with one hand raised lightly touching a tall doorframe or bookshelf overhead, lifting her ribcage and curving her waist naturally while her other hand rests softly on her hip" },
+
+  // ── 0B. Diagonal Legs-in-Frame Pinup (12) — 85%+ edge-to-edge rule-of-thirds cover glamour (dry matte, relaxed arms!) ──
+  { id: "dp01", bank: "diagonal_pinup", level: 1, name: "Barstool low-angle leg sweep", words: "tight low-angle diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds framing with her face in the upper-right third, seated sideways on a tall wooden barstool with one shapely thigh and leg propped high sweeping diagonally across the lower-left foreground, relaxed arm resting along her knee or counter edge, warm tungsten rim light" },
+  { id: "dp02", bank: "diagonal_pinup", level: 1, name: "Velvet chaise diagonal leg-up", words: "close-in low-angle diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds composition with her face in the upper-left third, reclining sideways on a plush dark velvet chaise with one bent knee and shapely thigh drawn diagonally across the lower-right foreground, one relaxed forearm resting on the cushion beside her, warm amber lamp glow" },
+  { id: "dp03", bank: "diagonal_pinup", level: 1, name: "Sunlit bench side-recline diagonal", words: "intimate low eye-level diagonal candid filling 90% of the frame edge to edge with minimal empty space, rule-of-thirds composition with her face in the upper-right third, reclining sideways across a cushioned bench propped comfortably on one elbow with her top shapely leg bent forward filling the lower-left foreground, warm afternoon window light" },
+  { id: "dp04", bank: "diagonal_pinup", level: 1, name: "Leather armchair leg drape", words: "tight low-angle diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds composition with her face in the upper-right third, curled sideways in a worn leather armchair with one leg lifted diagonally across the lower-left foreground framing her thigh and curve, relaxed hand resting along the armrest, warm wall-sconce light" },
+  { id: "dp05", bank: "diagonal_pinup", level: 1, name: "Floor tatami / rug side recline", words: "low floor-level diagonal candid filling 90% of the frame edge to edge with zero wasted headroom, rule-of-thirds composition with her face in the upper-left third, reclining sideways on woven tatami or plush floor cushions propped naturally on one forearm with her legs sweeping diagonally across the lower-right foreground, warm lantern or bedside lamp light" },
+  { id: "dp06", bank: "diagonal_pinup", level: 1, name: "Couch corner tucked-knee diagonal", words: "intimate close-in diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds framing with her face in the upper-right third, seated sideways on a dark distressed sofa with one knee bent high across the lower-left foreground and relaxed hands resting along the cushion, moody warm table-lamp light" },
+  { id: "dp07", bank: "diagonal_pinup", level: 1, name: "Vanity edge seated leg-cross", words: "close-in diagonal thigh-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds composition with her face in the upper-left third, perched sideways on a wooden dressing table with knees bent and angled diagonally across the lower-right foreground, leaning gently forward with both hands relaxed on her knee or table edge, warm vanity bulbs behind" },
+  { id: "dp08", bank: "diagonal_pinup", level: 1, name: "Window-sill backlight leg curve", words: "tight close-in diagonal knee-up candid filling 88% of the frame edge to edge with minimal empty space, rule-of-thirds framing with her face in the upper-right third, seated sideways on a deep cushioned window bench with one knee raised diagonally across the lower-left foreground, arms resting relaxed on her leg, golden late-afternoon side light" },
+  { id: "dp09", bank: "diagonal_pinup", level: 1, name: "Bed-corner pillow sprawl diagonal", words: "low intimate diagonal candid filling 90% of the frame edge to edge with minimal headroom, rule-of-thirds composition with her face in the upper-left third, lounging diagonally against plump pillows on rumpled sheets with one shapely thigh angled across the lower-right foreground, one hand resting softly near her collarbone, warm bedside lamp glow" },
+  { id: "dp10", bank: "diagonal_pinup", level: 1, name: "Ottoman low-angle knee frame", words: "tight low-angle diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds composition with her face in the upper-right third, perched low on a velvet ottoman leaning slightly forward with one leg stretched diagonally across the lower-left foreground and hands resting relaxed on her thighs, warm ambient room light" },
+  { id: "dp11", bank: "diagonal_pinup", level: 1, name: "Wooden stair landing diagonal sit", words: "intimate low-angle diagonal thigh-up candid filling 88% of the frame edge to edge with minimal empty space, rule-of-thirds composition with her face in the upper-left third, seated angled sideways across two warm-lit wooden steps with one leg extended down and one bent knee sweeping across the lower-right foreground, hands relaxed on the stair beside her" },
+  { id: "dp12", bank: "diagonal_pinup", level: 1, name: "Balcony lounger dusk leg sweep", words: "close-in diagonal knee-up candid filling 88% of the frame edge to edge with minimal headroom, rule-of-thirds framing with her face in the upper-right third, reclining casually sideways on a cushioned balcony lounger at dusk with one leg bent diagonally across the lower-left foreground and one hand brushing hair off her shoulder, warm amber twilight glow" },
 
   // ── 1. Camera Geometry & Glamour (20) — areyouokay + KaosEngine style ─────────────────────────────
   { id: "cg01", bank: "camera_glamour", level: 0, name: "Waist-high 3/4 turn", words: "waist-up medium shot from a front three-quarter angle with the camera placed at waist height looking slightly upward, shoulders angled diagonally, one hand resting along her hip, chin dipped slightly with heavy-lidded eye contact into the lens" },
@@ -259,24 +275,27 @@ export function resetUsedBlueprints(scope?: string) {
   saveUsed(m);
 }
 
-export type CoverArchetypeId = "upfront" | "selfie" | "creative";
+export type CoverArchetypeId = "upfront" | "selfie" | "creative" | "diagonal";
 export interface CoverArchetypePick {
   style: CoverArchetypeId;
   label: string;
   blueprint: ShotBlueprint;
 }
 
-/** Deal 3 genuinely distinct, non-repeating cover-art blueprints for a character so NO two characters look like a template:
+/** Deal 4 genuinely distinct, non-repeating cover-art blueprints for a character so NO two characters look like a template:
  *  1) Upfront Magnetic Portrait (waist-up / chest-up close-in — arms-up, bar lean, zipper tease, chair straddle, doorframe)
  *  2) Authentic Amateur Selfie / Bedroom Mirror (lived-in bedroom mirror with smartphone OR raw handheld phone candid)
- *  3) Creative Candid / Dynamic Pinup (wide CivitAI repertoire — barstool, prone bed, kneeling, stair glance, crouch, couch) */
-export function pickCoverPackBlueprints(scope = "cover6"): CoverArchetypePick[] {
+ *  3) Creative Candid (wide CivitAI repertoire — doorway turn, stair glance, backwards chair, crouch, window backlight)
+ *  4) Diagonal Legs-in-Frame Pinup (85%+ edge-to-edge rule-of-thirds cover glamour with legs/thighs sweeping lower foreground) */
+export function pickCoverPackBlueprints(scope = "cover8"): CoverArchetypePick[] {
   const [up] = pickFreshBlueprints(["upfront_portrait"], 1, `${scope}:upfront`, 1);
   const [sf] = pickFreshBlueprints(["raw_selfie", "mirror_choreo"], 1, `${scope}:selfie`, 1);
   const [cr] = pickFreshBlueprints(["sexy_cosplay", "camera_glamour"], 1, `${scope}:creative`, 1);
+  const [dg] = pickFreshBlueprints(["diagonal_pinup"], 1, `${scope}:diagonal`, 1);
   return [
     { style: "upfront", label: "Upfront Portrait", blueprint: up ?? SHOT_BLUEPRINTS[0] },
     { style: "selfie", label: "Amateur Selfie", blueprint: sf ?? SHOT_BLUEPRINTS.find((b) => b.id === "rs21")! },
     { style: "creative", label: "Creative Candid", blueprint: cr ?? SHOT_BLUEPRINTS.find((b) => b.bank === "sexy_cosplay")! },
+    { style: "diagonal", label: "Diagonal Pinup", blueprint: dg ?? SHOT_BLUEPRINTS.find((b) => b.bank === "diagonal_pinup")! },
   ];
 }

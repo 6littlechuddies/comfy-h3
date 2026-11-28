@@ -447,7 +447,11 @@ export interface CoverHeroOpts {
   prompt: string;
   /** Optional custom Krea 2 diffusion UNET (e.g. civitai/BSS_DesireX2_INT8_ConvRot.safetensors); defaults to Krea 2 Turbo */
   unet?: string;
+  /** Optional separate UNET for Pass 2 1.4× skin/fabric refine (e.g. stock Krea 2 Turbo after DesireX Pass 1 -> 0% white sweat specks!) */
+  refineUnet?: string;
   loras?: LoraPick[];
+  /** Optional LoRAs for Pass 2 refine (defaults to p.loras when using the same UNET) */
+  refineLoras?: LoraPick[];
   /** Pass 1 steps (default 10 for Krea 2 Turbo, 8 for DesireX) */
   steps?: number;
   width?: number;
@@ -458,8 +462,8 @@ export interface CoverHeroOpts {
   prefix: string;
 }
 
-/** V7 Cover-Art Hero T2I graph (896×1344 er_sde/beta + 1.4× Lanczos pixel-space 4-step crisp refine -> 1256×1880,
- *  fast INT8 attention, CFG 1): shared by Krea 2 Turbo Crisp Photo & BSS_DesireX2 Dry-Matte 6-pack cover factory. */
+/** V7/V8 Cover-Art Hero T2I graph (896×1344 er_sde/beta + 1.4× Lanczos pixel-space 4-step crisp refine -> 1256×1880,
+ *  fast INT8 attention, CFG 1): supports optional Krea 2 Turbo Pass-2 finish on DesireX outputs for 100% speck-free skin! */
 export function buildCoverHero(p: CoverHeroOpts): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
@@ -481,9 +485,18 @@ export function buildCoverHero(p: CoverHeroOpts): ApiGraph {
   if (p.refine !== false) {
     const big = g.add("ImageScaleBy", { image: outImg, upscale_method: "lanczos", scale_by: 1.4 });
     const enc2 = g.add("VAEEncode", { pixels: o(big), vae: o(vae) });
+    let refineModel = model;
+    if (p.refineUnet && p.refineUnet !== (p.unet || M.kreaUnet)) {
+      const u2 = g.add("UNETLoader", { unet_name: p.refineUnet, weight_dtype: "default" });
+      let m2: Link = o(u2);
+      for (const l of activeLoras(p.refineLoras ?? [])) {
+        m2 = o(g.add("LoraLoaderModelOnly", { model: m2, lora_name: l.name, strength_model: l.strength }));
+      }
+      refineModel = fastAttn(g, m2);
+    }
     const ks2 = g.add("KSampler", {
-      model, seed: p.seed + 7, steps: 4, cfg: 1, sampler_name: "euler", scheduler: "simple",
-      positive: o(pos), negative: o(neg), latent_image: o(enc2), denoise: 0.24,
+      model: refineModel, seed: p.seed + 7, steps: 4, cfg: 1, sampler_name: "euler", scheduler: "simple",
+      positive: o(pos), negative: o(neg), latent_image: o(enc2), denoise: p.refineUnet ? 0.22 : 0.24,
     });
     outImg = o(g.add("VAEDecode", { samples: o(ks2), vae: o(vae) }));
   }

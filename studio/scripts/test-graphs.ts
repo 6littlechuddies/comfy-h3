@@ -55,7 +55,7 @@ const cases: [string, ApiGraph][] = [
   ["v9 master pack shot", buildMasterPackShot({ cutoutImage: "test.png", instruction: "High-angle candid phone selfie", seed: 7, prefix: "studio/packs/x/v9_selfies_1", refBoost: 1.28, loras: lora })],
   ["v9 master pack shot (v4 pixel body polish)", buildMasterPackShot({ cutoutImage: "test.png", instruction: "Mirror lace corset tease", seed: 7, prefix: "studio/packs/x/v9_mirror_1", refBoost: 1.45, loras: lora, bodyPolish: { scale: 1.4, denoise: 0.14, steps: 4 } })],
   ["v7 cover hero (krea 2 turbo crisp refine)", buildCoverHero({ prompt: "Upfront candid portrait in warm light, clean dry matte natural skin", steps: 10, seed: 7, prefix: "studio/packs/x/cover_upfront_krea2", loras: lora })],
-  ["v7 cover hero (desirex dry matte refine)", buildCoverHero({ prompt: "Amateur bedroom mirror selfie, clean dry matte natural skin", unet: "civitai/BSS_DesireX2_INT8_ConvRot.safetensors", steps: 8, seed: 8, prefix: "studio/packs/x/cover_selfie_desirex", loras: lora })],
+  ["v7 cover hero (desirex dry matte + krea refine)", buildCoverHero({ prompt: "Amateur bedroom mirror selfie, clean dry matte natural skin", unet: "civitai/BSS_DesireX2_INT8_ConvRot.safetensors", refineUnet: "krea2_turbo_fp8_scaled.safetensors", steps: 8, seed: 8, prefix: "studio/packs/x/cover_selfie_desirex", loras: lora })],
 ];
 const a = { sampler: "er_sde", scheduler: "beta", steps: 10, seed: 42, prompt: "<Picture 1> dances", seconds: 10, width: 1344, height: 768, loras: lora, refImageSize: "match" as const, prefix: "studio/animate/a" };
 cases.push(

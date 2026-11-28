@@ -403,8 +403,8 @@ function V9MasterPackBox() {
   );
 }
 
-/** 1-click Cover-Art 6-Pack Factory: generates 3 genuinely different CivitAI pose styles (Upfront Portrait, Amateur Mirror/Selfie,
- *  Creative Candid) × 2 engines (Krea 2 Turbo + DesireX dry-matte) per character, streaming live across multi-GPU pods! */
+/** 1-click Cover-Art 8-Pack Factory: generates 4 genuinely different CivitAI pose styles (Upfront Portrait, Amateur Mirror/Selfie,
+ *  Creative Candid, 85% Diagonal Legs-in-Frame Pinup) × 2 engines (Krea 2 Turbo + DesireX w/ Krea 2 Pass-2 zero-speck refine) per character! */
 function CoverArt6PackBox() {
   const chars = useCharacters(useShallow((s) => s.list.filter(isAdult)));
   const sel = useCharacters((s) => s.sel);
@@ -417,11 +417,11 @@ function CoverArt6PackBox() {
 
   const pickedChars = chars.filter((c) => who.includes(c.id));
   const cosplayIds = chars.filter((c) => /^Cosplay of /i.test(c.source ?? "")).map((c) => c.id);
-  const perChar = includeDesireX ? 6 : 3;
+  const perChar = includeDesireX ? 8 : 4;
   const totalPics = pickedChars.length * perChar;
 
   const go = async () => {
-    setBusy("Starting Cover-Art 6-Pack…");
+    setBusy("Starting Cover-Art 8-Pack…");
     try {
       const { planAndQueueCoverPack } = await import("../lib/coverPack");
       const r = await planAndQueueCoverPack(pickedChars, { includeDesireX, stageToLocalSet, review }, setBusy);
@@ -444,7 +444,7 @@ function CoverArt6PackBox() {
   return (
     <div className="flex flex-col gap-2.5 rounded-lg border border-accent/55 bg-accent/[.05] p-3 text-[12.5px]">
       <div className="flex flex-wrap items-center gap-2">
-        <b className="font-medium text-ink">Cover-Art 6-Pack · 3 styles × Krea 2 &amp; DesireX</b>
+        <b className="font-medium text-ink">Cover-Art 8-Pack · 4 styles × Krea 2 &amp; DesireX</b>
         <span className="ml-auto flex items-center gap-2 text-[11.5px]">
           {cosplayIds.length > 0 && cosplayIds.length < chars.length && (
             <button onClick={() => setWho(cosplayIds)} className="text-muted hover:text-ink hover:underline" title="Select all realistic cosplays">
@@ -459,7 +459,7 @@ function CoverArt6PackBox() {
         </span>
       </div>
       <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
-        Blazes across all GPUs: draws 3 distinct non-repeating CivitAI poses per character (<b>Upfront Portrait</b> · <b>Amateur Selfie/Mirror</b> · <b>Creative Candid</b>), dry-matte skin guard on DesireX (zero sweat droplets), tagged straight into each character's Catalog folder.
+        Blazes across all GPUs: draws 4 distinct non-repeating CivitAI poses per character (<b>Upfront Portrait</b> · <b>Amateur Selfie/Mirror</b> · <b>Creative Candid</b> · <b>85% Diagonal Legs-in-Frame</b>), dry-matte skin guard + Krea 2 Pass-2 speck-free finish on DesireX, tagged straight into each character's Catalog folder.
       </p>
       <div className="flex max-h-36 flex-wrap gap-1 overflow-y-auto">
         {chars.map((c) => {
@@ -482,11 +482,11 @@ function CoverArt6PackBox() {
       <div className="flex flex-col gap-1.5">
         <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
           <input type="checkbox" className="mt-0.5" checked={includeDesireX} onChange={(e) => setIncludeDesireX(e.target.checked)} />
-          <span>Run both <b>Krea 2 Turbo</b> + <b>DesireX (dry matte)</b> = <b>6 covers/char</b> (uncheck for 3 Krea 2 only)</span>
+          <span>Run both <b>Krea 2 Turbo</b> + <b>DesireX (Krea-refined dry matte)</b> = <b>8 covers/char</b> (uncheck for 4 Krea 2 only)</span>
         </label>
         <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
           <input type="checkbox" className="mt-0.5" checked={stageToLocalSet} onChange={(e) => setStageToLocalSet(e.target.checked)} />
-          <span>Stage into local <b>Cover Art Candidates (V7)</b> set in Your site (never overwrites live card/cover)</span>
+          <span>Stage into local <b>Cover Art Candidates (V8)</b> set in Your site (never overwrites live card/cover)</span>
         </label>
         <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
           <input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => setReview(e.target.checked)} />

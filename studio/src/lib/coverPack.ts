@@ -1,8 +1,11 @@
-// V7 Cover-Art 6-Pack Factory: 1-click multi-GPU cover generator for 1 or 100+ characters.
-// Generates 3 genuinely distinct, non-repeating pose styles drawn across our 140+ CivitAI-mined blueprint repertoire
-// (1. Upfront Magnetic Portrait · 2. Amateur Bedroom Mirror / Handheld Selfie · 3. Creative Dynamic Candid)
-// across 2 engines (Krea 2 Turbo Crisp Photo + BSS_DesireX2 Dry-Matte = 6 covers/char, or 3 Krea-only).
-// Streams straight into ComfyUI's multi-GPU router so an 8× RTX 5090 pod blazes at 100% saturation!
+// V8 Cover-Art 8-Pack Factory: 1-click multi-GPU cover generator for 1 or 100+ characters.
+// Generates 4 genuinely distinct, non-repeating pose styles drawn across our 154+ CivitAI-mined blueprint repertoire:
+//   1. Upfront Magnetic Portrait (waist-up / chest-up close-in — arms-up, bar lean, zipper tease)
+//   2. Amateur Bedroom Mirror / Handheld Selfie (lived-in bedroom mirror with phone OR raw candid phone snap)
+//   3. Creative Candid (wide CivitAI repertoire — doorway turn, staircase glance, backwards chair, window light)
+//   4. Diagonal Legs-in-Frame Pinup (85%+ edge-to-edge rule-of-thirds seated/reclining leg glamour)
+// across 2 engines (Krea 2 Turbo Crisp Photo + BSS_DesireX2 Dry-Matte finished with Krea 2 Pass-2 zero-speck refine
+// = 8 covers/char, or 4 Krea-only). Streams straight into ComfyUI's multi-GPU router for 100% 8× RTX 5090 saturation!
 import { comboOptions, listLoras } from "./api";
 import { newGroup, newRow, queueAll, useBatch, type Row } from "./batch";
 import { pickCoverPackBlueprints, type CoverArchetypeId, type CoverArchetypePick } from "./blueprints";
@@ -19,7 +22,7 @@ const LORA_SNAP_V1 = "civitai/RealisticSnapshotKrea2.safetensors";
 const DESIREX_CANDIDATES = ["civitai/BSS_DesireX2_INT8_ConvRot.safetensors"];
 
 export interface CoverPackOpts {
-  /** Generate both Krea 2 Turbo + DesireX (6 covers/char) when DesireX is installed; false = Krea 2 only (3/char) */
+  /** Generate both Krea 2 Turbo + DesireX (8 covers/char) when DesireX is installed; false = Krea 2 only (4/char) */
   includeDesireX: boolean;
   /** Stage finished candidates into a local "Cover Art Candidates" free set in Your site (NEVER overwrites live card/cover!) */
   stageToLocalSet: boolean;
@@ -95,19 +98,22 @@ export function buildCoverPackPlanPrompt(c: Character, picks: CoverArchetypePick
   const byStyle = Object.fromEntries(picks.map((p) => [p.style, p])) as Record<CoverArchetypeId, CoverArchetypePick>;
 
   return (
-    `Write 3 completely different, high-charm, scroll-stopping SFW/teasing cover-art photo prompts for ${disp} (${identity}).\n` +
+    `Write 4 completely different, high-charm, scroll-stopping SFW/teasing cover-art photo prompts for ${disp} (${identity}).\n` +
     `Her world / vibe: ${world}.\n\n` +
-    `Output ONLY valid JSON with these exact 3 keys: {"upfront": "...", "selfie": "...", "creative": "..."}\n\n` +
-    `THE 3 VARIATIONS MUST LOOK UNMISTAKABLY DIFFERENT FROM ONE ANOTHER (never repeat the same seated-leg or standing template!):\n` +
-    `1. "upfront" (Upfront Magnetic Portrait — waist-up or chest-up close-in portrait; NO lifted thigh required!):\n` +
+    `Output ONLY valid JSON with these exact 4 keys: {"upfront": "...", "selfie": "...", "creative": "...", "diagonal": "..."}\n\n` +
+    `THE 4 VARIATIONS MUST LOOK UNMISTAKABLY DIFFERENT FROM ONE ANOTHER:\n` +
+    `1. "upfront" (Upfront Magnetic Portrait — waist-up or chest-up close-in portrait; zero leg-template):\n` +
     `   Follow this fresh CivitAI camera & pose blueprint: [${byStyle.upfront.blueprint.name}] ${byStyle.upfront.blueprint.words}\n` +
     `   Set in a rich, atmospheric real-world spot from her world with warm practical lighting.\n\n` +
     `2. "selfie" (Authentic Amateur Mirror / Handheld Selfie — everyday girlfriend charm in her full outfit/cosplay):\n` +
     `   Follow this fresh CivitAI camera & pose blueprint: [${byStyle.selfie.blueprint.name}] ${byStyle.selfie.blueprint.words}\n` +
-    `   Set in a real lived-in bedroom, messy dorm/apartment mirror, or warm bathroom vanity (only hold a smartphone if it is a mirror selfie; for front-camera selfies keep hands empty!).\n\n` +
-    `3. "creative" (Creative Candid / Dynamic Pinup — expressive, varied full-body or 3/4 framing from her world):\n` +
+    `   Set in a real lived-in bedroom, messy apartment mirror, or warm bathroom vanity (only hold a smartphone if it is a mirror selfie; for front-camera selfies keep hands empty!).\n\n` +
+    `3. "creative" (Creative Candid — expressive, varied full-body or 3/4 framing from her world, NOT a seated diagonal leg pose):\n` +
     `   Follow this fresh CivitAI camera & pose blueprint: [${byStyle.creative.blueprint.name}] ${byStyle.creative.blueprint.words}\n` +
     `   Set in a DIFFERENT real-world location fitting her story or vibe with warm natural or practical light.\n\n` +
+    `4. "diagonal" (Diagonal Legs-in-Frame Pinup — 85%+ edge-to-edge rule-of-thirds cover glamour with face in upper third and thighs/legs sweeping across the lower foreground):\n` +
+    `   Follow this fresh CivitAI camera & pose blueprint: [${byStyle.diagonal.blueprint.name}] ${byStyle.diagonal.blueprint.words}\n` +
+    `   Set in a warm, moody interior or iconic spot from her world with minimal empty ceiling space.\n\n` +
     "STRICT QUALITY & ANATOMY RULES:\n" +
     "- 80–120 words per prompt, flowing natural photography English, positive-only wording (never write 'no X').\n" +
     "- SFW COVER-SAFE & HIGH SEX APPEAL: seductive gaze, natural curves, neckline/cleavage tease, figure-flattering posture — keep breasts/nipples covered by her outfit so every candidate works as a public site card.\n" +
@@ -126,20 +132,20 @@ async function planCharacterCovers(c: Character, picks: CoverArchetypePick[]): P
       class_type: "LLMTextProcessor",
       inputs: {
         model: M.llmBig, mmproj: "none", system_prompt: "none", prompt,
-        max_tokens: 1800, temperature: 0.85, top_p: 0.9, top_k: 40, repeat_penalty: 1.05,
+        max_tokens: 2400, temperature: 0.85, top_p: 0.9, top_k: 40, repeat_penalty: 1.05,
         ctx_size: 12288, memory_mode: "auto", n_gpu_layers: 99, n_cpu_moe_layers: 1,
         seed: newSeed() % 2 ** 31, timeout_seconds: 240, reasoning: "off",
       },
     },
     "2": { class_type: "PreviewAny", _meta: { title: "covers" }, inputs: { source: ["1", 0] } },
   };
-  const job = await useJobs.getState().run("batch", `Cover 6-Pack plan · ${disp}`, graph, "writer:cover6", { quiet: true, front: true, noTray: true, project: c.id });
+  const job = await useJobs.getState().run("batch", `Cover 8-Pack plan · ${disp}`, graph, "writer:cover8", { quiet: true, front: true, noTray: true, project: c.id });
   const done = await waitForJob(job.id);
   const raw = (done.texts.covers ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
   if (!raw) throw new Error(`${disp}: cover planner returned empty output`);
   const parsed = looseJson<Record<string, unknown>>(raw);
   const out = {} as Record<CoverArchetypeId, string>;
-  for (const k of ["upfront", "selfie", "creative"] as CoverArchetypeId[]) {
+  for (const k of ["upfront", "selfie", "creative", "diagonal"] as CoverArchetypeId[]) {
     const v = String(parsed[k] ?? "").trim();
     if (v) out[k] = sanitizeDrySkin(v, false);
   }
@@ -147,7 +153,7 @@ async function planCharacterCovers(c: Character, picks: CoverArchetypePick[]): P
   return out;
 }
 
-/** Plan & queue 6 diverse Cover-Art Hero candidates per character (3 CivitAI styles × Krea 2 Turbo + DesireX)
+/** Plan & queue 8 diverse Cover-Art Hero candidates per character (4 CivitAI styles × Krea 2 Turbo + DesireX w/ Krea 2 Pass-2 zero-speck refine)
  *  with 8-worker parallel DeepSeek planning & immediate streaming dispatch across all GPUs! */
 export async function planAndQueueCoverPack(
   chars: Character[],
@@ -166,17 +172,18 @@ export async function planAndQueueCoverPack(
     installedLoras,
   );
   const desireLoras = resolveLoras([[LORA_REALISM, 0.40]], installedLoras);
+  const kreaRefineLoras = resolveLoras([[LORA_REALISM, 0.45]], installedLoras);
 
   const runTs = Math.floor(Date.now() / 1000);
-  const group = newGroup(`Cover-Art ${desireXUnet ? "6-Pack" : "3-Pack"} (${chars.length} char${chars.length === 1 ? "" : "s"})`);
+  const group = newGroup(`Cover-Art ${desireXUnet ? "8-Pack" : "4-Pack"} (${chars.length} char${chars.length === 1 ? "" : "s"})`);
   const failed: string[] = [];
   let totalRows = 0;
   let totalJobs = 0;
   let doneCount = 0;
   let cursor = 0;
 
-  // Pre-deal unique non-repeating 3-style blueprints sequentially so no two characters share a pose
-  const dealt = chars.map(() => pickCoverPackBlueprints("cover6"));
+  // Pre-deal unique non-repeating 4-style blueprints sequentially so no two characters share a pose
+  const dealt = chars.map(() => pickCoverPackBlueprints("cover8"));
 
   const b = useBatch.getState();
   b.set({ target: "image" });
@@ -190,17 +197,17 @@ export async function planAndQueueCoverPack(
       const c = chars[idx];
       const disp = c.site?.name || c.name;
       const slug = slugOf(c);
-      onStep(`Planning Cover ${desireXUnet ? "6-Pack" : "3-Pack"} (${doneCount + 1}/${chars.length}: ${disp})…`);
+      onStep(`Planning Cover ${desireXUnet ? "8-Pack" : "4-Pack"} (${doneCount + 1}/${chars.length}: ${disp})…`);
       try {
         const plan = await planCharacterCovers(c, dealt[idx]);
         const charRows: Partial<Row>[] = [];
-        const setKey = `free-v7-covers-${runTs}`;
+        const setKey = `free-v8-covers-${runTs}`;
         for (const pick of dealt[idx]) {
           const basePrompt = plan[pick.style];
           if (!basePrompt) continue;
-          const engines: { tag: string; label: string; unet?: string; steps: number; loras: LoraPick[]; prompt: string }[] = [
+          const engines: { tag: string; label: string; unet?: string; refineUnet?: string; refineLoras?: LoraPick[]; steps: number; loras: LoraPick[]; prompt: string }[] = [
             { tag: "krea2", label: "Krea 2", unet: undefined, steps: 10, loras: kreaLoras, prompt: sanitizeDrySkin(basePrompt, false) },
-            ...(desireXUnet ? [{ tag: "desirex", label: "DesireX", unet: desireXUnet, steps: 8, loras: desireLoras, prompt: sanitizeDrySkin(basePrompt, true) }] : []),
+            ...(desireXUnet ? [{ tag: "desirex", label: "DesireX", unet: desireXUnet, refineUnet: M.kreaUnet, refineLoras: kreaRefineLoras, steps: 8, loras: desireLoras, prompt: sanitizeDrySkin(basePrompt, true) }] : []),
           ];
           for (const eng of engines) {
             charRows.push({
@@ -211,11 +218,13 @@ export async function planAndQueueCoverPack(
               takes: 1,
               loras: eng.loras,
               group,
-              ...(opts.stageToLocalSet ? { toSet: { title: "Cover Art Candidates (V7)", tier: "free", rating: "suggestive", setKey } } : {}),
+              ...(opts.stageToLocalSet ? { toSet: { title: "Cover Art Candidates (V8)", tier: "free", rating: "suggestive", setKey } } : {}),
               cover: {
                 style: pick.style,
                 engine: eng.tag,
                 unet: eng.unet,
+                refineUnet: eng.refineUnet,
+                refineLoras: eng.refineLoras,
                 steps: eng.steps,
                 prefix: `studio/packs/${slug}/cover_${pick.style}_${eng.tag}`,
                 label: `${disp} · Cover (${pick.label} · ${eng.label})`,
