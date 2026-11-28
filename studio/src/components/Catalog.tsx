@@ -60,21 +60,81 @@ function CatalogPanel() {
   const close = () => useCatalog.setState({ open: false });
   useEffect(() => () => { remakeUnsubs.current.forEach((u) => u()); remakeUnsubs.current = []; }, []);
   const req = useRef(0);
-  const load = async (offset: number) => {
+  const itemsRef = useRef<CatItem[]>([]);
+  itemsRef.current = items;
+  const loadingRef = useRef(false);
+  loadingRef.current = loading;
+  const remakingRef = useRef(remaking);
+  remakingRef.current = remaking;
+  const load = async (offset: number, silent = false) => {
+    if (silent && loadingRef.current) return;
     const my = ++req.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
-      const qs = new URLSearchParams({ offset: String(offset), limit: "150", ...(folder ? { folder } : {}), ...(kind ? { kind } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...(onlyFav ? { fav: "1" } : {}) });
+      const limit = silent ? Math.max(150, itemsRef.current.length) : 150;
+      const qs = new URLSearchParams({ offset: String(offset), limit: String(limit), ...(folder ? { folder } : {}), ...(kind ? { kind } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...(onlyFav ? { fav: "1" } : {}) });
       const r = await fetch(`/studio-api/catalog?${qs}`);
       if (!r.ok) throw new Error(`The rental answered ${r.status}`);
       const d = await r.json();
       if (my !== req.current) return;
-      setItems((old) => (offset ? [...old, ...d.items] : d.items)); setTotal(d.total); setFolders(d.folders); setErr("");
-      // the project's folder doesn't exist yet (nothing made there): show everything
-      if (!offset && folder && !folder.split("\n").some((k) => d.folders.some((f: { name: string }) => f.name === k))) setFolder("");
-    } catch (e) { if (my === req.current) setErr((e as Error).message); } finally { if (my === req.current) setLoading(false); }
+      if (silent && offset === 0) {
+        const prev = itemsRef.current;
+        const incoming: CatItem[] = d.items ?? [];
+        const changed =
+          incoming.length !== prev.length ||
+          incoming.some((it, idx) => !prev[idx] || fileKey(it) !== fileKey(prev[idx]) || it.mtime !== prev[idx].mtime || it.meta?.project !== prev[idx].meta?.project);
+        if (changed) {
+          // Keep any card currently mid-remake stable while smoothly prepending/updating new arrivals
+          const activeRemakes = remakingRef.current;
+          setItems(incoming.map((it) => {
+            const k = fileKey(it);
+            if (!activeRemakes[k]) return it;
+            return prev.find((x) => fileKey(x) === k) ?? it;
+          }));
+        }
+        setTotal((old) => (old === d.total ? old : d.total));
+        setFolders((old) => {
+          const next: Folder[] = d.folders ?? [];
+          if (old.length === next.length && old.every((f, idx) => f.name === next[idx]?.name && f.count === next[idx]?.count)) return old;
+          return next;
+        });
+        setErr("");
+      } else {
+        setItems((old) => (offset ? [...old, ...d.items] : d.items)); setTotal(d.total); setFolders(d.folders); setErr("");
+        // the project's folder doesn't exist yet (nothing made there): show everything
+        if (!offset && folder && !folder.split("\n").some((k) => d.folders.some((f: { name: string }) => f.name === k))) setFolder("");
+      }
+    } catch (e) { if (my === req.current && !silent) setErr((e as Error).message); } finally { if (my === req.current && !silent) setLoading(false); }
   };
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => { const t = setTimeout(() => load(0), q ? 300 : 0); return () => clearTimeout(t); }, [folder, kind, q, onlyFav]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Live auto-refresh: silently pull newly generated photos every 4 s while visible, on tab focus, and whenever a job finishes
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const ping = () => {
+      if (document.hidden) return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => void loadRef.current(0, true), 350);
+    };
+    const poll = setInterval(() => { if (!document.hidden) void loadRef.current(0, true); }, 4000);
+    const onVis = () => { if (!document.hidden) ping(); };
+    window.addEventListener("focus", ping);
+    document.addEventListener("visibilitychange", onVis);
+    let prevDone = new Set(useJobs.getState().jobs.filter((j) => j.status === "done").map((j) => j.id));
+    const unsubJobs = useJobs.subscribe((st) => {
+      const doneIds = st.jobs.filter((j) => j.status === "done").map((j) => j.id);
+      if (doneIds.some((id) => !prevDone.has(id))) ping();
+      prevDone = new Set(doneIds);
+    });
+    return () => {
+      clearInterval(poll);
+      if (debounce) clearTimeout(debounce);
+      window.removeEventListener("focus", ping);
+      document.removeEventListener("visibilitychange", onVis);
+      unsubJobs();
+    };
+  }, []);
   // a menu action that takes you to a tab (Use in Edit, Animate it…): the catalog steps aside
   useEffect(() => useSettings.subscribe((st, prev) => { if (st.s.tab !== prev.s.tab) close(); }), []);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("[aria-label='Picture viewer']")) { if (Object.keys(picked).length) setPicked({}); else close(); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [picked]);
@@ -274,6 +334,7 @@ function CatalogPanel() {
         <button onClick={() => void import("../lib/cosplayRun").then((m) => m.openCosplays())} title="Every cosplay in your results: made, named and written with one button, then pick each one's main picture"
           className="press chip-raised flex h-9 items-center gap-1.5 rounded-sm px-3 text-[12.5px]"><Icon name="sparkle" size={13} /> Cosplays</button>
         <CatalogMore chars={chars} onDone={() => load(0)} />
+        <button aria-label="Refresh catalog" title="Refresh now (also auto-updates every 4 seconds)" onClick={() => void load(0, true)} className="press btn-raised flex h-9 items-center gap-1 px-2.5 text-[12px] text-muted hover:text-ink">↻</button>
         <button aria-label="Close" onClick={close} className="press btn-raised flex h-9 w-9 items-center justify-center text-muted hover:text-ink"><Icon name="x" size={15} /></button>
       </div>
       <div className="flex min-h-0 flex-1">

@@ -3303,14 +3303,23 @@ def _redact(t: str) -> str:
     return t
 
 
+def _rate_limited(out: str) -> bool:
+    """transient per-minute Google Drive API rate-limit (NOT a full drive — Google includes 'quota_unit' in 403 rateLimitExceeded)"""
+    return bool(re.search(r"RATE_LIMIT_EXCEEDED|rateLimitExceeded|userRateLimitExceeded|quota_unit|1/min/", out or "", re.I))
+
+
 def _full(out: str) -> bool:
-    """rclone's words for a drive with no space left (Google: storageQuotaExceeded / quota; Proton: insufficient storage)"""
-    return bool(re.search(r"storageQuotaExceeded|quota|insufficient storage|no space left|storage (is )?full|exceeded.*storage", out or "", re.I))
+    """rclone's words for a drive with no space left (Google: storageQuotaExceeded; Proton: insufficient storage).
+    Explicitly excludes transient per-minute API rate limits whose JSON body mentions 'quota_unit'."""
+    if _rate_limited(out): return False
+    return bool(re.search(r"storageQuotaExceeded|insufficient storage|no space left|storage (is )?full|exceeded.*storage|quota.*exceeded", out or "", re.I))
 
 
 def _why_drive(out: str) -> str:
     """rclone's sign-in errors in plain words, put in front of the raw message (which gets cut off)"""
     o = out or ""
+    if _rate_limited(o):
+        return "GOOGLE DRIVE RATE-LIMITED briefly (your drive is NOT full) — automatically retrying on the next backup. "
     if re.search(r"invalid_grant|token has been expired or revoked|Token has been revoked", o, re.I):
         return ("DRIVE SIGN-IN EXPIRED OR REVOKED — run \"Connect Google Drive.bat\" again on your PC and put the new token in "
                 "GDRIVE_TOKEN (if your Google Cloud app is still in Testing, tokens die after 7 days: set it to In production). ")
@@ -3846,7 +3855,7 @@ async def proton_sync(full: bool = False, force: bool = False) -> None:
         if not err: await _proton_prune(folder)
         src = os.path.join(OUTPUT, "studio")
         if os.path.isdir(src):
-            args = ["copy", src, f"proton:{folder}/results", "--transfers", "6", "--checkers", "8", "--retries", "3", "--low-level-retries", "5"]
+            args = ["copy", src, f"proton:{folder}/results", "--transfers", "4", "--checkers", "8", "--retries", "3", "--retries-sleep", "5s", "--low-level-retries", "15"]
             # only what's new since the last run that WORKED (+15 min margin) — a fixed window used to drop every result
             # made during a failing stretch (drive full, sign-in expired): once they aged past it they were never sent
             if not full and PROTON.get("last_ok"):

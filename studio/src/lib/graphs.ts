@@ -311,13 +311,15 @@ export interface MasterPackNudeCutoutOpts {
   stripDesc?: string;
   /** Preferred NSFW UNET (e.g. FinePorn_V_fp8 / BSS_DesireX2_INT8_ConvRot); falls back to stock Krea 2 Turbo */
   unet?: string;
+  /** V6 SAM 3 pre-blank: detect clothes/gloves/shorts/choker and paint #808080 BEFORE General Edit V2 so zero cuffs or shorts survive */
+  sam3Clean?: boolean;
   seed: number;
   prefix: string;
 }
 
-/** V4 1-time In-Place Nude Body #808080 Cutout (krea2_general_edit_v2, ref_boost=1.0, 8 steps -> BiRefNet HR-matting):
- *  strips ONLY clothes/straps/gloves directly on the Gen-0 clothed cutout so face, makeup, eye color & full bust stay
- *  100% pixel-aligned with zero clothing left to bleed under towels, corsets, slip dresses, or lifted shirts. */
+/** V6 1-time In-Place Nude Body #808080 Cutout (optional SAM 3 clothing/glove pre-blank -> krea2_general_edit_v2,
+ *  ref_boost=1.0, 8 steps, purely positive bare-skin wording -> BiRefNet HR-matting): strips clothes/straps/gloves/shorts
+ *  directly on the Gen-0 clothed cutout so face, makeup, eye color & full bust stay 100% pixel-aligned with zero wardrobe bleed. */
 export function buildMasterPackNudeCutout(p: MasterPackNudeCutoutOpts): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
@@ -327,20 +329,37 @@ export function buildMasterPackNudeCutout(p: MasterPackNudeCutoutOpts): ApiGraph
   const vae = g.add("VAELoader", { vae_name: M.kreaVae });
   const ref = g.add("LoadImage", { image: p.clothedCutoutImage });
   const sc = g.add("ImageScaleToTotalPixels", { image: o(ref), upscale_method: "lanczos", megapixels: 1.0, resolution_steps: 16 });
-  const lat = g.add("VAEEncode", { pixels: o(sc), vae: o(vae) });
+  let srcImg: Link = o(sc);
+  if (p.sam3Clean) {
+    const sz = g.add("GetImageSize", { image: o(sc) });
+    const sam = g.add("CheckpointLoaderSimple", { ckpt_name: M.sam3 });
+    const txtC = g.add("CLIPTextEncode", {
+      text: "clothing, top, shirt, tank top, bra, harness, straps, leather glove, arm guard, gauntlet, skirt, shorts, jeans, jacket, bodysuit, choker",
+      clip: o(sam, 1),
+    });
+    const det = g.add("SAM3_Detect", {
+      model: o(sam, 0), image: o(sc), conditioning: o(txtC), threshold: 0.25, refine_iterations: 2, individual_masks: false,
+    });
+    const grown = g.add("GrowMask", { mask: o(det, 0), expand: 18, tapered_corners: true });
+    const grey = g.add("EmptyImage", { width: o(sz, 0), height: o(sz, 1), batch_size: 1, color: 0x808080 });
+    srcImg = o(g.add("ImageCompositeMasked", {
+      destination: o(sc), source: o(grey), x: 0, y: 0, resize_source: false, mask: o(grown),
+    }));
+  }
+  const lat = g.add("VAEEncode", { pixels: srcImg, vae: o(vae) });
   const patched = g.add("Krea2EditModelPatch", {
     model, source_latent: o(lat), ref_boost: 1, ref_boost_a: 1, fit_mode: "fit",
-    vae: o(vae), source_image: o(sc), target_latent: o(lat),
+    vae: o(vae), source_image: srcImg, target_latent: o(lat),
   });
-  const strip = p.stripDesc?.trim() || "all of her clothing, top, bra, straps, harness, gloves, necklace, skirt, and accessories";
+  // Purely positive bare-skin wording (semantic deletion: never name banned gloves/straps/shorts that leak back into attention)
   const prompt =
-    `Completely undress this exact adult woman in place: remove ${strip} completely so she is completely naked ` +
-    `with bare shoulders, bare neck, full natural bare breasts with realistic nipples, bare midriff, bare hips, ` +
-    `bare arms, and bare hands, wearing zero clothing, zero gloves, zero straps, zero necklaces, and zero accessories. ` +
-    `Keep her exact face, natural eye color, eyebrows, makeup, freckles, lips, expression, hairstyle, head angle, pose, framing, ` +
-    `full natural bust proportions, soft lighting, and plain neutral grey studio background completely unchanged.`;
-  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt, grounding_px: 768, system_prompt: "", image: o(sc) });
-  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(sc) });
+    "Clean studio nude reference photograph of this exact adult woman keeping her exact face, natural eye color, eyebrows, " +
+    "makeup, freckles, lips, expression, hairstyle, and head angle untouched, completely naked bare smooth human skin everywhere " +
+    "below her chin: bare neck, bare shoulders, completely bare upper arms, bare elbows, bare forearms, bare wrists, bare hands, " +
+    "full natural bare breasts with realistic nipples, toned bare midriff, bare waist, and bare curving hips against a plain " +
+    "seamless neutral grey studio background, soft natural daylight.";
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt, grounding_px: 768, system_prompt: "", image: srcImg });
+  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: srcImg });
   const ks = g.add("KSampler", {
     model: o(patched), seed: p.seed, steps: 8, cfg: 1, sampler_name: "euler", scheduler: "simple",
     positive: o(pos), negative: o(neg), latent_image: o(lat), denoise: 1,

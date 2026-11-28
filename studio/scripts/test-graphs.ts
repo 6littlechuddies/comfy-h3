@@ -51,7 +51,8 @@ const cases: [string, ApiGraph][] = [
   ["cutout", buildCutout("test.png", "studio/characters/x_cutout")],
   ["v9 master pack cutout (birefnet)", buildMasterPackCutout("test.png", "studio/_work/v9_cutout_x", "birefnet")],
   ["v9 master pack in-place nude cutout (v4)", buildMasterPackNudeCutout({ clothedCutoutImage: "test.png", seed: 7, prefix: "studio/_work/v9_nude_x" })],
-  ["v9 master pack shot", buildMasterPackShot({ cutoutImage: "test.png", instruction: "High-angle candid phone selfie", seed: 7, prefix: "studio/packs/x/v9_selfies_1", refBoost: 1.42, loras: lora })],
+  ["v9 master pack SAM3-cleaned nude cutout (v6)", buildMasterPackNudeCutout({ clothedCutoutImage: "test.png", sam3Clean: true, seed: 7, prefix: "studio/_work/v9_nude_sam3_x" })],
+  ["v9 master pack shot", buildMasterPackShot({ cutoutImage: "test.png", instruction: "High-angle candid phone selfie", seed: 7, prefix: "studio/packs/x/v9_selfies_1", refBoost: 1.28, loras: lora })],
   ["v9 master pack shot (v4 pixel body polish)", buildMasterPackShot({ cutoutImage: "test.png", instruction: "Mirror lace corset tease", seed: 7, prefix: "studio/packs/x/v9_mirror_1", refBoost: 1.45, loras: lora, bodyPolish: { scale: 1.4, denoise: 0.14, steps: 4 } })],
 ];
 const a = { sampler: "er_sde", scheduler: "beta", steps: 10, seed: 42, prompt: "<Picture 1> dances", seconds: 10, width: 1344, height: 768, loras: lora, refImageSize: "match" as const, prefix: "studio/animate/a" };

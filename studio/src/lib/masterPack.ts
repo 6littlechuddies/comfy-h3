@@ -339,8 +339,8 @@ export function buildMasterPackPlanPrompt(c: Character, selectedKeys: MasterPack
     `Output ONLY valid JSON with these exact keys and 4 shot strings each: ${schema}\n\n` +
     `${sections}\n\n` +
     (freshCues ? `FRESH NON-REPEATING CAMERA & POSE INSPIRATION FOR THIS RUN (borrow distinct camera heights, angles, hand placement, and warm lighting from these so every shot feels fresh and unrepetitive — adapt strictly to ${disp}'s own room & body):\n${freshCues}\n\n` : "") +
-    "CAMERA & VISUAL STYLE (CRITICAL — RAW AMATEUR HANDHELD LOOK, NOT PROFESSIONALLY SHOT!):\n" +
-    "Every single shot MUST look like a real, raw, candid amateur phone photo she snapped herself or a partner snapped handheld in the moment — arm's-length outstretched angles, low-hip upward angles, bird's-eye slightly-from-above angles, tilted raw bedroom/home lighting, authentic candid iPhone/digicam snap feel, natural imperfect skin & room lighting (NEVER glossy DSLR studio lighting, NEVER repetitive straight-on standing poses!).\n\n" +
+    "CAMERA & VISUAL STYLE (CRITICAL — 85%+ EDGE-TO-EDGE DIAGONAL FRAMING & RAW CANDID LOOK!):\n" +
+    "Every single shot MUST fill 85–90% of the frame edge to edge with minimal headroom and zero wasted empty margins, using diagonal rule-of-thirds composition (face/eyes in the upper-left or upper-right third while her shoulders, cleavage, hips, thighs, or stockings sweep diagonally across the opposite lower foreground). Shoot close-in with an authentic candid amateur phone/35mm camera feel — varied heights and intimacy (low-angle diagonal knee-up, low eye-level side-recline on bed/couch, perched leaning-forward thigh-up, arm's-length overhead selfie, over-the-shoulder rear three-quarter, bedside flash) with natural warm practical room lighting and unretouched skin sheen (NEVER glossy studio backdrops, NEVER tiny distant framing, NEVER repetitive straight-on standing poses!).\n\n" +
     "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Describe eye color naturally in ambient room shadows (never glowing, luminous, or neon irises). For front-camera arm's-length selfies keep her hands empty or resting on hair/clothing (never holding a phone unless it is a mirror selfie). Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
   );
 }
@@ -440,7 +440,7 @@ async function prepareCutout(c: Character, faceMode: boolean, hasFaceSegment: bo
   return prepareCutoutFromInput(staged.name, disp, slug, c.id, faceMode, hasFaceSegment);
 }
 
-/** V4 1-time In-Place Nude Body #808080 Cutout directly on the Gen-0 clothed cutout (keeps huge Gen-0 face & curves locked, 0% wardrobe bleed) */
+/** V6 1-time In-Place Nude Body #808080 Cutout directly on the Gen-0 clothed cutout (SAM 3 clothing/glove pre-blank + General Edit V2 keeps Gen-0 face & curves locked, 0% wardrobe/gauntlet bleed) */
 async function prepareInPlaceNudeCutout(
   clothedCutoutInp: string,
   label: string,
@@ -448,12 +448,14 @@ async function prepareInPlaceNudeCutout(
   project: string | null,
   stripDesc: string | undefined,
   nudeUnet: string,
+  sam3Clean: boolean,
 ): Promise<string | null> {
   try {
     const g = buildMasterPackNudeCutout({
       clothedCutoutImage: clothedCutoutInp,
       stripDesc,
       unet: nudeUnet,
+      sam3Clean,
       seed: newSeed(),
       prefix: `studio/_work/v9_nude_inplace_${slug}`,
     });
@@ -586,12 +588,12 @@ export async function planAndQueueMasterPack(
       continue;
     }
 
-    // V4: build 1-time pixel-aligned In-Place Nude Body Cutout directly on Gen-0 clothed cutout (0% wardrobe bleed, 100% Gen-0 face/bust)
+    // V6: build 1-time pixel-aligned In-Place Nude Body Cutout directly on Gen-0 clothed cutout (SAM 3 blanks gloves/clothes -> 0% wardrobe bleed, 100% Gen-0 face/bust)
     let nudeCutout: string | null = null;
     if (v4On && !opts.faceOnlyCutout && hasGenEditV2 && autoNudeUnet) {
-      onStep(`Preparing V4 in-place nude cutout (${i + 1}/${targets.length}: ${disp})…`);
+      onStep(`Preparing V6 bare-skin nude cutout (${i + 1}/${targets.length}: ${disp})…`);
       const stripDesc = t.c.outfit?.trim() ? `${t.c.outfit.trim()}, plus any harness, gloves, tie, bra, panties, stockings, and accessories` : undefined;
-      nudeCutout = await prepareInPlaceNudeCutout(clothedCutout, disp, slug, t.kind === "char" ? t.c.id : null, stripDesc, autoNudeUnet);
+      nudeCutout = await prepareInPlaceNudeCutout(clothedCutout, disp, slug, t.kind === "char" ? t.c.id : null, stripDesc, autoNudeUnet, hasSam3);
     }
 
     const { anchor: bodyAnchor } = bodyDescFor(t.c);
@@ -622,7 +624,8 @@ export async function planAndQueueMasterPack(
             packTag: pack.setTag,
             cutoutImage: shotCutout,
             gen0FaceRef: clothedCutout,
-            refBoost: v4On ? Math.max(pack.refBoost, 1.45) : pack.refBoost,
+            // V6: drop refBoost to 1.28 when SAM 3 Gen-0 Face-Lock is active so Pass 1 unlocks dynamic 85% diagonal posing without upright mannequin gravity
+            refBoost: v4On && hasSam3 ? 1.28 : pack.refBoost,
             bodyAnchor,
             prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
             nudeFraming: pack.nudeFraming,
