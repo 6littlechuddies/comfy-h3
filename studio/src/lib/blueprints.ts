@@ -5,6 +5,7 @@
 // identity, zero room lock — so it transfers cleanly onto ANY adult character without repeating samey poses.
 
 export type BlueprintBankId =
+  | "upfront_portrait"
   | "camera_glamour"
   | "mirror_choreo"
   | "raw_selfie"
@@ -30,15 +31,36 @@ export interface BlueprintBank {
 }
 
 export const BLUEPRINT_BANKS: BlueprintBank[] = [
+  { id: "upfront_portrait", label: "Upfront Portraits & Glamour", short: "Portrait", hint: "Magnetic waist-up / chest-up close-in portraits — arms-up arches, bar/table leans, zipper/collar tease, hair sweeps" },
   { id: "camera_glamour", label: "Camera Geometry & Glamour", short: "Glamour", hint: "Explicit shot height, 3/4 angles, men's-mag warmth, and flattering figure framing" },
-  { id: "mirror_choreo", label: "Mirror & Micro-Choreography", short: "Mirror", hint: "Hip shift, waist twist, rear mirror glances, and over-the-shoulder choreography" },
-  { id: "raw_selfie", label: "Raw Smartphone & Digicam Selfies", short: "Selfies", hint: "Arm's-length phone snaps, low-hip angles, and late-night on-camera flash" },
+  { id: "mirror_choreo", label: "Mirror & Micro-Choreography", short: "Mirror", hint: "Lived-in bedroom mirror phone selfies, hip shift, waist twist, and over-the-shoulder choreography" },
+  { id: "raw_selfie", label: "Raw Smartphone & Digicam Selfies", short: "Selfies", hint: "Arm's-length phone snaps, messy-bedroom mirror selfies, low-hip angles, and late-night on-camera flash" },
   { id: "sexy_cosplay", label: "Sexy Cosplay & Character Tease", short: "Cosplay", hint: "Flirty low/high angles, strap/zipper tease, and candid costume framing" },
   { id: "lingerie_boudoir", label: "Lingerie, Boudoir & Thighs", short: "Lingerie", hint: "Bralette, stockings, cleavage lean-in, bedside arches, and warm lamp light" },
   { id: "explicit_positions", label: "Explicit Solo & Partner POV", short: "Explicit", hint: "High-demand solo explicit poses, ass-up doggy invites, and clean partner POV angles" },
 ];
 
 export const SHOT_BLUEPRINTS: ShotBlueprint[] = [
+  // ── 0. Upfront Magnetic Portraits (18) — waist-up / bust-up close-in cover winners (zero leg-template!) ──
+  { id: "up01", bank: "upfront_portrait", level: 0, name: "Bar-counter leaning hip arch", words: "tight waist-up eye-level candid photograph leaning casually against a dark wood bar or table counter, one hand resting relaxed on the counter edge and hips slightly shifted to one side, shoulders angled gently toward the lens with captivating parted-lip eye contact and warm pendant light behind her" },
+  { id: "up02", bank: "upfront_portrait", level: 0, name: "Both arms raised behind head", words: "close-in chest-to-waist upfront portrait with both arms lifted gracefully behind her head tucking into her hair, elbows flared naturally opening her shoulders and collarbone toward the camera, playful confident smile looking straight into the lens in warm practical room light" },
+  { id: "up03", bank: "upfront_portrait", level: 1, name: "Finger-on-lip zipper tease", words: "intimate close-in chest-up portrait in warm vanity-bulb light, one fingertip touching her glossy lower lip playfully while her other hand lightly grips her front zipper or neckline tie, intense direct eye contact through her lashes" },
+  { id: "up04", bank: "upfront_portrait", level: 0, name: "Across-table forearms lean", words: "warm candid waist-up portrait from across a wooden table, leaning slightly forward on both forearms with fingers loosely laced near her chin, shoulders relaxed forward, shallow background depth and irresistible direct eye contact" },
+  { id: "up05", bank: "upfront_portrait", level: 0, name: "Doorframe shoulder peek", words: "close-in three-quarter waist-up candid paused beside an interior doorway, one forearm resting naturally along the wooden doorframe while she turns her chin toward the lens with a slow knowing half-smile and warm side lighting" },
+  { id: "up06", bank: "upfront_portrait", level: 0, name: "Backwards chair chin-rest", words: "intimate waist-up portrait sitting backwards straddling a wooden chair, forearms folded comfortably along the top rail with her chin tilted near her wrists, playful heavy-lidded eyes locked straight into the camera" },
+  { id: "up07", bank: "upfront_portrait", level: 1, name: "Collar-slip shoulder glance", words: "tight waist-up three-quarter portrait letting one jacket lapel or shoulder strap slip slightly off her shoulder, fingers lightly resting on her collarbone, head tilted fifteen degrees with a bold teasing smirk" },
+  { id: "up08", bank: "upfront_portrait", level: 0, name: "Hands-on-waist hip tilt", words: "natural eye-level thigh-up upfront candid standing with weight shifted onto one leg popping her hip softly, one hand resting relaxed on her waist and the other brushing hair off her shoulder, warm ambient indoor lighting" },
+  { id: "up09", bank: "upfront_portrait", level: 0, name: "Wall-lean warm side key", words: "tight waist-up 50mm candid leaning one shoulder loosely back against a textured plaster or wood wall, arms relaxed naturally at her sides or one hand hooked in her belt, chin dipped slightly gazing up into the lens" },
+  { id: "up10", bank: "upfront_portrait", level: 0, name: "Hair-sweep over-shoulder turn", words: "close-in medium portrait turned sideways sweeping all of her hair over one shoulder with one hand to bare her neck and collarbone, glancing back squarely at the camera with parted lips and natural warm shadows" },
+  { id: "up11", bank: "upfront_portrait", level: 1, name: "Choker-hook close portrait", words: "intimate 50mm bust-up close portrait with two fingers hooked playfully inside her choker or collar edge, shoulders rotated softly, biting her lower lip gently in warm directional bedside lamp light" },
+  { id: "up12", bank: "upfront_portrait", level: 0, name: "Window-light relaxed gaze", words: "natural waist-up candid standing beside a sunlit window with soft afternoon light skimming across her cheekbones and collarbone, arms relaxed loosely in front of her, warm genuine half-smile straight into the camera" },
+  { id: "up13", bank: "upfront_portrait", level: 1, name: "Vanity-stool forward lean", words: "close-in waist-up candid perched on a dressing stool facing the camera, leaning gently forward with hands resting naturally on her knees framing her collarbone and neckline, warm glowing bulbs softly blurred behind her" },
+  { id: "up14", bank: "upfront_portrait", level: 0, name: "Over-shoulder amused turn", words: "intimate chest-up candid caught mid-turn glancing over her near shoulder straight into the lens with a crooked amused smirk, loose strands of hair moving across her cheek, authentic 35mm depth" },
+  { id: "up15", bank: "upfront_portrait", level: 0, name: "Belt-hook confident stance", words: "medium thigh-up upfront candid standing comfortably in her space with thumbs hooked casually into her belt or waistband, torso slightly angled, bold playful eyes locked right onto the viewer" },
+  { id: "up16", bank: "upfront_portrait", level: 1, name: "Low-ledge cleavage lean-in", words: "early-2000s men's-magazine waist-up glamour portrait leaning slightly forward over a low wooden ledge or rail with hands resting naturally flat on the edge, warm tungsten highlight, heavy-lidded direct gaze" },
+  { id: "up17", bank: "upfront_portrait", level: 0, name: "Couch-backrest chin prop", words: "cozy close-in bust-up candid kneeling behind a sofa backrest leaning both forearms across the top cushion looking straight over into the camera with a warm mischievous half-smile" },
+  { id: "up18", bank: "upfront_portrait", level: 1, name: "One-arm overhead doorframe stretch", words: "thigh-up candid standing angled in a room with one hand raised lightly touching a tall doorframe or bookshelf overhead, lifting her ribcage and curving her waist naturally while her other hand rests softly on her hip" },
+
   // ── 1. Camera Geometry & Glamour (20) — areyouokay + KaosEngine style ─────────────────────────────
   { id: "cg01", bank: "camera_glamour", level: 0, name: "Waist-high 3/4 turn", words: "waist-up medium shot from a front three-quarter angle with the camera placed at waist height looking slightly upward, shoulders angled diagonally, one hand resting along her hip, chin dipped slightly with heavy-lidded eye contact into the lens" },
   { id: "cg02", bank: "camera_glamour", level: 0, name: "Low-angle knee-up hero", words: "low-angle knee-up shot taken from hip level looking up to elongate her silhouette, weight shifted onto one hip with the opposite knee softly bent forward, one hand sweeping hair behind her ear, warm golden practical rim light" },
@@ -104,6 +126,10 @@ export const SHOT_BLUEPRINTS: ShotBlueprint[] = [
   { id: "rs18", bank: "raw_selfie", level: 1, name: "Flash-lit stairs upward look", words: "raw 2000s point-and-shoot flash photo taken from a low angle as she sits on carpeted stairs with knees open slightly, elbows propped behind her, bold direct eye contact" },
   { id: "rs19", bank: "raw_selfie", level: 1, name: "Bed-edge barefoot stretch", words: "casual vertical phone snapshot sitting barefoot on the edge of an unmade bed stretching both arms behind her head, arching her back in warm morning blinds light" },
   { id: "rs20", bank: "raw_selfie", level: 2, name: "Under-sheet morning tease", words: "intimate close-up phone angle from bed height with a rumpled duvet pulled low across her bare chest and shoulders, tangled morning hair, biting her lip with sleepy seductive eyes" },
+  { id: "rs21", bank: "raw_selfie", level: 0, name: "Messy-bedroom full mirror phone", words: "authentic casual amateur full-length bedroom mirror selfie holding her smartphone up near chest/face height in one hand while her other hand rests casually on her waist or hem, standing with one knee slightly bent inward in front of an unmade bed and warm glowing bedside lamp, slight mirror dust and raw everyday phone realism" },
+  { id: "rs22", bank: "raw_selfie", level: 1, name: "Back-to-mirror phone glance", words: "raw candid bedroom mirror selfie standing with her back mostly angled toward the tall mirror, weight shifted onto one hip, twisting gracefully at the waist to aim her smartphone at the glass over her shoulder while eyeing her own reflection with a playful sultry smile" },
+  { id: "rs23", bank: "raw_selfie", level: 0, name: "Bathroom vanity phone mirror", words: "casual amateur bathroom vanity mirror selfie holding her smartphone at chest height leaning one hip casually against the sink counter, warm overhead vanity bulbs, lived-in toiletries on the ledge, natural unposed girlfriend smirk" },
+  { id: "rs24", bank: "raw_selfie", level: 1, name: "Mirror hip-pop side curve", words: "candid lived-in bedroom mirror selfie standing angled 45 degrees contrapposto with one hip pushed higher than the other, holding her smartphone loosely at chest level while her free hand brushes hair over one shoulder, warm home lamp glow" },
 
   // ── 4. Sexy Cosplay & Character Tease (20) — fixing stiff convention photos! ───────────────────────
   { id: "sc01", bank: "sexy_cosplay", level: 1, name: "Low-angle power crouch", words: "dramatic low-angle shot crouching low with knees apart and one hand planted on the floor for balance, torso angled forward showing off her costume silhouette and thighs, looking up with a fierce teasing smirk" },
@@ -231,4 +257,26 @@ export function resetUsedBlueprints(scope?: string) {
   const m = loadUsed();
   delete m[scope];
   saveUsed(m);
+}
+
+export type CoverArchetypeId = "upfront" | "selfie" | "creative";
+export interface CoverArchetypePick {
+  style: CoverArchetypeId;
+  label: string;
+  blueprint: ShotBlueprint;
+}
+
+/** Deal 3 genuinely distinct, non-repeating cover-art blueprints for a character so NO two characters look like a template:
+ *  1) Upfront Magnetic Portrait (waist-up / chest-up close-in — arms-up, bar lean, zipper tease, chair straddle, doorframe)
+ *  2) Authentic Amateur Selfie / Bedroom Mirror (lived-in bedroom mirror with smartphone OR raw handheld phone candid)
+ *  3) Creative Candid / Dynamic Pinup (wide CivitAI repertoire — barstool, prone bed, kneeling, stair glance, crouch, couch) */
+export function pickCoverPackBlueprints(scope = "cover6"): CoverArchetypePick[] {
+  const [up] = pickFreshBlueprints(["upfront_portrait"], 1, `${scope}:upfront`, 1);
+  const [sf] = pickFreshBlueprints(["raw_selfie", "mirror_choreo"], 1, `${scope}:selfie`, 1);
+  const [cr] = pickFreshBlueprints(["sexy_cosplay", "camera_glamour"], 1, `${scope}:creative`, 1);
+  return [
+    { style: "upfront", label: "Upfront Portrait", blueprint: up ?? SHOT_BLUEPRINTS[0] },
+    { style: "selfie", label: "Amateur Selfie", blueprint: sf ?? SHOT_BLUEPRINTS.find((b) => b.id === "rs21")! },
+    { style: "creative", label: "Creative Candid", blueprint: cr ?? SHOT_BLUEPRINTS.find((b) => b.bank === "sexy_cosplay")! },
+  ];
 }

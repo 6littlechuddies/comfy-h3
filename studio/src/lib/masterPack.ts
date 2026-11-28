@@ -325,12 +325,12 @@ export function buildMasterPackPlanPrompt(c: Character, selectedKeys: MasterPack
   const schema = `{${chosen.map((p) => `"${p.key}": ["shot1","shot2","shot3","shot4"]`).join(", ")}}`;
   const totalShots = chosen.reduce((sum, p) => sum + p.shots, 0);
   const sections = chosen.map((p, idx) => `${idx + 1}. ${p.promptSpec}`).join("\n\n");
-  // Pull fresh, non-repeating scraped camera/pose/lighting cues so consecutive runs across 20+ characters never feel samey
-  const bankPool: BlueprintBankId[] = ["camera_glamour", "mirror_choreo", "raw_selfie", "lingerie_boudoir"];
+  // Pull fresh, non-repeating scraped camera/pose/lighting cues across ALL banks so consecutive runs across 100+ characters never feel samey
+  const bankPool: BlueprintBankId[] = ["upfront_portrait", "camera_glamour", "mirror_choreo", "raw_selfie", "lingerie_boudoir"];
   if (chosen.some((p) => p.rating === "explicit")) bankPool.push("explicit_positions");
   if (chosen.some((p) => p.key === "cosplay_strip")) bankPool.push("sexy_cosplay");
-  const freshCues = pickFreshBlueprints(bankPool, Math.min(8, Math.max(4, chosen.length * 2)), `v9:${disp.toLowerCase()}`)
-    .map((b, i) => `  • [${b.name}] ${b.words}`)
+  const freshCues = pickFreshBlueprints(bankPool, Math.min(10, Math.max(6, chosen.length * 2)), `v9:${disp.toLowerCase()}`)
+    .map((b) => `  • [${b.name}] ${b.words}`)
     .join("\n");
 
   return (
@@ -338,10 +338,10 @@ export function buildMasterPackPlanPrompt(c: Character, selectedKeys: MasterPack
     `Character: ${who}\n\n` +
     `Output ONLY valid JSON with these exact keys and 4 shot strings each: ${schema}\n\n` +
     `${sections}\n\n` +
-    (freshCues ? `FRESH NON-REPEATING CAMERA & POSE INSPIRATION FOR THIS RUN (borrow distinct camera heights, angles, hand placement, and warm lighting from these so every shot feels fresh and unrepetitive — adapt strictly to ${disp}'s own room & body):\n${freshCues}\n\n` : "") +
-    "CAMERA & VISUAL STYLE (CRITICAL — 85%+ EDGE-TO-EDGE DIAGONAL FRAMING & RAW CANDID LOOK!):\n" +
-    "Every single shot MUST fill 85–90% of the frame edge to edge with minimal headroom and zero wasted empty margins, using diagonal rule-of-thirds composition (face/eyes in the upper-left or upper-right third while her shoulders, cleavage, hips, thighs, or stockings sweep diagonally across the opposite lower foreground). Shoot close-in with an authentic candid amateur phone/35mm camera feel — varied heights and intimacy (low-angle diagonal knee-up, low eye-level side-recline on bed/couch, perched leaning-forward thigh-up, arm's-length overhead selfie, over-the-shoulder rear three-quarter, bedside flash) with natural warm practical room lighting and unretouched skin sheen (NEVER glossy studio backdrops, NEVER tiny distant framing, NEVER repetitive straight-on standing poses!).\n\n" +
-    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Describe eye color naturally in ambient room shadows (never glowing, luminous, or neon irises). For front-camera arm's-length selfies keep her hands empty or resting on hair/clothing (never holding a phone unless it is a mirror selfie). Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
+    (freshCues ? `FRESH NON-REPEATING CIVITAI CAMERA & POSE INSPIRATION FOR THIS RUN (draw freely across these varied heights, upfront portraits, mirror selfies, and candid poses so NO two shots feel like a template — adapt strictly to ${disp}'s own room & body):\n${freshCues}\n\n` : "") +
+    "CAMERA, VARIETY & VISUAL STYLE (CRITICAL — ZERO REPETITIVE TEMPLATES!):\n" +
+    "Vary framing and posture widely across shots — mix upfront waist-up portraits (bar/table lean, arms raised behind head, zipper/collar tease), raw lived-in amateur bedroom mirror selfies and arm's-length phone snaps, over-the-shoulder rear curves, lying prone, kneeling, crouching, doorway leans, and intimate seated candids. Keep her prominent in frame with minimal wasted ceiling space, warm natural practical room light, and authentic handheld 35mm/phone feel (NEVER glossy studio backdrops, NEVER tiny distant framing, NEVER repeat the same lifted-thigh or standing template across shots!).\n\n" +
+    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Keep skin clean dry matte natural with subtle pores on non-shower shots (NEVER write 'sweat', 'sheen', 'dewy', 'glistening', or 'oily' on dry scenes). Keep arms and hands in relaxed, physically natural positions (never twisted awkwardly behind her back). Describe eye color naturally in ambient room shadows (never glowing, luminous, or neon irises). Keep hands EMPTY on front-camera selfies and boyfriend-POV candid shots (only hold a smartphone in an explicit mirror selfie!). Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld photo, authentic natural room lighting, natural anatomy, clean natural skin texture. Everyone is an adult.'"
   );
 }
 
@@ -544,118 +544,108 @@ export async function planAndQueueMasterPack(
     selected.map((p) => [p.key, resolvePackLoras(p.loras, installedLoras)]),
   );
 
-  // Plan prompts in parallel (up to 4 targets at once so DeepSeek runs fast without stalling)
-  const plans: (Record<string, string[]> | null)[] = new Array(targets.length).fill(null);
+  // 8×-GPU Machine-Speed Streaming Pool: run prompt planning + Gen-0/SAM3 cutouts across up to 8 characters in parallel,
+  // and immediately queue each character's V9 rows straight to ComfyUI's multi-GPU router the moment her cutouts finish!
   const failed: string[] = [];
-  let planIdx = 0;
-  let planDone = 0;
-  const concurrency = Math.min(4, targets.length);
-
-  await Promise.all(Array.from({ length: concurrency }, async () => {
-    while (planIdx < targets.length) {
-      const i = planIdx++;
-      const t = targets[i];
-      const disp = t.c.site?.name || t.c.name;
-      onStep(`Planning V9 packs (${planDone + 1}/${targets.length}: ${disp})…`);
-      try {
-        plans[i] = await planCharacterPacks(t.c, selected.map((p) => p.key));
-      } catch (e) {
-        failed.push(`${disp}: ${(e as Error).message}`);
-      }
-      planDone++;
-    }
-  }));
-
   const runTs = Math.floor(Date.now() / 1000);
-  const rowsToAdd: Partial<Row>[] = [];
-  let setCount = 0;
-  const group = newGroup(`V9 Master Pack (${selected.length} sets${v4On ? " · V4" : ""})`);
-
-  for (let i = 0; i < targets.length; i++) {
-    const plan = plans[i];
-    if (!plan) continue;
-    const t = targets[i];
-    const disp = t.c.site?.name || t.c.name;
-    const slug = disp.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || (t.kind === "quick" ? "quick" : t.c.id);
-    onStep(`Preparing Gen-0 cutout (${i + 1}/${targets.length}: ${disp})…`);
-    let clothedCutout: string;
-    try {
-      clothedCutout = t.kind === "quick"
-        ? await prepareCutoutFromInput(t.media.name, disp, slug, null, opts.faceOnlyCutout, hasFaceSegment)
-        : await prepareCutout(t.c, opts.faceOnlyCutout, hasFaceSegment);
-    } catch (e) {
-      failed.push(`${disp}: ${(e as Error).message}`);
-      continue;
-    }
-
-    // V6: build 1-time pixel-aligned In-Place Nude Body Cutout directly on Gen-0 clothed cutout (SAM 3 blanks gloves/clothes -> 0% wardrobe bleed, 100% Gen-0 face/bust)
-    let nudeCutout: string | null = null;
-    if (v4On && !opts.faceOnlyCutout && hasGenEditV2 && autoNudeUnet) {
-      onStep(`Preparing V6 bare-skin nude cutout (${i + 1}/${targets.length}: ${disp})…`);
-      const stripDesc = t.c.outfit?.trim() ? `${t.c.outfit.trim()}, plus any harness, gloves, tie, bra, panties, stockings, and accessories` : undefined;
-      nudeCutout = await prepareInPlaceNudeCutout(clothedCutout, disp, slug, t.kind === "char" ? t.c.id : null, stripDesc, autoNudeUnet, hasSam3);
-    }
-
-    const { anchor: bodyAnchor } = bodyDescFor(t.c);
-    const stageToSite = t.kind === "char" && opts.saveToLocalSets;
-    for (const pack of selected) {
-      const shots = plan[pack.key] ?? [];
-      if (!shots.length) continue;
-      setCount++;
-      const setKey = `${pack.tier}-${pack.setTag}-${runTs}`;
-      const packLoras = resolvedByPack.get(pack.key) ?? [];
-      shots.forEach((shotPrompt, sIdx) => {
-        // Keep Gen-0 clothed cutout ONLY for cosplay_strip shot 1 (full signature costume); use in-place nude cutout everywhere else for 0% clothing bleed!
-        const keepClothedCosplay = pack.key === "cosplay_strip" && sIdx === 0;
-        const shotCutout = !keepClothedCosplay && nudeCutout ? nudeCutout : clothedCutout;
-        const isNudeOrLift = pack.rating === "explicit" && !keepClothedCosplay;
-        const shotAutoNudeUnet = v4On && isNudeOrLift ? autoNudeUnet : undefined;
-        rowsToAdd.push({
-          ...(t.kind === "char" ? { charId: t.c.id } : { noStar: true }),
-          idea: `V9 ${pack.shortLabel} · ${sIdx + 1}/${shots.length}`,
-          prompt: shotPrompt,
-          status: "ready",
-          takes: 1,
-          loras: packLoras,
-          group,
-          ...(stageToSite ? { toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey } } : {}),
-          v9: {
-            packKey: pack.key,
-            packTag: pack.setTag,
-            cutoutImage: shotCutout,
-            gen0FaceRef: clothedCutout,
-            // V6: drop refBoost to 1.28 when SAM 3 Gen-0 Face-Lock is active so Pass 1 unlocks dynamic 85% diagonal posing without upright mannequin gravity
-            refBoost: v4On && hasSam3 ? 1.28 : pack.refBoost,
-            bodyAnchor,
-            prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
-            nudeFraming: pack.nudeFraming,
-            replaceExisting: stageToSite && opts.replaceExisting,
-            label: disp,
-            bodyPolish: v4On,
-            faceLock: v4On && hasSam3,
-            autoNudeUnet: shotAutoNudeUnet,
-            polishLoras: isNudeOrLift ? [] : polishRealismLoras,
-          },
-        });
-      });
-    }
-  }
-
-  if (!rowsToAdd.length) {
-    throw new Error(failed[0] || "No V9 Master Pack shots were planned");
-  }
-
+  const group = newGroup(`V9 Master Pack (${selected.length} sets${v4On ? " · V6" : ""})`);
   const b = useBatch.getState();
   b.set({ target: "image" });
   const empty = b.rows.filter((r) => !r.imitate && !r.civit && !r.idea.trim() && !r.prompt.trim());
-  const made = rowsToAdd.map((p) => newRow(p));
-  useBatch.setState((s) => ({ rows: [...s.rows.filter((r) => !empty.includes(r)), ...made] }));
+  if (empty.length) useBatch.setState((s) => ({ rows: s.rows.filter((r) => !empty.includes(r)) }));
 
-  if (opts.review) {
-    return { rows: made.length, jobs: 0, sets: setCount, failed };
+  let setCount = 0;
+  let totalRows = 0;
+  let totalJobs = 0;
+  let cursor = 0;
+  let started = 0;
+  const concurrency = Math.min(8, targets.length);
+
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (cursor < targets.length) {
+      const i = cursor++;
+      const t = targets[i];
+      const disp = t.c.site?.name || t.c.name;
+      const slug = disp.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 32) || (t.kind === "quick" ? "quick" : t.c.id);
+      const num = ++started;
+      onStep(`Planning & preparing cutouts (${num}/${targets.length}: ${disp})…`);
+      try {
+        // Run DeepSeek prompt planning + Gen-0 clothed cutout in parallel for this character!
+        const [plan, clothedCutout] = await Promise.all([
+          planCharacterPacks(t.c, selected.map((p) => p.key)),
+          t.kind === "quick"
+            ? prepareCutoutFromInput(t.media.name, disp, slug, null, opts.faceOnlyCutout, hasFaceSegment)
+            : prepareCutout(t.c, opts.faceOnlyCutout, hasFaceSegment),
+        ]);
+
+        // V6: build 1-time pixel-aligned SAM 3-blanked bare-skin nude cutout directly on Gen-0 clothed cutout
+        let nudeCutout: string | null = null;
+        if (v4On && !opts.faceOnlyCutout && hasGenEditV2 && autoNudeUnet) {
+          onStep(`Building V6 bare-skin nude cutout (${num}/${targets.length}: ${disp})…`);
+          const stripDesc = t.c.outfit?.trim() ? `${t.c.outfit.trim()}, plus any harness, gloves, tie, bra, panties, stockings, and accessories` : undefined;
+          nudeCutout = await prepareInPlaceNudeCutout(clothedCutout, disp, slug, t.kind === "char" ? t.c.id : null, stripDesc, autoNudeUnet, hasSam3);
+        }
+
+        const { anchor: bodyAnchor } = bodyDescFor(t.c);
+        const stageToSite = t.kind === "char" && opts.saveToLocalSets;
+        const charRows: Partial<Row>[] = [];
+        for (const pack of selected) {
+          const shots = plan[pack.key] ?? [];
+          if (!shots.length) continue;
+          setCount++;
+          const setKey = `${pack.tier}-${pack.setTag}-${runTs}`;
+          const packLoras = resolvedByPack.get(pack.key) ?? [];
+          shots.forEach((shotPrompt, sIdx) => {
+            const keepClothedCosplay = pack.key === "cosplay_strip" && sIdx === 0;
+            const shotCutout = !keepClothedCosplay && nudeCutout ? nudeCutout : clothedCutout;
+            const isNudeOrLift = pack.rating === "explicit" && !keepClothedCosplay;
+            const shotAutoNudeUnet = v4On && isNudeOrLift ? autoNudeUnet : undefined;
+            charRows.push({
+              ...(t.kind === "char" ? { charId: t.c.id } : { noStar: true }),
+              idea: `V9 ${pack.shortLabel} · ${sIdx + 1}/${shots.length}`,
+              prompt: shotPrompt,
+              status: "ready",
+              takes: 1,
+              loras: packLoras,
+              group,
+              ...(stageToSite ? { toSet: { title: pack.title, tier: pack.tier, rating: pack.rating, setKey } } : {}),
+              v9: {
+                packKey: pack.key,
+                packTag: pack.setTag,
+                cutoutImage: shotCutout,
+                gen0FaceRef: clothedCutout,
+                refBoost: v4On && hasSam3 ? 1.28 : pack.refBoost,
+                bodyAnchor,
+                prefix: `studio/packs/${slug}/v9_${pack.key}_${sIdx + 1}`,
+                nudeFraming: pack.nudeFraming,
+                replaceExisting: stageToSite && opts.replaceExisting,
+                label: disp,
+                bodyPolish: v4On,
+                faceLock: v4On && hasSam3,
+                autoNudeUnet: shotAutoNudeUnet,
+                polishLoras: isNudeOrLift ? [] : polishRealismLoras,
+              },
+            });
+          });
+        }
+
+        if (charRows.length) {
+          const made = charRows.map((p) => newRow(p));
+          useBatch.setState((s) => ({ rows: [...s.rows, ...made] }));
+          totalRows += made.length;
+          if (!opts.review) {
+            onStep(`Streaming ${made.length} shots for ${disp} to GPU(s)…`);
+            totalJobs += await queueAll(made.map((r) => r.id));
+          }
+        }
+      } catch (e) {
+        failed.push(`${disp}: ${(e as Error).message}`);
+      }
+    }
+  }));
+
+  if (!totalRows) {
+    throw new Error(failed[0] || "No V9 Master Pack shots were planned");
   }
-
-  onStep(`Queueing ${made.length} V9 pictures across GPU(s)…`);
-  const jobs = await queueAll(made.map((r) => r.id));
-  return { rows: made.length, jobs, sets: setCount, failed };
+  return { rows: totalRows, jobs: totalJobs, sets: setCount, failed };
 }

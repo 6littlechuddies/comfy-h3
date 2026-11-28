@@ -1,7 +1,7 @@
 // Validates every Studio graph against a real ComfyUI (models can be empty dummy files):
 //   COMFY=http://127.0.0.1:18288 npx tsx scripts/test-graphs.ts
 // ComfyUI validates node types, inputs, links and combo values before queueing; we then cancel the queue.
-import { bfsSwapPrompt, buildBfsVideoSwap, buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildMasterPackCutout, buildMasterPackNudeCutout, buildMasterPackShot, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
+import { bfsSwapPrompt, buildBfsVideoSwap, buildCoverHero, buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildMasterPackCutout, buildMasterPackNudeCutout, buildMasterPackShot, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
 
 const COMFY = process.env.COMFY || "http://127.0.0.1:18288";
 const s = { sampler: "euler_ancestral", scheduler: "normal", steps: 28, cfg: 5.5, seed: 123456789012345 };
@@ -54,6 +54,8 @@ const cases: [string, ApiGraph][] = [
   ["v9 master pack SAM3-cleaned nude cutout (v6)", buildMasterPackNudeCutout({ clothedCutoutImage: "test.png", sam3Clean: true, seed: 7, prefix: "studio/_work/v9_nude_sam3_x" })],
   ["v9 master pack shot", buildMasterPackShot({ cutoutImage: "test.png", instruction: "High-angle candid phone selfie", seed: 7, prefix: "studio/packs/x/v9_selfies_1", refBoost: 1.28, loras: lora })],
   ["v9 master pack shot (v4 pixel body polish)", buildMasterPackShot({ cutoutImage: "test.png", instruction: "Mirror lace corset tease", seed: 7, prefix: "studio/packs/x/v9_mirror_1", refBoost: 1.45, loras: lora, bodyPolish: { scale: 1.4, denoise: 0.14, steps: 4 } })],
+  ["v7 cover hero (krea 2 turbo crisp refine)", buildCoverHero({ prompt: "Upfront candid portrait in warm light, clean dry matte natural skin", steps: 10, seed: 7, prefix: "studio/packs/x/cover_upfront_krea2", loras: lora })],
+  ["v7 cover hero (desirex dry matte refine)", buildCoverHero({ prompt: "Amateur bedroom mirror selfie, clean dry matte natural skin", unet: "civitai/BSS_DesireX2_INT8_ConvRot.safetensors", steps: 8, seed: 8, prefix: "studio/packs/x/cover_selfie_desirex", loras: lora })],
 ];
 const a = { sampler: "er_sde", scheduler: "beta", steps: 10, seed: 42, prompt: "<Picture 1> dances", seconds: 10, width: 1344, height: 768, loras: lora, refImageSize: "match" as const, prefix: "studio/animate/a" };
 cases.push(

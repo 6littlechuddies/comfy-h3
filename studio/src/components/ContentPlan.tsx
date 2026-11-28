@@ -56,6 +56,7 @@ export function ContentPlan() {
   };
   if (!open) return (
     <div className="flex flex-col gap-2">
+      <CoverArt6PackBox />
       <V9MasterPackBox />
       <AutoPlanBox />
       <Btn onClick={() => setOpen(true)} className="w-full">Content plan · pick backgrounds × poses yourself</Btn>
@@ -397,6 +398,108 @@ function V9MasterPackBox() {
         why={busy ?? (!targetCount ? "Attach a quick photo or pick at least one character" : "Pick at least one V9 set")}
       >
         {busy ?? (review ? `Plan V9 prompts · ${totalPics} shots (${totalSets} sets)` : `Build & queue V9 Master Pack · ${totalPics} pictures (${totalSets} sets)`)}
+      </Btn>
+    </div>
+  );
+}
+
+/** 1-click Cover-Art 6-Pack Factory: generates 3 genuinely different CivitAI pose styles (Upfront Portrait, Amateur Mirror/Selfie,
+ *  Creative Candid) × 2 engines (Krea 2 Turbo + DesireX dry-matte) per character, streaming live across multi-GPU pods! */
+function CoverArt6PackBox() {
+  const chars = useCharacters(useShallow((s) => s.list.filter(isAdult)));
+  const sel = useCharacters((s) => s.sel);
+  const toast = useJobs((s) => s.toast);
+  const [who, setWho] = useState<string[]>(sel ? [sel] : []);
+  const [includeDesireX, setIncludeDesireX] = useState(true);
+  const [stageToLocalSet, setStageToLocalSet] = useState(true);
+  const [review, setReview] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const pickedChars = chars.filter((c) => who.includes(c.id));
+  const cosplayIds = chars.filter((c) => /^Cosplay of /i.test(c.source ?? "")).map((c) => c.id);
+  const perChar = includeDesireX ? 6 : 3;
+  const totalPics = pickedChars.length * perChar;
+
+  const go = async () => {
+    setBusy("Starting Cover-Art 6-Pack…");
+    try {
+      const { planAndQueueCoverPack } = await import("../lib/coverPack");
+      const r = await planAndQueueCoverPack(pickedChars, { includeDesireX, stageToLocalSet, review }, setBusy);
+      const warn = r.failed.length ? ` (${r.failed.length} failed: ${r.failed[0]})` : "";
+      const engNote = includeDesireX && !r.hasDesireX ? " (DesireX not installed — queued Krea 2 only)" : "";
+      toast(
+        review
+          ? `Planned ${r.rows} cover-art prompts across ${pickedChars.length} character${pickedChars.length === 1 ? "" : "s"}${engNote}${warn}`
+          : `Queued ${r.jobs} cover-art candidates across ${pickedChars.length} character${pickedChars.length === 1 ? "" : "s"} — each tags straight into her Catalog folder (live cards untouched)${engNote}${warn}`,
+        r.failed.length ? "info" : "good",
+        "batch",
+      );
+    } catch (e) {
+      toast((e as Error).message, "bad", "batch");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border border-accent/55 bg-accent/[.05] p-3 text-[12.5px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="font-medium text-ink">Cover-Art 6-Pack · 3 styles × Krea 2 &amp; DesireX</b>
+        <span className="ml-auto flex items-center gap-2 text-[11.5px]">
+          {cosplayIds.length > 0 && cosplayIds.length < chars.length && (
+            <button onClick={() => setWho(cosplayIds)} className="text-muted hover:text-ink hover:underline" title="Select all realistic cosplays">
+              Cosplays ({cosplayIds.length})
+            </button>
+          )}
+          {chars.length > 0 && (
+            <button onClick={() => setWho(who.length === chars.length ? [] : chars.map((c) => c.id))} className="text-accent hover:underline">
+              {who.length === chars.length ? "Clear all" : `Select all (${chars.length})`}
+            </button>
+          )}
+        </span>
+      </div>
+      <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
+        Blazes across all GPUs: draws 3 distinct non-repeating CivitAI poses per character (<b>Upfront Portrait</b> · <b>Amateur Selfie/Mirror</b> · <b>Creative Candid</b>), dry-matte skin guard on DesireX (zero sweat droplets), tagged straight into each character's Catalog folder.
+      </p>
+      <div className="flex max-h-36 flex-wrap gap-1 overflow-y-auto">
+        {chars.map((c) => {
+          const on = who.includes(c.id);
+          const disp = c.site?.name || c.name;
+          return (
+            <button
+              key={c.id}
+              title={c.site?.name && c.site.name !== c.name ? `${c.site.name} (${c.name})` : c.name}
+              onClick={() => setWho((w) => (w.includes(c.id) ? w.filter((x) => x !== c.id) : [...w, c.id]))}
+              aria-pressed={on}
+              className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", on && "on")}
+            >
+              {disp}
+            </button>
+          );
+        })}
+        {!chars.length && <span className="text-dim">Add or import characters first.</span>}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+          <input type="checkbox" className="mt-0.5" checked={includeDesireX} onChange={(e) => setIncludeDesireX(e.target.checked)} />
+          <span>Run both <b>Krea 2 Turbo</b> + <b>DesireX (dry matte)</b> = <b>6 covers/char</b> (uncheck for 3 Krea 2 only)</span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+          <input type="checkbox" className="mt-0.5" checked={stageToLocalSet} onChange={(e) => setStageToLocalSet(e.target.checked)} />
+          <span>Stage into local <b>Cover Art Candidates (V7)</b> set in Your site (never overwrites live card/cover)</span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+          <input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => setReview(e.target.checked)} />
+          <span>Let me read or edit prompts before queueing</span>
+        </label>
+      </div>
+      <Btn
+        kind="primary"
+        onClick={go}
+        disabled={!pickedChars.length || !!busy}
+        why={busy ?? "Pick at least one character"}
+      >
+        {busy ?? (review ? `Plan Cover ${perChar}-Packs · ${totalPics} prompts` : `Build & queue Cover ${perChar}-Packs · ${totalPics} covers`)}
       </Btn>
     </div>
   );

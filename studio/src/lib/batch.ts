@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import { planWriter, useBigPlanner } from "./packs";
 import { balanceLoras, BUDGET } from "./loraBalance";
-import { buildAnimate, buildCreate, buildEdit, buildMasterPackShot, buildPromptHelper, MINOR_FLAG, type AnimateOpts } from "./graphs";
+import { buildAnimate, buildCoverHero, buildCreate, buildEdit, buildMasterPackShot, buildPromptHelper, MINOR_FLAG, type AnimateOpts } from "./graphs";
 import { look } from "./charVideo";
 import { h3Frames, h3Size } from "./models";
 import { useJobs, type Job } from "./jobs";
@@ -51,6 +51,15 @@ export interface Row {
     autoNudeUnet?: string;
     /** V4: light realism LoRA for Pass 2 body polish on clothed/lingerie shots (empty on FinePorn/nude shots) */
     polishLoras?: import("./graphs").LoraPick[];
+  };
+  /** V7 Cover-Art 6-Pack row: high-res 896×1344 → 1.4× pixel refine (1256×1880) on Krea 2 Turbo or DesireX (dry-matte skin) */
+  cover?: {
+    style: string;
+    engine: string;
+    unet?: string;
+    steps: number;
+    prefix: string;
+    label?: string;
   };
   faceFix?: boolean;
   /** a saved CivitAI scene prompt to borrow the setting, light, camera and finish from (never its person) */
@@ -459,6 +468,57 @@ export async function queueAll(only?: string[]): Promise<number> {
   }
   for (const r of ready) {
     const rowIds: string[] = [];
+    // V7 Cover-Art 6-Pack: 896×1344 er_sde/beta + 1.4× Lanczos pixel refine (1256×1880), streamed across all GPUs
+    if (b.target === "image" && r.cover) {
+      try {
+        const c = character(r);
+        if (r.charId && !c) throw new Error("Character not found (or under 18)");
+        const cv = r.cover;
+        const prompt = r.prompt.trim();
+        const disp = c ? (c.site?.name || c.name) : (cv.label || "Cover");
+        const loras = mergeUniqueLoras(r.loras, b.batchLoras);
+        const baseMeta = extra(r, c);
+        const jobMeta = {
+          batchRow: r.id,
+          kind: "make",
+          project: c?.id ?? null,
+          sent: { prompt, character: disp, checkpoint: cv.unet ?? "official" },
+          ...baseMeta,
+        };
+        for (let t = 0; t < r.takes; t++) {
+          const job = await useJobs.getState().run(
+            "batch",
+            `${cv.label || `${disp} · ${r.idea.trim()}`}${r.takes > 1 ? ` · take ${t + 1}` : ""}`,
+            buildCoverHero({
+              prompt,
+              unet: cv.unet,
+              loras,
+              steps: cv.steps,
+              seed: newSeed(),
+              prefix: cv.prefix,
+            }),
+            `create:krea2:cover:${cv.engine}`,
+            jobMeta,
+          );
+          rowIds.push(job.id); ids.push(job.id);
+        }
+        useBatch.getState().update(r.id, {
+          status: "queued",
+          jobIds: rowIds,
+          error: undefined,
+          debug: {
+            path: `V7 Cover-Art (${cv.engine} · ${cv.steps}s er_sde/beta → 1.4× pixel refine 1256×1880)`,
+            character: disp,
+            style: cv.style,
+            checkpoint: cv.unet ?? "official",
+            loras: loras.map((l) => `${l.name} @${l.strength}`),
+            prompt: prompt.slice(0, 600),
+            toSet: r.toSet?.setKey ?? r.toSet?.title ?? null,
+          },
+        });
+      } catch (e) { useBatch.getState().update(r.id, { status: "error", error: (e as Error).message }); }
+      continue;
+    }
     // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 + V4 Gen-0 Face-Lock & 1.4× pixel body polish
     if (b.target === "image" && r.v9) {
       try {

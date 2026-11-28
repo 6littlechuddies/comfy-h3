@@ -443,6 +443,54 @@ export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
   return g.graph;
 }
 
+export interface CoverHeroOpts {
+  prompt: string;
+  /** Optional custom Krea 2 diffusion UNET (e.g. civitai/BSS_DesireX2_INT8_ConvRot.safetensors); defaults to Krea 2 Turbo */
+  unet?: string;
+  loras?: LoraPick[];
+  /** Pass 1 steps (default 10 for Krea 2 Turbo, 8 for DesireX) */
+  steps?: number;
+  width?: number;
+  height?: number;
+  /** Pixel-space 1.4× Lanczos 4-step refine (default true -> 1256×1880) */
+  refine?: boolean;
+  seed: number;
+  prefix: string;
+}
+
+/** V7 Cover-Art Hero T2I graph (896×1344 er_sde/beta + 1.4× Lanczos pixel-space 4-step crisp refine -> 1256×1880,
+ *  fast INT8 attention, CFG 1): shared by Krea 2 Turbo Crisp Photo & BSS_DesireX2 Dry-Matte 6-pack cover factory. */
+export function buildCoverHero(p: CoverHeroOpts): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
+  let model: Link = o(unet);
+  for (const l of activeLoras(p.loras ?? [])) {
+    model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  }
+  model = fastAttn(g, model);
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const pos = g.add("CLIPTextEncode", { text: p.prompt, clip: o(clip) });
+  const neg = g.add("ConditioningZeroOut", { conditioning: o(pos) });
+  const lat = g.add("EmptyLatentImage", { width: p.width ?? 896, height: p.height ?? 1344, batch_size: 1 });
+  const ks1 = g.add("KSampler", {
+    model, seed: p.seed, steps: p.steps ?? 10, cfg: 1, sampler_name: "er_sde", scheduler: "beta",
+    positive: o(pos), negative: o(neg), latent_image: o(lat), denoise: 1,
+  });
+  let outImg: Link = o(g.add("VAEDecode", { samples: o(ks1), vae: o(vae) }));
+  if (p.refine !== false) {
+    const big = g.add("ImageScaleBy", { image: outImg, upscale_method: "lanczos", scale_by: 1.4 });
+    const enc2 = g.add("VAEEncode", { pixels: o(big), vae: o(vae) });
+    const ks2 = g.add("KSampler", {
+      model, seed: p.seed + 7, steps: 4, cfg: 1, sampler_name: "euler", scheduler: "simple",
+      positive: o(pos), negative: o(neg), latent_image: o(enc2), denoise: 0.24,
+    });
+    outImg = o(g.add("VAEDecode", { samples: o(ks2), vae: o(vae) }));
+  }
+  g.add("SaveImage", { images: outImg, filename_prefix: p.prefix }, "result");
+  return g.graph;
+}
+
 // ---------------------------------------------------------------- Edit (Krea 2 Identity Edit; Anima / NoobAI redraw for anime)
 /** which model edits: Krea 2 + the Identity Edit LoRA (plain-words edits, 2 pictures), or an anime redraw */
 export type EditEngine = "krea" | "anima" | "noob";
