@@ -188,6 +188,7 @@ function V9MasterPackBox() {
   const [packs, setPacks] = useState<MasterPackKey[]>(loadV9Sets);
   const [saveToLocalSets, setSaveToLocalSets] = useState(true);
   const [replaceExisting, setReplaceExisting] = useState(true);
+  const [v4FaceLock, setV4FaceLock] = useState(() => { try { return localStorage.getItem("h3.v9pack.v4") !== "off"; } catch { return true; } });
   const [faceOnlyCutout, setFaceOnlyCutout] = useState(false);
   const [review, setReview] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -219,6 +220,7 @@ function V9MasterPackBox() {
           saveToLocalSets,
           replaceExisting,
           faceOnlyCutout,
+          v4FaceLock,
           review,
         },
         setBusy,
@@ -258,7 +260,7 @@ function V9MasterPackBox() {
         </span>
       </div>
       <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
-        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — drop any photo directly (no project needed) or pick saved characters. Nothing is ever uploaded to UrGF automatically.
+        1-click V4 Gen-0 Face-Locked pipeline (in-place nude cutout for 0% outfit bleed + 1.4× pixel polish + SAM 3 1024 px face lock) — drop any photo directly or pick saved characters. Nothing ever uploads to UrGF automatically.
       </p>
 
       <div className="flex items-start gap-2.5 rounded-md border border-dashed border-line bg-black/20 p-2">
@@ -376,8 +378,12 @@ function V9MasterPackBox() {
         </>
       )}
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={v4FaceLock} onChange={(e) => { setV4FaceLock(e.target.checked); try { localStorage.setItem("h3.v9pack.v4", e.target.checked ? "on" : "off"); } catch { /* */ } }} />
+        <span><b>V4 Gen-0 Face-Lock &amp; Zero-Bleed</b> — in-place nude cutout (0% shirt/tie overlap) + 1.4× crisp polish (1160×1696) + SAM 3 1024 px face lock</span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={faceOnlyCutout} onChange={(e) => setFaceOnlyCutout(e.target.checked)} />
-        <span>Head-only cutout (FaceSegment) — tick if the photo has a hand or peace sign near her face</span>
+        <span>Head-only cutout (FaceSegment) — tick only if the photo has a hand or peace sign blocking her face</span>
       </label>
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => setReview(e.target.checked)} />

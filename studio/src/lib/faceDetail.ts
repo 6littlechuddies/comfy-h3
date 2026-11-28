@@ -5,6 +5,7 @@ import { inputUrl, toInput, type FileRef, type InputFile } from "./api";
 import { addToSiteSet, faceView, useCharacters, type Character } from "./characters";
 import { buildEdit, buildFind, buildFindMask } from "./graphs";
 import { useJobs, waitForJob, type Tab } from "./jobs";
+import { M } from "./models";
 import { editArgs, newSeed, useSettings } from "./settings";
 
 import { faceWindow, parseBoxes, type Box } from "./faceBox";
@@ -18,6 +19,10 @@ export interface FaceOpts {
   tab?: Tab;
   /** whose face it is: their own picture is shown to the model so the face stays theirs */
   character?: Character | null;
+  /** Optional explicit staged Gen-0 hero input filename (takes precedence over character lookup & works for quick photos) */
+  refImage?: string;
+  /** Force clean Krea 2 Turbo (0 extra LoRAs, 6 steps, refBoost 2.9 -> 1.45 on V2 Identity) for V4 Gen-0 face locking */
+  kreaFaceLock?: boolean;
   /** 0.2–0.7: how much the face is redrawn */
   strength?: number;
   /** redo every face found (default: only the biggest one) */
@@ -53,21 +58,24 @@ export async function sharpenFace(src: FileRef | { name: string }, o: FaceOpts =
   toast(`SAM 3 found ${boxes.length} face${boxes.length > 1 ? "s" : ""} (best ${Math.round(boxes[0].score * 100)}% sure) — redrawing ${pick.length > 1 ? `${pick.length} of them` : "the biggest"}`, "info", tab);
   if (!pick.length) { toast("Couldn't find a face in that picture", "bad", tab); return null; }
   const c = o.character ?? null;
-  // their face close-up shows the model the face best; the front picture when there's no close-up
-  const view = c ? faceView(c) : null;
-  const ident = c && view ? await useCharacters.getState().asMedia(c.id, view).catch(() => null) : null;
+  // explicit Gen-0 reference first, else character's face/front view
+  const view = !o.refImage && c ? faceView(c) : null;
+  const ident = o.refImage ? { name: o.refImage } : (c && view ? await useCharacters.getState().asMedia(c.id, view).catch(() => null) : null);
   const anime = c ? c.style === "anime" : false;
   const e = useSettings.getState().s.edit;
   const base = editArgs(e, "krea");
-  const style = anime ? "Keep exactly the same art style, line art and colours — it is a drawing, not a photo." : "Keep it a photo with the same skin tone, lighting and colours.";
-  const instruction = `This is a close-up crop of one person's face. Redraw the face sharper and more detailed: crisp eyes and lashes, clear lips, natural skin texture and fine hair strands. `
-    + (ident ? "The second picture shows who this is — take only who they are from it: the same face shape, eye colour, eyebrows, nose, lip shape and skin. Do NOT copy its expression, mouth, gaze or head angle. " : "")
-    + `Keep this crop's own expression exactly (an open mouth stays open, a laugh stays a laugh, closed eyes stay closed), its head angle, gaze, hair, lighting and framing; change nothing else. ${style}`;
+  const style = anime ? "Keep exactly the same art style, line art and colours — it is a drawing, not a photo." : "Keep it a candid real photo with natural unretouched skin tone, soft lighting, and natural ambient shadows on the eyes (never glowing or artificially bright irises).";
+  const instruction = `This is a close-up crop of one person's face. Redraw the face sharper and more detailed: crisp natural eyes and lashes, clear sculpted lips, natural skin texture and fine hair strands. `
+    + (ident ? "The second picture shows who this exact person is — take only who they are from it: the exact same attractive face shape, natural eye colour in ambient light, eyebrows, eyeliner, nose, lip shape, freckles and skin. Do NOT copy its expression, mouth, gaze or head angle. " : "")
+    + `Keep this crop's own expression exactly (an open mouth stays open, a laugh stays a laugh, closed eyes stay closed), its head angle, gaze, hair, room lighting and framing; change nothing else. ${style}`;
+  const editParams = o.kreaFaceLock
+    ? { ...base, unet: M.kreaUnet, loras: [], sampler: "euler", scheduler: "simple", steps: 6, cfg: 1 }
+    : { ...base, loras: [...(base.loras ?? [])] };
   let cur = name, last: FileRef | null = null;
   for (let i = 0; i < pick.length; i++) {
     const win = faceWindow(pick[i], W, H);
-    const g = buildEdit({ ...base, loras: [...(base.loras ?? [])], enhance: false, seed: newSeed(), images: ident ? [cur, ident.name] : [cur], instruction, negative: "", resolution: 1024,
-      denoise: o.strength ?? FACE_DEFAULT, refBoost: ident ? 2.5 : 1, region: win, prefix: o.prefix ?? `studio/${tab}/face` });
+    const g = buildEdit({ ...editParams, enhance: false, seed: newSeed(), images: ident ? [cur, ident.name] : [cur], instruction, negative: "", resolution: 1024,
+      denoise: o.strength ?? FACE_DEFAULT, refBoost: ident ? (o.kreaFaceLock ? 2.9 : 2.5) : 1, region: win, prefix: o.prefix ?? `studio/${tab}/face` });
     const job = await useJobs.getState().run(tab, `${o.label ?? "Sharpening the face"}${pick.length > 1 ? ` ${i + 1}/${pick.length}` : ""}`, g, "face:edit", { kind: "face:edit", faceOf: name, ...o.meta });
     const done = await waitForJob(job.id);
     const out = done.outputs.find((x) => x.kind === "image" && x.type === "output");
@@ -78,11 +86,11 @@ export async function sharpenFace(src: FileRef | { name: string }, o: FaceOpts =
   return last;
 }
 
-/** Create's "Sharpen the face after": only when a job transitions live from queued/running -> done (never on reload/restore!) */
+/** Create's / V9 Master Pack's "Sharpen the face after": only when a job transitions live from queued/running -> done (never on reload/restore!) */
 const faceRan = new Set<string>();
 useJobs.subscribe((s, prev) => {
   for (const j of s.jobs) {
-    const fix = j.meta?.faceFix as { character: string | null; strength: number } | undefined;
+    const fix = j.meta?.faceFix as { character: string | null; strength: number; refImage?: string; prefix?: string; kreaFaceLock?: boolean; label?: string } | undefined;
     const before = prev.jobs.find((x) => x.id === j.id);
     if (!fix || j.status !== "done" || !before || (before.status !== "running" && before.status !== "queued") || faceRan.has(j.id)) continue;
     faceRan.add(j.id);
@@ -91,7 +99,16 @@ useJobs.subscribe((s, prev) => {
     (async () => {
       for (const out of outs) {
         try {
-          const sharp = await sharpenFace(out, { tab: j.tab, character: c, strength: fix.strength, label: "Sharpening the face", prefix: `studio/${j.tab}/face` });
+          const sharp = await sharpenFace(out, {
+            tab: j.tab,
+            character: c,
+            refImage: fix.refImage,
+            kreaFaceLock: fix.kreaFaceLock,
+            strength: fix.strength,
+            label: fix.label ?? (fix.kreaFaceLock ? "V4 Gen-0 face lock" : "Sharpening the face"),
+            prefix: fix.prefix ?? `studio/${j.tab}/face`,
+            meta: { quietFail: !!fix.kreaFaceLock, ...(j.meta?.project ? { project: j.meta.project } : {}) },
+          });
           const to = j.meta?.toSet as { charId: string; title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" } | undefined;
           if (to) addToSiteSet(to.charId, to.title, to.tier, sharp ?? out, { setKey: to.setKey, rating: to.rating });
         }
