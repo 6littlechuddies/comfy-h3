@@ -436,20 +436,79 @@ def save_models(reg: dict):
 
 
 async def my_models(req):
-    """your own checkpoints, by family: [{name, title, version, family, folder, here}]"""
+    """your own checkpoints, by family: [{name, title, version, family, folder, here, downloading, progress, step, problem}]"""
     out = []
-    # why one isn't here: the downloader's own words for that file (CivitAI refused it, early access …)
+    # Check BOTH boot downloader (downloads.json) AND live background/restore fetches (LORA_JOBS) so the UI never lies "(downloading...)"!
     errs: dict = {}
+    dl_active: set = set()
+    dl_prog: dict = {}
+    dl_step: dict = {}
+    dl_later: set = set()
     try:
         for f in json.load(open(os.path.join(H3_RUN, "downloads.json"))).get("files") or []:
-            if f.get("err"): errs[os.path.basename(str(f.get("n") or ""))] = str(f["err"])
+            bn = os.path.basename(str(f.get("n") or ""))
+            if not bn: continue
+            if f.get("err"): errs[bn] = str(f["err"])
+            st = str(f.get("st") or "")
+            if st in ("active", "queued", "stalled", "waiting", "downloading", "checking"):
+                dl_active.add(bn)
+                tot = f.get("t") or f.get("sz") or 0
+                got = f.get("g") if f.get("g") is not None else (f.get("got") or 0)
+                if tot: dl_prog[bn] = round(min(1.0, got / max(1, tot)), 3)
+                if st == "stalled": dl_step[bn] = "stalled"
+                elif st in ("waiting", "queued") and not got: dl_step[bn] = "waiting in queue"
+            elif st == "later":
+                dl_later.add(bn)
     except (OSError, ValueError): pass
+    # Index latest LORA_JOBS entry per version_id / target_rel / filename
+    job_by_vid: dict = {}
+    job_by_rel: dict = {}
+    for j in LORA_JOBS.values():
+        if j.get("version_id") is not None: job_by_vid[str(j["version_id"])] = j
+        if j.get("target_rel"): job_by_rel[str(j["target_rel"])] = j
+        if j.get("name"): job_by_rel[str(j["name"])] = j
     for rel, x in load_models().items():
         here = os.path.isfile(os.path.join(MODELS, x.get("folder", "diffusion_models"), rel))
+        bn = os.path.basename(rel)
+        vid = str(x.get("version_id")) if x.get("version_id") is not None else ""
+        lj = job_by_rel.get(rel) or (job_by_vid.get(vid) if vid else None)
+        downloading = False
+        progress = None
+        step = None
+        problem = None
+        if not here:
+            if lj and lj.get("status") == "running":
+                downloading = True
+                progress = float(lj.get("progress") or 0.0)
+                if lj.get("step"): step = str(lj["step"])
+            elif bn in dl_active:
+                downloading = True
+                if bn in dl_prog: progress = dl_prog[bn]
+                if bn in dl_step: step = dl_step[bn]
+            elif lj and lj.get("status") == "error" and lj.get("error"):
+                problem = str(lj["error"])
+            elif errs.get(bn):
+                problem = errs[bn]
+            elif bn in dl_later:
+                step = "paused (Later in Downloads)"
         out.append({"name": rel, "title": x.get("title", rel), "version": x.get("version", ""), "family": x.get("family", "other"),
                     "folder": x.get("folder", "diffusion_models"), "base": x.get("base", ""), "here": here, "model_id": x.get("model_id"), "version_id": x.get("version_id"),
-                    **({"problem": errs.get(os.path.basename(rel))} if not here and errs.get(os.path.basename(rel)) else {})})
+                    **({"downloading": True} if downloading else {}),
+                    **({"progress": progress} if progress is not None else {}),
+                    **({"step": step} if step else {}),
+                    **({"problem": problem} if problem else {})})
     return web.json_response({"items": out})
+
+
+async def fetch_models(req):
+    """POST: start downloading one missing checkpoint ({name}) or all missing checkpoints immediately."""
+    try: d = await req.json()
+    except Exception: d = {}
+    want = str(d.get("name") or "").strip()
+    reg = load_models()
+    subset = {want: reg[want]} if want and want in reg else reg
+    started, skipped = _fetch_missing_models(subset, now=True)
+    return web.json_response({"started": started, "skipped": skipped, "key": bool(civitai_token())})
 
 
 async def forget_model(req):
@@ -1296,7 +1355,9 @@ async def lora_job(job: dict, url: str):
                 if fam not in ("krea2", "anima", "sdxl"):
                     raise RuntimeError(f"That checkpoint is for {v.get('baseModel') or 'another model'} — the Studio runs Krea 2, Anima and Illustrious/NoobAI")
                 files = [x for x in files if str((x.get("metadata") or {}).get("format", "SafeTensor")).lower().startswith("safetensor")] or files
-            f = next((x for x in files if x.get("primary")), (files or [None])[0])
+            want_bn = os.path.basename(str(job.get("target_rel") or "")) if is_model else ""
+            f = (next((x for x in files if want_bn and re.sub(r"[^A-Za-z0-9._-]+", "_", str(x.get("name") or "")) == want_bn), None)
+                 or next((x for x in files if x.get("primary")), (files or [None])[0]))
             if not f: raise RuntimeError("No file on that model version")
             name = re.sub(r"[^A-Za-z0-9._-]+", "_", f["name"])
             if not name.endswith(".safetensors") and is_model: raise RuntimeError("That checkpoint isn't a .safetensors file (GGUF and others aren't supported here)")
@@ -1305,6 +1366,13 @@ async def lora_job(job: dict, url: str):
             folder = ("checkpoints" if fam == "sdxl" else "diffusion_models") if is_model else "loras"
             dest = os.path.join(MODELS, folder, "civitai", name)
             if is_model and os.path.isfile(dest):
+                old_rel = str(job.get("target_rel") or "")
+                if old_rel and old_rel != rel:
+                    mreg = load_models()
+                    if str((mreg.get(old_rel) or {}).get("version_id")) == str(vid):
+                        mreg.pop(old_rel, None)
+                        mreg.setdefault(rel, {"version_id": vid, "model_id": v.get("modelId"), "title": v["model"]["name"], "version": v.get("name", ""), "base": v.get("baseModel", ""), "family": fam, "folder": folder})
+                        save_models(mreg)
                 job.update(status="done", progress=1.0, name=rel, kind="model", folder=folder, title=v["model"]["name"], family=fam, trigger="")
                 return
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -1373,6 +1441,9 @@ async def lora_job(job: dict, url: str):
         tips = tips_from(v.get("description") or "", mdesc)
         if is_model:
             mreg = load_models()
+            old_rel = str(job.get("target_rel") or "")
+            if old_rel and old_rel != rel and str((mreg.get(old_rel) or {}).get("version_id")) == str(vid):
+                mreg.pop(old_rel, None)
             mreg[rel] = {"version_id": vid, "model_id": v.get("modelId"), "title": v["model"]["name"], "version": v.get("name", ""), "base": v.get("baseModel", ""), "family": fam, "folder": folder}
             save_models(mreg)
             if not job.get("from_import"): _forget("models", rel, False)  # added again by you: imports may bring it too
@@ -3920,6 +3991,18 @@ async def _proton_boot():
     await _proton_keys()  # first: the downloader is waiting for them
     asyncio.get_running_loop().create_task(_keys_refresh_loop())
     await _proton_restore()
+    # After restore (or on restart when backup was already current), pull any missing checkpoints that aren't already handled by downloader.py
+    try:
+        dl_files: set = set()
+        try:
+            for f in json.load(open(os.path.join(H3_RUN, "downloads.json"))).get("files") or []:
+                if str(f.get("st") or "") in ("active", "queued", "stalled", "waiting", "later", "done"):
+                    dl_files.add(os.path.basename(str(f.get("n") or "")))
+        except (OSError, ValueError): pass
+        mreg = {k: v for k, v in load_models().items() if os.path.basename(k) not in dl_files}
+        if mreg: _fetch_missing_models(mreg)
+    except Exception as e:  # noqa: BLE001
+        print("!! checkpoints boot fetch:", e, flush=True)
 
 
 KEY_REQ = {"at": 0.0, "reason": "", "keys_then": 0, "auto": 0.0, "slow_since": 0.0}
@@ -5836,17 +5919,20 @@ def _import_extras(z, refused_ids: set | None = None, tick=None, pictures: bool 
         now = time.time() * 1000
         # stamped "now" so the browser takes them over what it had (a fresh rental has nothing worth keeping)
         _state_write("prefs", {**cur, **{k: [v[0], now] for k, v in pf.items() if isinstance(v, list) and len(v) == 2}}); got["prefs"] = True
-    for name in ("loras", "models"):  # your LoRA library / own checkpoints: merged, then the missing files download
+    for name in ("models", "loras"):  # your own checkpoints first, then LoRA library: merged, then missing files download
         d = rd(f"{name}.json") if f"{name}.json" in names else None
         if not isinstance(d, dict): continue
         cur = _state_json(name, {}) or {}
         cur = cur if isinstance(cur, dict) else {}
         gone = _forgotten(name)  # ones you removed since that export stay removed
         new = {k: v for k, v in d.items() if isinstance(v, dict) and k not in cur and k not in gone}
+        merged = {**cur, **new}
         if new:
-            _state_write(name, {**cur, **new}); got[name] = len(new)
-            if name == "loras": _fetch_missing_loras(new)
-            else: _fetch_missing_models(new)
+            _state_write(name, merged); got[name] = len(new)
+        # Always fetch any missing files (even when models.json was already on disk after a restart)
+        if merged:
+            if name == "loras": _fetch_missing_loras(merged)
+            else: _fetch_missing_models(merged)
     jb = rd("jobs.json") if "jobs.json" in names else None
     if isinstance(jb, list) and jb:
         have = _state_json("jobs", []) or []
@@ -5888,7 +5974,8 @@ def _import_extras(z, refused_ids: set | None = None, tick=None, pictures: bool 
 
 _FETCHING: set = set()        # LoRAs (by file) being brought back
 _FETCHING_MODELS: set = set()  # your own checkpoints (by CivitAI version) being brought back
-_BG_SEM = asyncio.Semaphore(2)  # LoRAs and checkpoints coming back after a restore: two at a time
+_BG_SEM = asyncio.Semaphore(2)     # LoRAs coming back after a restore: two at a time
+_MODEL_SEM = asyncio.Semaphore(2)  # Checkpoints get their own 2 slots so they never starve behind 80 LoRAs
 
 
 async def _first_models_ready(job: dict):
@@ -5903,26 +5990,35 @@ async def _first_models_ready(job: dict):
     job.pop("step", None)
 
 
-async def _bg_fetch(job: dict, url: str, release, now: bool = False):
+async def _bg_fetch(job: dict, url: str, release, now: bool = False, sem=None):
     try:
         if now: await lora_job(job, url)  # a job of yours is waiting for it: straight away
         else:
             await _first_models_ready(job)
-            async with _BG_SEM: await lora_job(job, url)
+            async with (sem or _BG_SEM): await lora_job(job, url)
     finally:
         release()
 
 
-def _fetch_missing_models(reg: dict):
+def _fetch_missing_models(reg: dict, now: bool = False):
     """your own checkpoints from an imported checkpoint: downloaded again in the background — once each, however many
-    times a restore or an import asks"""
+    times a restore or an import asks. Pass now=True for explicit user Retry/Download clicks."""
+    started, skipped = [], []
     for rel, info in reg.items():
         vid = info.get("version_id")
-        if not vid or vid in _FETCHING_MODELS or os.path.isfile(os.path.join(MODELS, info.get("folder", "diffusion_models"), rel)): continue
+        if not vid or os.path.isfile(os.path.join(MODELS, info.get("folder", "diffusion_models"), rel)):
+            skipped.append(rel); continue
+        if vid in _FETCHING_MODELS:
+            skipped.append(rel); continue
         _FETCHING_MODELS.add(vid)
         jid = uuid.uuid4().hex[:10]
-        LORA_JOBS[jid] = job = {"id": jid, "status": "running", "progress": 0.0, "from_import": True, "title": info.get("title") or os.path.basename(rel)}
-        _spawn(_bg_fetch(job, f"https://civitai.com/api/download/models/{vid}", lambda v=vid: _FETCHING_MODELS.discard(v)))
+        LORA_JOBS[jid] = job = {
+            "id": jid, "status": "running", "progress": 0.0, "from_import": not now,
+            "title": info.get("title") or os.path.basename(rel), "version_id": vid, "target_rel": rel,
+        }
+        _spawn(_bg_fetch(job, f"https://civitai.com/api/download/models/{vid}", lambda v=vid: _FETCHING_MODELS.discard(v), now=now, sem=_MODEL_SEM))
+        started.append(rel)
+    return started, skipped
 
 
 def _fetch_missing_loras(reg: dict, now: bool = False):
@@ -7848,7 +7944,7 @@ def main():
         web.post("/studio-api/media-meta", media_meta), web.post("/studio-api/workflow/save", workflow_save),
         web.post("/studio-api/downloads/later", downloads_later),
         web.post("/studio-api/downloads/preset", downloads_preset),
-        web.get("/studio-api/models", my_models), web.post("/studio-api/models/forget", forget_model),
+        web.get("/studio-api/models", my_models), web.post("/studio-api/models/fetch", fetch_models), web.post("/studio-api/models/forget", forget_model),
         web.post("/studio-api/transcribe", transcribe),
         web.get("/studio-api/characters/export", characters_export), web.post("/studio-api/characters/import", characters_import),
         web.post("/studio-api/import/start", import_start), web.put("/studio-api/import/{id}/chunk", import_chunk),

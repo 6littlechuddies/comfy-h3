@@ -90,6 +90,12 @@ def _civitai_keys() -> list[str]:
     return out
 CIVITAI_KEYS = _civitai_keys()
 CIVITAI_TOKEN = CIVITAI_KEYS[0] if CIVITAI_KEYS else ""
+
+
+def _civitai_hosts() -> list[str]:
+    """CivitAI has two sites: civitai.red (everything, incl. NSFW checkpoints) and civitai.com (family-friendly only)."""
+    first = (os.environ.get("CIVITAI_HOST") or "https://civitai.red").rstrip("/")
+    return [first] + [h for h in ("https://civitai.com", "https://civitai.red") if h != first]
 REMOTE = os.environ.get("RCLONE_REMOTE", "")
 # groups to leave out (Vast template: SKIP_MODELS=anime,autoprompter …). The AutoPrompter extras are only used by the
 # old imported workflow in the node editor, so they're skipped unless you set SKIP_MODELS to something else (or empty).
@@ -342,10 +348,13 @@ def resolve(fl: dict, quiet: bool = False) -> None:
         m = re.match(r"civitai-file:(\d+):(.+)$", url)
         if m:  # one file of a CivitAI version picked by a word in its name (versions with several files: bf16 / int8 / ...)
             r = None
-            for key in (_civitai_keys() or [""]):
-                r = requests.get(f"https://civitai.com/api/v1/model-versions/{m.group(1)}", headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=30)
-                if r.status_code not in (401, 403): break
-            files = (r.json() if r.ok else {}).get("files") or []
+            for host in _civitai_hosts():
+                for key in (_civitai_keys() or [""]):
+                    r = requests.get(f"{host}/api/v1/model-versions/{m.group(1)}", headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=30)
+                    if r.ok: break
+                    if r.status_code not in (401, 403): break
+                if r is not None and r.ok: break
+            files = (r.json() if r is not None and r.ok else {}).get("files") or []
             models = [f for f in files if (f.get("type") or "Model") == "Model"] or files
             word = m.group(2).lower()
             # by name ("…_int8.safetensors"), else by CivitAI's own labels for the file (precision, size, format)
@@ -353,7 +362,7 @@ def resolve(fl: dict, quiet: bool = False) -> None:
                 or next((f for f in models if any(word == str(v).lower() for v in (f.get("metadata") or {}).values())), None) \
                 or (models[0] if len(models) == 1 else None)
             if not hit:
-                fl["error"] = (f"CivitAI version {m.group(1)}: no file matching '{m.group(2)}' ({r.status_code}; files: "
+                fl["error"] = (f"CivitAI version {m.group(1)}: no file matching '{m.group(2)}' ({r.status_code if r is not None else 'err'}; files: "
                                + ", ".join(f"{f.get('name')} {f.get('metadata') or ''}" for f in models)[:300] + ")")
                 log(f"{fl['name']}: {fl['error']}"); fl["get"] = url; fl["size"] = 0; return
             url = hit["downloadUrl"]
@@ -363,26 +372,31 @@ def resolve(fl: dict, quiet: bool = False) -> None:
             if ea:
                 ends = str(info.get("earlyAccessEndsAt") or "")[:10]
                 fl["civitai_note"] = f"early access on CivitAI{f' until {ends}' if ends else ''} — only people who paid the creator's early-access fee can download it until then; your keys are fine"
-        if url.startswith("https://civitai.com/"):
+        if url.startswith(("https://civitai.com/", "https://civitai.red/")):
             loc, r = "", None
             said = ""
-            for key in (_civitai_keys() or [""]):  # each key until CivitAI hands out the file
-                r = requests.get(url, headers={"Authorization": f"Bearer {key}"} if key else {}, allow_redirects=False, timeout=30)
-                loc = r.headers.get("Location") or ""
+            pth0 = re.sub(r"^https?://[^/]+", "", url)
+            paths = [pth0] + ([pth0.split("?", 1)[0]] if "?" in pth0 else [])
+            cands = [f"{host}{pth}" for host in _civitai_hosts() for pth in paths]
+            for key in (_civitai_keys() or [""]):  # each key & host (civitai.red + civitai.com) until CivitAI hands out the file
+                for cand in cands:
+                    r = requests.get(cand, headers={"Authorization": f"Bearer {key}"} if key else {}, allow_redirects=False, timeout=30)
+                    loc = r.headers.get("Location") or ""
+                    if loc and "/login" not in loc: break
+                    # what CivitAI itself says when it refuses (e.g. "early access", "you need to purchase") — never the key
+                    try: said = said or re.sub(r"\s+", " ", (r.json().get("message") or r.json().get("error") or ""))[:160]
+                    except ValueError: pass  # an HTML page, not a message
                 if loc and "/login" not in loc: break
-                # what CivitAI itself says when it refuses (e.g. "early access", "you need to purchase") — never the key
-                try: said = said or re.sub(r"\s+", " ", (r.json().get("message") or r.json().get("error") or ""))[:160]
-                except ValueError: pass  # an HTML page, not a message
             if said: fl["civitai_said"] = said
             if loc and "/login" not in loc:  # without a key, some models redirect to the sign-in page instead of the file
                 url = loc
             elif fl.get("fallback"):
-                log(f"{fl['name']}: CivitAI gave no download link ({r.status_code}{'' if CIVITAI_TOKEN else ', no CIVITAI_TOKEN'}) — using {fl['fallback']}")
+                log(f"{fl['name']}: CivitAI gave no download link ({r.status_code if r is not None else 'err'}{'' if _civitai_keys() else ', no CIVITAI_TOKEN'}) — using {fl['fallback']}")
                 url = fl["fallback"]
                 if tok and url.startswith(HF_BASE):
                     headers["Authorization"] = f"Bearer {tok}"; fl["hf"] = True
             else:
-                fl["error"] = f"CivitAI gave no download link ({r.status_code}) — check CIVITAI_TOKEN"
+                fl["error"] = f"CivitAI gave no download link ({r.status_code if r is not None else 'err'}) — check CIVITAI_TOKEN"
         fl["get"] = url
         # requests drops the Authorization header when a redirect leaves the original host
         r = requests.head(url, headers=headers, allow_redirects=True, timeout=30)
@@ -957,7 +971,7 @@ def main() -> int:
                 # … and backs off when it keeps saying no (1, 2, 4, 8 … minutes, at most every 30): a refusal (403: early access,
                 # members-only) doesn't change from one minute to the next, and asking every minute only fills the log
                 wait = min(1800, 60 * 2 ** min(5, f.get("tries", 0)))
-                if f.get("error") and wanted(f) and not complete(f) and f["url"].startswith(("https://civitai.com/", "civitai-file:")) and time.time() - f.get("resolved", 0) > wait:
+                if f.get("error") and wanted(f) and not complete(f) and f["url"].startswith(("https://civitai.com/", "https://civitai.red/", "civitai-file:")) and time.time() - f.get("resolved", 0) > wait:
                     quiet = f.get("tries", 0) >= 2
                     resolve(f, quiet=quiet)
                     if not f.get("error"): log(f"{f['name']}: CivitAI gave the link now"); f.pop("tries", None)
