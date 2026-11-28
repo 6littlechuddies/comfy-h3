@@ -11,8 +11,9 @@ import { h3Size } from "../lib/models";
 import { randomTopic, testAlert, useNotify } from "../lib/notify";
 import { droppedUrl, useTray } from "../lib/tray";
 import { useHandoffInto, usePrimaryAction } from "../App";
-import { modelOf, useSettings } from "../lib/settings";
-import { Btn, Icon, Label, Seg, Slot, TextIn, cx, DropSelect } from "../components/ui";
+import { KREA_SAMPLER_PRESETS, modelOf, useSettings } from "../lib/settings";
+import { Btn, Icon, Label, LoraList, Seg, Slot, TextIn, cx, DropSelect } from "../components/ui";
+import { KreaEditModel } from "../components/KreaEditModel";
 import { PromptPieces, useRewriteMenu } from "../components/PromptPieces";
 import { Workspace } from "../components/Workspace";
 import { Feed } from "../components/Feed";
@@ -104,6 +105,7 @@ export default function BatchTab() {
         {/* only what the chosen way uses: the prompt writer and the Star belong to videos and planned sets */}
         {(video || way === "plan" || way === "cosplay") && <WriterChoice />}
         {!video && <BatchCheckpoint />}
+        {!video && <BatchKreaControls />}
         {!video && way === "cosplay" && <CosplayOptions />}
         {(video || way === "plan") && <label className="flex flex-col gap-1.5"><span className="lbl">Star (optional)</span>
           <DropSelect value={b.characterId ?? ""} onChange={(e) => b.set({ characterId: e.target.value || null })} className="inset h-10 border px-2.5 text-[13.5px] focus:border-accent focus:outline-none">
@@ -479,7 +481,47 @@ function BatchCheckpoint() {
     <div className="flex flex-col gap-1">
       <CheckpointPicker model="krea2" models={["krea2"]} follow="Same as 03 Create" extra={[["@auto", "DeepSeek picks one for each character"]]} value={value}
         onChange={(v) => set(v === "@create" ? { mode: "create", locked: true } : v === "@auto" ? { mode: "auto", locked: false } : { mode: "pick", name: v, locked: true })} />
-      <p className="text-[11.5px] leading-relaxed text-dim">{ck.mode === "auto" ? "Cosplay: DeepSeek picks one of your checkpoints per character (its reason is on each character). Other rows use 03 Create's." : "Every picture in the batch uses this one — DeepSeek doesn't change it."}</p>
+      <p className="text-[11.5px] leading-relaxed text-dim">{ck.mode === "auto" ? "Cosplay: DeepSeek picks one of your checkpoints per character. V9 Master Pack, Plan, and Swap rows use 03 Create's." : "Applies to every Batch picture — V9 Master Pack, Plan, Swap in, Cosplay, and Create rows."}</p>
     </div>
+  );
+}
+
+/** Batch → Pictures parity controls: V2 Identity Edit switch, Krea 2 finish/refine presets, and Batch-wide Krea 2 LoRAs */
+function BatchKreaControls() {
+  const b = useBatch();
+  const preset = b.batchPreset ?? "create";
+  return (
+    <details className="rounded-lg border border-line bg-raised/35 px-3 py-2 text-[12.5px]">
+      <summary className="cursor-pointer select-none font-medium text-ink">
+        Edit model, LoRAs &amp; finish
+        <span className="ml-2 text-[11px] font-normal text-dim">
+          {(b.batchLoras?.filter((l) => !l.off).length ?? 0) > 0 ? `${b.batchLoras!.filter((l) => !l.off).length} LoRA · ` : ""}
+          {preset === "create" ? "Create sampler" : KREA_SAMPLER_PRESETS.find((x) => x.id === preset)?.label}
+          {b.batchRefine ? " · 1.5× refine" : ""}
+        </span>
+      </summary>
+      <div className="mt-2.5 flex flex-col gap-3">
+        <KreaEditModel />
+        <div className="flex flex-col gap-1">
+          <span className="lbl">Krea 2 finish preset (T2I / Cosplay / Poses)</span>
+          <div className="flex flex-wrap gap-1">
+            <button type="button" onClick={() => b.set({ batchPreset: "create" })} title="Use whatever sampler & steps are set in 03 Create"
+              className={cx("press tag-btn !h-7 !px-2 !text-[11.5px]", preset === "create" && "on")}>Same as Create</button>
+            {KREA_SAMPLER_PRESETS.map((pr) => (
+              <button key={pr.id} type="button" title={pr.hint} onClick={() => b.set({ batchPreset: pr.id })}
+                className={cx("press tag-btn !h-7 !px-2 !text-[11.5px]", preset === pr.id && "on")}>{pr.label}</button>
+            ))}
+          </div>
+          <label className="mt-1 flex cursor-pointer items-start gap-2 text-[12px] text-muted" title="Fast 2-stage polish from top CivitAI workflows: 1.5× latent upscale + 4-step denoise 0.30 pass for crisp skin pores & fabric">
+            <input type="checkbox" className="mt-0.5" checked={!!b.batchRefine} onChange={(e) => b.set({ batchRefine: e.target.checked })} />
+            <span>1.5× crisp refine pass (4 steps, denoise 0.30 — sharper pores on T2I / Cosplay)</span>
+          </label>
+        </div>
+        <div className="flex flex-col gap-1">
+          <LoraList family="krea2" label="Extra Batch LoRAs · Krea 2 (optional)" value={b.batchLoras ?? []} onChange={(v) => b.set({ batchLoras: v })} />
+          <p className="-mt-1 text-[11px] leading-snug text-dim">Applied to every Batch picture (V9 Master Pack, Plan, Swap in, Cosplay, Poses). Keep weights light (≤0.5) on V2 Edit to avoid blotchy skin.</p>
+        </div>
+      </div>
+    </details>
   );
 }

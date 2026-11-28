@@ -3,10 +3,11 @@ import { activePack, planWriter, useBigPlanner } from "../lib/packs";
 import { bfsSwapPrompt, buildAnimate, buildBfsVideoSwap, buildSwap, type BfsVideoSwapOpts, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
 import { longSeconds, runLong, stopLong, forgetLong, useLong, type LongRun } from "../lib/long";
 import { askSweep } from "../components/Dialogs";
-import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
+import { h3CacheInstalled, rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
 import { VideoModel } from "../components/VideoModel";
 import { useJobs, type Job, type Output } from "../lib/jobs";
-import { M, REALISM_KEY, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { H3_CACHE_KEY, M, REALISM_KEY, RTX_KEY, SMOOTH_KEY, h3Frames, h3Size, h3SizeFor } from "../lib/models";
+import { H3_BLUEPRINTS, H3_MOTION_CATS, type H3MotionCat } from "../lib/h3Blueprints";
 import { newSeed, seedFor, useSection, useSettings } from "../lib/settings";
 import { trayIdOf, useTray, type Media } from "../lib/tray";
 import type { MentionTarget } from "../components/Mention";
@@ -32,8 +33,8 @@ import { useCharacters } from "../lib/characters";
 import { CharacterPicker, charactersIn, identityLine, withCharacter, WriterSetup } from "./Prompt";
 import { copyText } from "../lib/copy";
 
-/** "she dances in the rain and waves at the end" (plain words) vs a written H3 timeline */
-const isPlan = (t: string) => /\bCUT \d|\(\d+(\.\d)?s?\s*[–-]|\b\d+:\d{2}\s*[–-]|\bAt \d/.test(t);
+/** "she dances in the rain and waves at the end" (plain words) vs a written H3 timeline / Deooeo multimodal schema */
+const isPlan = (t: string) => /\bCUT \d|\(\d+(\.\d)?s?\s*[–-]|\b\d+:\d{2}\s*[–-]|\bAt \d|integrated_multimodal_description:|\[Shot 1\]/.test(t);
 
 export default function AnimateTab() {
   const [a, set] = useSection("animate");
@@ -620,6 +621,15 @@ export default function AnimateTab() {
         )}
         {!refsMode && <div className="flex justify-end gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" onClick={doUndo}>↶ Undo</button>}<button className="text-xs text-accent hover:underline" onClick={planInPrompt}>Plan a video with these</button></div>}
         {!turboOk && !swap && <p className="text-xs text-muted">{h3ErosOn() ? "Eros Max has its own speed built in — turbo stays off." : "Turbo for this type is off in ⋯ → Speed-ups (Faster video steps)."}</p>}
+        {!swap && !long && (
+          <H3BlueprintPicker
+            onPick={(bp) => {
+              remember();
+              set({ prompt: bp.prompt, seconds: bp.seconds, plan: false, music: "none" });
+              toast(`Loaded “${bp.label}” (${bp.seconds} s Deooeo H3 blueprint — ready to render).`, "good");
+            }}
+          />
+        )}
         {(!swap || swapIsBfs) && <LoraList family="h3" label={swapIsBfs ? "Extra H3 LoRAs (optional, e.g. MysticXXX)" : "H3 LoRAs"} value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />}
         <Advanced a={a.adv} set={(p) => set({ adv: { ...a.adv, ...p } })} hideCfg>
           <Slider label="Size (megapixels)" min={0.3} max={2.5} step={0.05} value={a.mp} show={`${a.mp.toFixed(2)} MP · ${width}×${height}`} onChange={(v) => set({ mp: Math.round(v * 100) / 100 })} />
@@ -630,6 +640,7 @@ export default function AnimateTab() {
           <SmoothCheck />
           <RealismCheck />
           <RtxCheck />
+          <H3CacheCheck />
           <Check checked={a.lowMemDecode} onChange={(v) => set({ lowMemDecode: v })} title="Low-memory decode" sub="If long videos run out of GPU memory" help="lowMem" />
         </Advanced>
         <p className="text-xs leading-relaxed text-dim">The first video of a rental also loads the models (~1–2 min).</p>
@@ -764,4 +775,46 @@ function RtxCheck() {
   const there = rtxInstalled();
   return <Check checked={!off && there !== false} onChange={pick} title="Upscale to 1080p (NVIDIA RTX)"
     sub={there === false ? "Not on this rental (NVIDIA's upscaler didn't install or this card doesn't support it)" : "NVIDIA's video upscaler on the finished frames — a few seconds, not another generation"} />;
+}
+
+/** ApplyMiniMaxH3FirstBlockCache speedup toggle (Deooeo's 0.10 / max 2 cache setting — auto-detected when node is installed) */
+function H3CacheCheck() {
+  const [on, setOn] = useState(() => { try { return localStorage.getItem(H3_CACHE_KEY) === "on"; } catch { return false; } });
+  const pick = (v: boolean) => { try { if (v) localStorage.setItem(H3_CACHE_KEY, "on"); else localStorage.removeItem(H3_CACHE_KEY); } catch { /* private mode */ } setOn(v); syncKreaTE(); };
+  const there = h3CacheInstalled();
+  return <Check checked={on && there !== false} onChange={pick} title="First-Block Cache speedup (Deooeo)"
+    sub={there === false ? "ApplyMiniMaxH3FirstBlockCache node isn't installed on this rental" : "Reuses early-block features on 20+ step renders (0.10 / max 2) for faster Hero videos with minimal quality loss"} />;
+}
+
+/** 1-click Deooeo-format H3 motion & soundscape blueprint picker (36 timestamped blueprints across 6 categories) */
+function H3BlueprintPicker({ onPick }: { onPick: (bp: (typeof H3_BLUEPRINTS)[number]) => void }) {
+  const [cat, setCat] = useState<H3MotionCat>("tease");
+  const items = H3_BLUEPRINTS.filter((b) => b.cat === cat);
+  return (
+    <details className="rounded-lg border border-line bg-raised/35 px-3 py-2 text-[12.5px]">
+      <summary className="cursor-pointer select-none font-medium text-ink">
+        H3 Motion Blueprints <span className="ml-1.5 text-[11px] font-normal text-dim">36 Deooeo-format presets</span>
+      </summary>
+      <div className="mt-2.5 flex flex-col gap-2">
+        <div className="flex flex-wrap gap-1">
+          {H3_MOTION_CATS.map((c) => (
+            <button key={c.id} type="button" onClick={() => setCat(c.id)}
+              className={`press tag-btn !h-7 !px-2 !text-[11.5px] ${cat === c.id ? "on" : ""}`}>{c.label}</button>
+          ))}
+        </div>
+        <div className="flex flex-col gap-1">
+          {items.map((bp) => (
+            <button key={bp.id} type="button" onClick={() => onPick(bp)} title={bp.hint}
+              className="press flex items-center justify-between gap-2 rounded border border-line bg-black/20 px-2.5 py-1.5 text-left text-[12px] hover:border-accent">
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-ink">{bp.label}</span>
+                <span className="block truncate text-[11px] text-dim">{bp.hint}</span>
+              </span>
+              <span className="shrink-0 font-mono text-[11px] text-accent">{bp.seconds}s</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
 }

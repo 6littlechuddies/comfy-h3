@@ -5,6 +5,7 @@
 //   4. DeepSeek (the writer) describes the costume piece by piece and writes the Krea 2 prompt
 //   5. "Add to batch" makes one Batch row per character
 import { create } from "zustand";
+import { pickFreshBlueprints, type BlueprintBankId } from "./blueprints";
 import { runWriter } from "./writer";
 import { searchCivitai, installLora, type CivitLora } from "./api";
 import { minorWords } from "./adult";
@@ -36,12 +37,46 @@ export interface CosItem {
   lora?: Candidate | null;
   loraFile?: LoraPick | null;
 }
+export type CosplayVibe = "bold" | "selfie" | "glamour" | "editorial";
+export const COSPLAY_VIBES: { id: CosplayVibe; label: string; hint: string; directive: string; banks: BlueprintBankId[] }[] = [
+  {
+    id: "bold",
+    label: "Bold & Flirty",
+    hint: "Sexy low/high angles, arched figure-flattering poses, teasing eye contact & candid warm lighting (never stiff convention photos)",
+    directive: "BOLD & FLIRTY COSPLAY: Shoot like an alluring private cosplay shoot or boudoir-tinted candid — dynamic low/high/three-quarter angles, hip pops, crouched or reclining curves, strap/collar/zipper tease, heavy-lidded eye contact, warm directional practical light, and flattering natural figure framing. Never stiff straight-on convention standing poses.",
+    banks: ["sexy_cosplay", "camera_glamour", "mirror_choreo"],
+  },
+  {
+    id: "selfie",
+    label: "Candid Selfie",
+    hint: "Raw smartphone selfies, mirror hip-twists, and late-night digicam flash bedroom snaps in cosplay",
+    directive: "CANDID SELFIE & MIRROR COSPLAY: Shoot like raw unposed smartphone front-camera selfies, low-hip upward snaps, bedroom mirror hip-twists, and late-night compact digicam flash photos she took herself in full cosplay — authentic warm bedroom lamp light, subtle phone grain, zero stiff studio posing.",
+    banks: ["raw_selfie", "mirror_choreo", "sexy_cosplay"],
+  },
+  {
+    id: "glamour",
+    label: "Men's-Mag Glamour",
+    hint: "Early-2000s men's-magazine glamour lighting, warm skin tones, seductive gaze, and editorial curves",
+    directive: "MEN'S-MAGAZINE GLAMOUR COSPLAY: Early-2000s glossy men's-magazine glamour photography feel — warm tungsten highlights on natural unretouched skin, flattering 3/4 waist-to-hip framing, leaning forward over ledges/sofas, direct sultry eye contact, rich saturated costume textures.",
+    banks: ["camera_glamour", "sexy_cosplay", "lingerie_boudoir"],
+  },
+  {
+    id: "editorial",
+    label: "Editorial World",
+    hint: "Cinematic real-world locations evoking her canon story with varied camera geometry",
+    directive: "EDITORIAL WORLD COSPLAY: Grounded cinematic location photography evoking her world — dramatic camera height changes, environmental depth, authentic practical/natural weather lighting, natural candid expression.",
+    banks: ["camera_glamour", "sexy_cosplay"],
+  },
+];
+
 export interface Shot { brief: string; pose: string; prompt: string; ref?: import("./posewear").PwPick }
 export interface CosOpts { cosplayer: "one" | "each"; charId: string | null; auto: boolean; minCollected: number; takes: number;
   /** LoRAs on every cosplay picture (a realism or skin LoRA, say) */
   loras: LoraPick[];
   /** where the poses come from: the writer's mix, or your PoseWear picks (copied through their depth) */
   poses: "mix" | "posewear" | "library";
+  /** cosplay photography & pose vibe (bold default fixes stiff convention photos) */
+  vibe?: CosplayVibe;
   /** read the character LoRA's own Krea 2 posts for its costume wording */
   posts: boolean;
   collapsed: boolean;
@@ -66,7 +101,7 @@ export const useCosplay = create<{ items: CosItem[]; opts: CosOpts; workers?: nu
     const saved = load<Partial<CosOpts> & { v?: number }>(KEY + ".opts", {});
     // v2: the PoseWear library is the default pose source (older saved settings had "words only")
     if ((saved.v ?? 1) < 2) { if (saved.poses === "mix") saved.poses = "library"; saved.v = 2; }
-    return { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "library", posts: true, collapsed: false, look: "", director: false, ...saved } as CosOpts;
+    return { cosplayer: "each", charId: null, auto: false, minCollected: 50, takes: 3, loras: [], poses: "library", vibe: "bold", posts: true, collapsed: false, look: "", director: false, ...saved } as CosOpts;
   })(),
   set: (p) => { set(p); save(); },
   update: (key, p) => { set({ items: get().items.map((x) => (x.key === key ? { ...x, ...p } : x)) }); save(); },
@@ -180,17 +215,25 @@ export interface Brief { brief: string; ref?: PwPick; options?: PwPick[] }
 /** a dealer of shots for one run. Angles and generic poses walk their own shuffled lists; every place is from the
  *  character's own world (the writer names them). With the PoseWear library, each character gets 8 poses no other
  *  character in the run gets, and the writer picks the ones that suit her — so no pose repeats across the batch */
-function dealer(posePicks: PwPick[], library: PwPick[]) {
-  const A = shuffle(ANGLES.filter((a) => !/close-up/.test(a))), P = shuffle(POSES), R = shuffle(posePicks);
-  let i = 0, cur = 0;
-  const OPTS = 8;
+function dealer(posePicks: PwPick[], library: PwPick[], vibeId: CosplayVibe = "bold") {
+  const vibe = COSPLAY_VIBES.find((v) => v.id === vibeId) ?? COSPLAY_VIBES[0];
+  const R = shuffle(posePicks);
+  // Pre-deal a large non-repeating queue of real CivitAI camera/pose blueprints matching this cosplay vibe!
+  const fresh = pickFreshBlueprints(vibe.banks, 48, `cosplay:${vibe.id}`, 1);
+  let i = 0;
   return (k: number, shared?: PwPick[]): Brief => {
     const n = i++;
-    if (k === 0) return { brief: `ANGLE: ${CLOSE} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
-    if (R.length) { const ref = R[n % R.length]; return { brief: `POSE (copy exactly): ${ref.words} · SETTING: ${WORLD}`, ref }; }
-    if (library.length && shared) return { brief: `POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${WORLD}`, options: shared };
-    void cur; void OPTS;
-    return { brief: `ANGLE: ${A[n % A.length]} · POSE: ${P[(n * 3 + 1) % P.length]} · SETTING: ${WORLD}` };
+    const bp = fresh[n % fresh.length];
+    const setting = vibe.id === "selfie"
+      ? "a cozy dimly lit bedroom, bathroom vanity, or warm personal room that fits her vibe (varied spot per shot)"
+      : WORLD;
+    if (k === 0) {
+      const lead = fresh.find((x) => /close|portrait|selfie|waist|collar|choker|lean/i.test(x.words)) ?? bp;
+      return { brief: `VIBE: ${vibe.directive} · CAMERA & POSE: ${lead?.words ?? CLOSE} · SETTING: ${setting}` };
+    }
+    if (R.length) { const ref = R[n % R.length]; return { brief: `VIBE: ${vibe.directive} · POSE (copy exactly): ${ref.words} · SETTING: ${setting}`, ref }; }
+    if (library.length && shared) return { brief: `VIBE: ${vibe.directive} · POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${setting}`, options: shared };
+    return { brief: `VIBE: ${vibe.directive} · CAMERA & POSE (follow this exact camera height, angle, and body choreography): ${bp?.words ?? ANGLES[n % ANGLES.length]} · SETTING: ${setting}` };
   };
 }
 /** the next poses from the library for one character (none of them dealt to anyone else in this run) */
@@ -322,7 +365,7 @@ export async function researchAll(cosplayer: string, only?: string) {
       poseLib = [...shuffle(items.filter((x) => ps.favs[x.key])).map(pick), ...shuffle(items.filter((x) => !ps.favs[x.key])).map(pick)];
     } catch (e) { (await import("./jobs")).useJobs.getState().toast(`PoseWear library didn't load (${(e as Error).message}) — poses are written in words this time`, "bad", "batch"); }
   }
-  const deal = dealer(picksNow, poseLib);
+  const deal = dealer(picksNow, poseLib, st.opts.vibe ?? "bold");
   const libAt = { i: 0 };
   // your Krea 2 LoRAs the writer may choose from (not the locked ones, not other characters' LoRAs)
   let library = "(not used)", libNames = new Set<string>(), ckNames = new Set<string>();

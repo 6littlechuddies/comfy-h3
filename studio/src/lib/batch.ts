@@ -9,7 +9,7 @@ import { buildAnimate, buildCreate, buildEdit, buildMasterPackShot, buildPromptH
 import { look } from "./charVideo";
 import { h3Frames, h3Size } from "./models";
 import { useJobs, type Job } from "./jobs";
-import { DEFAULTS, editArgs, modelArgs, modelOf, newSeed, qualityTags, useSettings } from "./settings";
+import { DEFAULTS, KREA_SAMPLER_PRESETS, editArgs, modelArgs, modelOf, newSeed, qualityTags, useSettings } from "./settings";
 import { animeTags, describe, looks, isAdult, replaceSiteSetsByTag, useCharacters, type View } from "./characters";
 import { parseTimeline, toPrompt } from "./timeline";
 import type { Media } from "./tray";
@@ -92,6 +92,12 @@ export interface BatchOpts {
   target: "video" | "image";
   /** realistic pictures: the checkpoint — 03 Create's, or one picked here ("" = Krea 2 official); locked = every row uses it */
   ck?: { mode: "create" | "pick" | "auto"; name: string; locked: boolean };
+  /** Extra Krea 2 LoRAs applied across Batch pictures (V9 Master Pack, Plan, Swap in, Cosplay, Create rows) */
+  batchLoras?: import("./graphs").LoraPick[];
+  /** Optional Krea 2 sampler preset override for Batch picture rows ("create" = inherit 03 Create) */
+  batchPreset?: "create" | "turbo" | "crisp" | "candid";
+  /** Optional light 1.5× 4-step latent refine pass (denoise 0.30) on Krea 2 T2I / Cosplay / Pose rows */
+  batchRefine?: boolean;
   characterId: string | null;
   seconds: number;
   aspect: "16:9" | "9:16" | "1:1";
@@ -182,7 +188,18 @@ export const useBatch = create<BatchState>((set) => ({
   rows: [newRow()],
   rec: loadRec(),
   ck: (() => { try { return JSON.parse(localStorage.getItem("h3.batch.ck") || "null") ?? undefined; } catch { return undefined; } })(),
-  set: (p) => { if (p.ck) try { localStorage.setItem("h3.batch.ck", JSON.stringify(p.ck)); } catch { /* */ } if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ } if (p.rec) saveRec(p.rec); set(p); },
+  batchLoras: (() => { try { return JSON.parse(localStorage.getItem("h3.batch.loras") || "[]"); } catch { return []; } })(),
+  batchPreset: (() => { try { return (localStorage.getItem("h3.batch.preset") as BatchOpts["batchPreset"]) || "create"; } catch { return "create"; } })(),
+  batchRefine: (() => { try { return localStorage.getItem("h3.batch.refine") === "1"; } catch { return false; } })(),
+  set: (p) => {
+    if (p.ck) try { localStorage.setItem("h3.batch.ck", JSON.stringify(p.ck)); } catch { /* */ }
+    if (p.target) try { localStorage.setItem("h3.batch.target", p.target); } catch { /* private mode */ }
+    if (p.batchLoras !== undefined) try { localStorage.setItem("h3.batch.loras", JSON.stringify(p.batchLoras)); } catch { /* */ }
+    if (p.batchPreset !== undefined) try { localStorage.setItem("h3.batch.preset", p.batchPreset); } catch { /* */ }
+    if (p.batchRefine !== undefined) try { localStorage.setItem("h3.batch.refine", p.batchRefine ? "1" : "0"); } catch { /* */ }
+    if (p.rec) saveRec(p.rec);
+    set(p);
+  },
   add: (p) => set((s) => ({ rows: [...s.rows, newRow(p)] })),
   update: (id, p) => set((s) => ({ rows: s.rows.map((r) => (r.id === id ? { ...r, ...p } : r)) })),
   remove: (id) => set((s) => ({ rows: s.rows.filter((r) => r.id !== id) })),
@@ -376,6 +393,27 @@ export async function queueAll(only?: string[]): Promise<number> {
   if (useBatch.getState().target === "image" && picturesToWrite().some((r) => r.inspo || r.expression)) await writePicturePrompts();
   const b = useBatch.getState();
   const st = useSettings.getState().s;
+  const mergeUniqueLoras = (...lists: (import("./graphs").LoraPick[] | undefined)[]) => {
+    const out: import("./graphs").LoraPick[] = [];
+    const seen = new Set<string>();
+    for (const xs of lists) for (const l of xs ?? []) if (l?.name && !seen.has(l.name)) { seen.add(l.name); out.push(l); }
+    return out;
+  };
+  /** Resolve Batch's Krea 2 checkpoint override for edit/V9 paths ("official" → undefined, custom → file path) */
+  const batchUnet = async (rowCk?: string, rowMine?: boolean): Promise<string | undefined> => {
+    const bck = b.ck?.mode === "pick" ? (b.ck.name || "official") : undefined;
+    const ck = rowMine || b.ck?.mode === "auto" ? rowCk : bck;
+    if (ck === "official") return undefined;
+    if (ck) { await needCheckpoint(ck); return ck; }
+    // mode === "create" (default): inherit 03 Create's Krea 2 checkpoint if set
+    const fromCreate = st.create.checkpoint?.krea2 || undefined;
+    if (fromCreate) await needCheckpoint(fromCreate);
+    return fromCreate;
+  };
+  const batchAdv = (baseAdv: typeof st.create.advKrea) => {
+    const p = b.batchPreset && b.batchPreset !== "create" ? KREA_SAMPLER_PRESETS.find((x) => x.id === b.batchPreset) : undefined;
+    return p ? { ...baseAdv, sampler: p.sampler, scheduler: p.scheduler, steps: p.steps, cfg: p.cfg } : baseAdv;
+  };
   const ids: string[] = [];
   const ready = b.rows.filter((r) => r.status !== "queued" && !rowProblem(r) && (!only || only.includes(r.id)));
   // rows that copy a pose need the depth models: checked once up front (starting their download) — not 150 rows failing one by one
@@ -409,6 +447,8 @@ export async function queueAll(only?: string[]): Promise<number> {
         const v = r.v9;
         const shot = r.prompt.trim() || r.idea.trim();
         const disp = c ? (c.site?.name || c.name) : (v.label || "Quick photo");
+        const unet = await batchUnet(r.checkpoint, r.ckMine);
+        const v9Loras = mergeUniqueLoras(r.loras, b.batchLoras);
         for (let t = 0; t < r.takes; t++) {
           const job = await useJobs.getState().run(
             "batch",
@@ -419,12 +459,13 @@ export async function queueAll(only?: string[]): Promise<number> {
               seed: newSeed(),
               prefix: v.prefix,
               refBoost: v.refBoost,
-              loras: r.loras ?? [],
+              unet,
+              loras: v9Loras,
               bodyAnchor: v.bodyAnchor,
               nudeFraming: v.nudeFraming,
             }),
             "edit:krea:1:v9",
-            { batchRow: r.id, kind: "make", project: c?.id ?? null, sent: { prompt: shot, character: disp }, ...extra(r, c) },
+            { batchRow: r.id, kind: "make", project: c?.id ?? null, sent: { prompt: shot, character: disp, checkpoint: unet ?? "official" }, ...extra(r, c) },
           );
           rowIds.push(job.id); ids.push(job.id);
         }
@@ -437,9 +478,10 @@ export async function queueAll(only?: string[]): Promise<number> {
             path: "V9 Master Pack (Krea 2 Identity Edit V2 · 8 steps · 832×1216)",
             character: disp,
             pack: v.packTag,
+            checkpoint: unet ?? "official",
             reference: v.cutoutImage,
             refBoost: v.refBoost,
-            loras: (r.loras ?? []).map((l) => `${l.name} @${l.strength}`),
+            loras: v9Loras.map((l) => `${l.name} @${l.strength}`),
             instruction: shot.slice(0, 600),
             toSet: r.toSet?.setKey ?? r.toSet?.title ?? null,
           },
@@ -515,7 +557,9 @@ export async function queueAll(only?: string[]): Promise<number> {
                 ? `Change only the face and hair of the ${noun} in this picture so they become the ${noun} from the second picture: exactly their face, eye colour, eyebrows, nose, lips, skin tone, hairstyle and hair colour. Keep everything else in this picture exactly as it is — body, outfit, pose, hands, expression, camera, lighting, colours and background.${extraWords} Only one ${noun} in the picture. Everyone is an adult.`
                 : `Replace the ${noun} in this picture with the ${noun} from the second picture: keep this picture's exact pose, framing, setting and lighting, and keep the second ${noun}'s face, hair, body and outfit exactly the same.${extraWords} Only one ${noun} in the picture. Everyone is an adult.`;
             const rr: Row = { ...r, faceFix: r.faceFix || b.faceFix, toSet: r.toSet ?? (b.setTitle?.trim() ? { title: b.setTitle.trim(), tier: b.tier ?? "premium" } : undefined) };
-            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1}${who ? ` · ${who.name}` : ""} · picture`, buildEdit({ ...editArgs(st.edit, engine), enhance: false, seed: newSeed(), images, instruction, negative: "", resolution: 1024, prefix: "studio/batch/edit" }), "edit:batch", { batchRow: r.id, kind: "make", ...extra(rr, who) });
+            const swapUnet = await batchUnet(r.checkpoint, r.ckMine);
+            const ea = editArgs(st.edit, engine);
+            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1}${who ? ` · ${who.name}` : ""} · picture`, buildEdit({ ...ea, ...(swapUnet ? { unet: swapUnet } : b.ck?.mode === "pick" && !b.ck.name ? { unet: undefined } : {}), loras: mergeUniqueLoras(ea.loras, b.batchLoras), enhance: false, seed: newSeed(), images, instruction, negative: "", resolution: 1024, refBoost: Math.min(2.0, ea.refBoost ?? 1.5), prefix: "studio/batch/edit" }), "edit:batch", { batchRow: r.id, kind: "make", ...extra(rr, who) });
             rowIds.push(job.id); ids.push(job.id);
           }
           noteRowUse(r, b, null, stars.map((x) => x?.id ?? null));
@@ -542,11 +586,14 @@ export async function queueAll(only?: string[]): Promise<number> {
             // a PoseWear pose: its depth steers her body on the blank canvas (experimental — see Copy debug)
             if (r.control) await (await import("./posewear")).depthReady();
             const named = r.idea.replace(/^(Cosplay|Pose) · /, "").slice(0, 50);
-            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name}${named ? ` · ${named}` : ""} · ${cs.view}`, buildEdit({ ...editArgs(st.edit, "krea"), loras: cs.loras, enhance: false, seed: newSeed(),
-              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 2.8, prefix: "studio/batch/create", control: r.control }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
-            useBatch.getState().update(r.id, { debug: { path: "character sheet (Krea 2 Identity Edit on a blank canvas)", character: c.name, view: cs.view, reference: cs.ref.name, pose: r.pose?.title ?? null,
+            const sheetUnet = await batchUnet(r.checkpoint, r.ckMine);
+            const sheetLoras = mergeUniqueLoras(cs.loras, b.batchLoras);
+            const ea = editArgs(st.edit, "krea");
+            job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${c.name}${named ? ` · ${named}` : ""} · ${cs.view}`, buildEdit({ ...ea, ...(sheetUnet ? { unet: sheetUnet } : b.ck?.mode === "pick" && !b.ck.name ? { unet: undefined } : {}), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", loras: sheetLoras, enhance: false, seed: newSeed(),
+              images: [cs.ref.name], blank: cs.canvas, instruction: cs.instruction, negative: "", resolution: 1024, refBoost: 1.45, prefix: "studio/batch/create", control: r.control }), "edit:krea:1:raw", { batchRow: r.id, kind: "make", ...extra(r, c) });
+            useBatch.getState().update(r.id, { debug: { path: "character sheet (Krea 2 Identity Edit V2 · anti-blotch refBoost 1.45)", character: c.name, view: cs.view, checkpoint: sheetUnet ?? "official", reference: cs.ref.name, pose: r.pose?.title ?? null,
               poseImage: r.control?.image ?? null, poseDepth: r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : null, poseStrength: r.control?.strength ?? null,
-              loras: cs.loras.map((l) => `${l.name} @${l.strength}`), instruction: cs.instruction.slice(0, 600), canvas: `${cs.canvas.width}×${cs.canvas.height}` } });
+              loras: sheetLoras.map((l) => `${l.name} @${l.strength}`), instruction: cs.instruction.slice(0, 600), canvas: `${cs.canvas.width}×${cs.canvas.height}` } });
             rowIds.push(job.id); ids.push(job.id);
             continue;
           }
@@ -560,8 +607,8 @@ export async function queueAll(only?: string[]): Promise<number> {
           const ck = r.ckMine || b.ck?.mode === "auto" ? r.checkpoint : bck;
           if (!anime && ck && ck !== "official") await needCheckpoint(ck);
           const ckArgs = !anime && ck ? (ck === "official" ? { ...ma, unet: undefined } : { ...ma, unet: ck }) : ma;
-          let rowLoras = [...(c?.loras ?? []), ...mi.loras, ...(r.loras ?? [])];
-          if (!anime && r.loras?.length) {
+          let rowLoras = mergeUniqueLoras(c?.loras, mi.loras, r.loras, !anime ? b.batchLoras : undefined);
+          if (!anime && (r.loras?.length || b.batchLoras?.length)) {
             // the locked ones keep your strength; the rest are fitted into what's left of Krea 2's budget
             const isLocked = (l: { name: string }) => !!r.locked?.includes(l.name);
             const fixed = rowLoras.filter(isLocked), free = rowLoras.filter((l) => !isLocked(l));
@@ -570,11 +617,13 @@ export async function queueAll(only?: string[]): Promise<number> {
             rowLoras = [...fixed, ...bal.loras];
             if (bal.changed.length) useBatch.getState().update(r.id, { note: `LoRAs balanced around your locked ones: ${bal.changed.join(", ")}` });
           }
+          const finalAdv = !anime ? batchAdv(adv) : adv;
+          const hires = !anime && b.batchRefine ? { scale: 1.5, denoise: 0.30, steps: 4 } : undefined;
           job = await useJobs.getState().run("batch", `Batch ${b.rows.indexOf(r) + 1} · ${named || "picture"}`, buildCreate({
-            ...adv, seed: newSeed(), ...ckArgs, positive, negative: st.create.negative, loras: rowLoras,
-            width: w, height: h, count: 1, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,
+            ...finalAdv, seed: newSeed(), ...ckArgs, positive, negative: st.create.negative, loras: rowLoras,
+            width: w, height: h, count: 1, hires, cutout: false, prefix: "studio/batch/create", control: !anime && r.control ? r.control : undefined,
           }), `create:${anime ? "anime" : "realistic"}:portrait:1`, { batchRow: r.id, kind: "make", ...extra(r, c) });
-          useBatch.getState().update(r.id, { debug: { path: anime ? "anime text-to-picture" : "Krea 2 text-to-picture", character: c?.name ?? null, model: mi.label, size: `${w}×${h}`,
+          useBatch.getState().update(r.id, { debug: { path: anime ? "anime text-to-picture" : `Krea 2 text-to-picture (${finalAdv.sampler}/${finalAdv.scheduler} ${finalAdv.steps}s${hires ? " + 1.5× refine" : ""})`, character: c?.name ?? null, model: mi.label, size: `${w}×${h}`,
             pose: r.pose?.title ?? null, poseImage: !anime && r.control ? r.control.image : null, poseDepth: !anime && r.control ? (r.control.estimate ? "worked out from the pose picture" : "depth map as given") : r.control ? "skipped (anime)" : null,
             poseStrength: !anime && r.control ? r.control.strength : null, checkpoint: (ckArgs as { unet?: string }).unet ?? "official", loras: rowLoras.map((l) => `${l.name} @${l.strength}`), prompt: positive.slice(0, 900) } });
         }

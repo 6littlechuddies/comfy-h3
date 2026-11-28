@@ -1,6 +1,6 @@
 // Builds ComfyUI API-format prompts for each Studio tab.
 // Every builder here is validated against a real ComfyUI's /prompt by scripts/test-graphs.ts.
-import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, h3FramesFloor, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
+import { H3_CACHE_NODE, KREA_BOOST_NODE, M, REALISM_TRIGGER, h3CacheOn, realismOn, h3ErosOn, h3Frames, h3FramesFloor, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
 import { fastAttnOn, speedOn } from "./speed";
 
 /** Speed-ups → Faster attention: ComfyUI's INT8 attention (only when this ComfyUI has it); off = the model as it was */
@@ -310,6 +310,8 @@ export interface MasterPackShotOpts {
   seed: number;
   prefix: string;
   refBoost: number;
+  /** Optional custom Krea 2 diffusion UNET checkpoint (defaults to stock Krea 2 Turbo) */
+  unet?: string;
   loras?: LoraPick[];
   bodyAnchor?: string;
   nudeFraming?: boolean;
@@ -319,7 +321,7 @@ export interface MasterPackShotOpts {
  *  exact ref_boost 1.38–1.42 without halving, fast INT8 attention, CFG 1 euler/simple — zero over-step fizz). */
 export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
   const g = new G();
-  const unet = g.add("UNETLoader", { unet_name: M.kreaUnet, weight_dtype: "default" });
+  const unet = g.add("UNETLoader", { unet_name: p.unet || M.kreaUnet, weight_dtype: "default" });
   const editLora = kreaEditV2() ? M.kreaIdentityV2 : M.kreaEditLora;
   let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: editLora, strength_model: 1 }));
   for (const l of activeLoras(p.loras ?? [])) {
@@ -861,6 +863,10 @@ export function buildAnimate(p: AnimateOpts): ApiGraph {
   const rayLoras = [...(p.turbo && ref ? [{ name: M.h3TurboRef, strength: 1 }] : flTurbo ? [{ name: M.h3TurboFl8, strength: 1 }] : []), ...activeLoras(p.loras), ...(real ? [{ name: M.h3Realism, strength: 0.8 }] : [])];
   // Eros Max beta6: its author's "10/3 shift" (video 10, audio 3; the official files keep their own 12/3) — ComfyUI's own node
   if (eros) model = o(g.add("MiniMaxH3SigmaShift", { model, shift_video: 10, shift_audio: 3 }));
+  // Optional Deooeo First-Block Cache speedup (only inserted when node is installed AND user opted in under Animate → Advanced)
+  if (h3CacheOn() && !ray) {
+    model = o(g.add(H3_CACHE_NODE, { model, start_percent: 0.1, end_percent: 0.95, threshold: 0.1, max_consecutive_hits: 2, temporal_guard: false, mode: "H3 Fast — 0.10 / max 2" }, "H3 First-Block Cache"));
+  }
   model = fastAttn(g, model);
   const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
   const vae = g.add("VAELoader", { vae_name: M.h3Vae });

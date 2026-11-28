@@ -340,7 +340,7 @@ function ClassicEdit() {
           onFamily={(fam, pick) => { const eng: EditEngine = fam === "sdxl" ? "noob" : fam === "anima" ? "anima" : "krea"; const k = editKeys(eng); setEngine(eng); set({ engine: eng, [k.loras]: [...(e[k.loras] ?? []).filter((x) => x.name !== pick.name), pick] } as Partial<typeof e>); }} />
         <p className="-mt-2 text-[12px] leading-relaxed text-dim">Not needed to keep a face — Edit copies it from your picture. Use LoRAs for a style or effect you want added.</p>
         {engine === "krea" && <KreaEditModel />}
-        {engine === "krea" && <Slider label="Hold on to the reference" min={1} max={8} step={0.5} value={e.refBoost ?? 4} show={(e.refBoost ?? 4).toFixed(1)} onChange={(v) => set({ refBoost: v })} />}
+        {engine === "krea" && <Slider label="Hold on to the reference (1.0–1.5 = zero blotch)" min={1} max={6} step={0.25} value={e.refBoost ?? 1.5} show={(e.refBoost ?? 1.5).toFixed(2)} onChange={(v) => set({ refBoost: v })} />}
         <FaceFix on={!!e.faceFix} strength={e.faceStrength ?? 0.45} onChange={(p) => set({ ...(p.on != null ? { faceFix: p.on } : {}), ...(p.strength != null ? { faceStrength: p.strength } : {}) })} />
         <TextIn label="Negative prompt · avoid" help="negative" value={e.negative} onChange={(v) => set({ negative: v })} placeholder="e.g. blurry, extra fingers" />
         <Advanced a={e[keys.adv]} set={(p) => set({ [keys.adv]: { ...e[keys.adv], ...p } } as Partial<typeof e>)}>
