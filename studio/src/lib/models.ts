@@ -121,10 +121,16 @@ export const M = {
   qwenAngles: "qwen-image-edit-2511-multiple-angles-lora.safetensors",
 } as const;
 
-/** H3 frame count: 24 fps, snapped to the model's 17k+5 grid (same formula as the official template). */
+/** H3 frame count: 24 fps, snapped UP to the model's 17k+5 grid (same formula as the official template). */
 export function h3Frames(seconds: number): number {
   const l = Math.max(5, Math.round(seconds * 24));
   return l + ((((5 - (l % 17)) % 17) + 17) % 17);
+}
+
+/** H3 frame count snapped DOWN to the largest 17k+5 <= clip frames (prevents empty tail frames on guide-video swaps). */
+export function h3FramesFloor(seconds: number): number {
+  const raw = Math.max(5, Math.floor(seconds * 24));
+  return Math.max(5, raw - ((((raw - 5) % 17) + 17) % 17));
 }
 
 /** Size for H3 from a picture's width ÷ height and megapixels, multiples of 32 (a vertical photo stays vertical, never stretched) */

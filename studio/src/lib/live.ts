@@ -570,6 +570,14 @@ export async function likenessTest(cid: string, actionKey?: string): Promise<voi
   const { width, height } = h3Size("9:16", 0.88);
   const seconds = Math.min(15, act.seconds);
   const seed = newSeed(); // the same seed for all three: only the way differs
+  const { toInput } = await import("./api");
+  const refmodFiles: string[] = [];
+  for (const v of [c.views.cutout ?? c.views.front, c.views.face, c.views.threeq, c.views.left, c.views.back]) {
+    if (!v) continue;
+    const n = await toInput(v).then((x) => x.name).catch(() => "");
+    if (n && !refmodFiles.includes(n)) refmodFiles.push(n);
+  }
+  const refmodImgs = refmodFiles.length ? refmodFiles : R.files.filter((f) => f !== l.room?.input);
   const one = async (way: TestWay) => {
     try {
       const refs = way === "refs";
@@ -582,8 +590,8 @@ export async function likenessTest(cid: string, actionKey?: string): Promise<voi
         images: pics, videos: [], audios: [], seconds, width, height, turbo: a.turbo, loras: a.loras, refImageSize: a.refImageSize, lowMemDecode: a.lowMemDecode, prefix: `studio/live/${cid}_test`,
         plain: true, mouth: "closed", music: "none", avoid: "camera movement, cuts, zoom, text, watermark", anime: c.style === "anime",
         ...(refs ? { guides: [{ image: anchor, frame: 0 }] } : {}),
-        // the room sheet stays out of the RefMod: it's an identity reference, the room comes from her still
-        ...(way === "refmod" ? { refmod: { images: R.files.filter((f) => f !== l.room?.input), copies: 2 } } : {}) });
+        // RefMod: clean individual angle views (front/cutout, face, 3/4, side, back) — never room sheets or cramped 12-face grids
+        ...(way === "refmod" ? { refmod: { images: refmodImgs, copies: 2 } } : {}) });
       const j = await useJobs.getState().run("characters", `${c.name} · likeness test · ${TEST_WAYS.find((t) => t.way === way)!.label}`, g, `animate:${refs ? "ref" : "i2v"}:live:${seconds}s`, { charId: cid, live: `test_${way}` });
       const done = await waitForJob(j.id);
       const src = done.outputs.find((o) => o.kind === "video" && o.type === "output");

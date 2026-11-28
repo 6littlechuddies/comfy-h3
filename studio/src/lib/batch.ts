@@ -5,12 +5,12 @@
 import { create } from "zustand";
 import { planWriter, useBigPlanner } from "./packs";
 import { balanceLoras, BUDGET } from "./loraBalance";
-import { buildAnimate, buildCreate, buildEdit, buildPromptHelper, MINOR_FLAG, type AnimateOpts } from "./graphs";
+import { buildAnimate, buildCreate, buildEdit, buildMasterPackShot, buildPromptHelper, MINOR_FLAG, type AnimateOpts } from "./graphs";
 import { look } from "./charVideo";
 import { h3Frames, h3Size } from "./models";
 import { useJobs, type Job } from "./jobs";
 import { DEFAULTS, editArgs, modelArgs, modelOf, newSeed, qualityTags, useSettings } from "./settings";
-import { animeTags, describe, looks, isAdult, useCharacters, type View } from "./characters";
+import { animeTags, describe, looks, isAdult, replaceSiteSetsByTag, useCharacters, type View } from "./characters";
 import { parseTimeline, toPrompt } from "./timeline";
 import type { Media } from "./tray";
 import { watchJobs } from "./notify";
@@ -29,7 +29,9 @@ export interface Row {
   jobIds: string[];
   /** content plan rows: their own star (instead of the batch's), the site set the pictures go into, and the face pass */
   charId?: string;
-  toSet?: { title: string; tier: "free" | "premium" };
+  toSet?: { title: string; tier: "free" | "premium"; setKey?: string; rating?: "sfw" | "suggestive" | "explicit" };
+  /** V9 Master Pack row: exact Krea 2 Identity Edit V2 settings (pre-cut cutout ref, ref_boost, pack LoRAs, nude framing; works with or without a saved character) */
+  v9?: { packKey: string; packTag: string; cutoutImage: string; refBoost: number; bodyAnchor: string; prefix: string; nudeFraming?: boolean; replaceExisting?: boolean; label?: string };
   faceFix?: boolean;
   /** a saved CivitAI scene prompt to borrow the setting, light, camera and finish from (never its person) */
   inspo?: string;
@@ -386,8 +388,65 @@ export async function queueAll(only?: string[]): Promise<number> {
     const q = useDownloads.getState().groups.find((g) => g.id === "qwen");
     if (q && q.state !== "done") throw new Error(`Swap in needs the Edit chat helper (Qwen-Image-Edit) — it's ${q.state === "downloading" ? `downloading, ${q.pct}%` : q.state === "error" ? "failed to download (status menu → Retry)" : "in line"}. Pick Face only or Whole person meanwhile.`);
   }
+  // Replace older V9 sets ONLY for (character, packTag) pairs that are actually being queued right now (never on review-only)
+  const replacedV9 = new Map<string, Set<string>>();
+  if (b.target === "image") {
+    for (const r of ready) {
+      if (!r.v9?.replaceExisting || !r.charId) continue;
+      let tags = replacedV9.get(r.charId);
+      if (!tags) { tags = new Set(); replacedV9.set(r.charId, tags); }
+      tags.add(r.v9.packTag);
+    }
+    for (const [cid, tags] of replacedV9) replaceSiteSetsByTag(cid, [...tags]);
+  }
   for (const r of ready) {
     const rowIds: string[] = [];
+    // V9 Master Pack: verified 8-step Krea 2 Identity Edit V2 fast path (works for saved characters AND standalone quick photos)
+    if (b.target === "image" && r.v9) {
+      try {
+        const c = character(r);
+        if (r.charId && !c) throw new Error("Character not found (or under 18)");
+        const v = r.v9;
+        const shot = r.prompt.trim() || r.idea.trim();
+        const disp = c ? (c.site?.name || c.name) : (v.label || "Quick photo");
+        for (let t = 0; t < r.takes; t++) {
+          const job = await useJobs.getState().run(
+            "batch",
+            `V9 · ${disp} · ${r.idea.trim() || v.packKey}${r.takes > 1 ? ` · take ${t + 1}` : ""}`,
+            buildMasterPackShot({
+              cutoutImage: v.cutoutImage,
+              instruction: shot,
+              seed: newSeed(),
+              prefix: v.prefix,
+              refBoost: v.refBoost,
+              loras: r.loras ?? [],
+              bodyAnchor: v.bodyAnchor,
+              nudeFraming: v.nudeFraming,
+            }),
+            "edit:krea:1:v9",
+            { batchRow: r.id, kind: "make", project: c?.id ?? null, sent: { prompt: shot, character: disp }, ...extra(r, c) },
+          );
+          rowIds.push(job.id); ids.push(job.id);
+        }
+        useBatch.getState().update(r.id, {
+          status: "queued",
+          jobIds: rowIds,
+          error: undefined,
+          v9: { ...v, replaceExisting: false },
+          debug: {
+            path: "V9 Master Pack (Krea 2 Identity Edit V2 · 8 steps · 832×1216)",
+            character: disp,
+            pack: v.packTag,
+            reference: v.cutoutImage,
+            refBoost: v.refBoost,
+            loras: (r.loras ?? []).map((l) => `${l.name} @${l.strength}`),
+            instruction: shot.slice(0, 600),
+            toSet: r.toSet?.setKey ?? r.toSet?.title ?? null,
+          },
+        });
+      } catch (e) { useBatch.getState().update(r.id, { status: "error", error: (e as Error).message }); }
+      continue;
+    }
     // Recreate: a CivitAI post again, as posted — its prompt, settings and its own LoRAs, a new seed per take
     if (b.target === "image" && r.civit) {
       try {

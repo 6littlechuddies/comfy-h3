@@ -362,9 +362,10 @@ export function identityLine(refs: Ref[], list: Character[], prompt: string): st
 }
 
 /** pick a saved character: its pictures go in as references, named and described for the writer.
- *  "Every angle" sends the whole reference sheet (front, face, sides, back…) instead of just the front and face. */
-export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r: Ref[]) => void }) {
-  const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && c.views.front);
+ *  "Every angle" sends the whole reference sheet (front, face, sides, back…) instead of just the front and face.
+ *  With `singleFront` (BFS H3 Character Swap v1.1): picks ONLY her cleanest single front/cover photo and keeps any guide video. */
+export function CharacterPicker({ refs, onChange, singleFront = false }: { refs: Ref[]; onChange: (r: Ref[]) => void; singleFront?: boolean }) {
+  const list = useCharacters((s) => s.list).filter((c) => isAdult(c) && (c.views.front || c.cover || c.views.face));
   const toast = useJobs((s) => s.toast);
   const [adding, setAdding] = useState<string | null>(null);
   const [every, setEvery] = useState<CharMode>(charMode);
@@ -375,7 +376,24 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
   const toggle = async (c: Character) => {
     if (has(c.id)) { onChange(refs.filter((r) => r.charId !== c.id)); return; }
     setAdding(c.id);
-    try { onChange(await withCharacter(c, refs, every)); }
+    try {
+      if (singleFront) {
+        const st = useCharacters.getState();
+        let m = c.views.front ? await st.asMedia(c.id, "front") : null;
+        if (!m && c.cover) {
+          const { toInput } = await import("../lib/api");
+          const inp = await toInput(c.cover);
+          m = { ...inp, url: viewUrl(c.cover), label: c.site?.name || c.name };
+        }
+        if (!m && c.views.face) m = await st.asMedia(c.id, "face");
+        if (!m) throw new Error(`${c.site?.name || c.name} has no front or cover picture yet`);
+        // Replace any previous image refs with her single clean front ref, keeping any guide video/audio intact
+        const keep = refs.filter((r) => r.media.kind !== "image");
+        onChange([{ ...makeRef(m), label: `${c.site?.name || c.name} — reference`, charId: c.id }, ...keep]);
+      } else {
+        onChange(await withCharacter(c, refs, every));
+      }
+    }
     catch (e) { toast((e as Error).message, "bad"); } finally { setAdding(null); }
   };
   if (!list.length) return (
@@ -384,23 +402,26 @@ export function CharacterPicker({ refs, onChange }: { refs: Ref[]; onChange: (r:
   const added = list.filter((c) => has(c.id));
   if (!shown) return (
     <button onClick={() => show(true)} className="flex items-center gap-2 text-left text-[12.5px] text-muted hover:text-ink">
-      ▸ Characters {added.length ? <span className="text-ink">· {added.map((c) => c.name).join(", ")}</span> : <span className="text-dim">· none added</span>}
+      ▸ Characters {added.length ? <span className="text-ink">· {added.map((c) => c.site?.name || c.name).join(", ")}</span> : <span className="text-dim">· none added</span>}
     </button>
   );
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between"><button onClick={() => show(false)} className="text-[12.5px] text-muted hover:text-ink">▾ Characters</button>
-        <span className="flex gap-1 text-[11.5px]">{([["sheet", "Sheet + face", "Her one-picture reference sheet and her face close-up — best for H3 (falls back to every angle if she has no sheet)"], ["stitch", "Stitched + face", "Her own angle pictures (front, three-quarter, sides, back) tiled into ONE picture, plus her face close-up — real pictures instead of the drawn sheet"], ["all", "Every angle", "Every angle as its own picture (up to 9)"], ["few", "Front + face", "Full body and face only"]] as const).map(([v, l, t]) => (
-          <button key={v} title={t} onClick={() => pickEvery(v)} className={cx("press rounded-sm px-1.5 py-0.5", every === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink")}>{l}</button>))}</span></div>
+        {singleFront
+          ? <span className="text-[11px] text-dim">1 clean front photo (auto-cutout)</span>
+          : <span className="flex gap-1 text-[11.5px]">{([["sheet", "Sheet + face", "Her one-picture reference sheet and her face close-up — best for H3 (falls back to every angle if she has no sheet)"], ["stitch", "Stitched + face", "Her own angle pictures (front, three-quarter, sides, back) tiled into ONE picture, plus her face close-up — real pictures instead of the drawn sheet"], ["all", "Every angle", "Every angle as its own picture (up to 9)"], ["few", "Front + face", "Full body and face only"]] as const).map(([v, l, t]) => (
+            <button key={v} title={t} onClick={() => pickEvery(v)} className={cx("press rounded-sm px-1.5 py-0.5", every === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink")}>{l}</button>))}</span>}</div>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {list.map((c) => {
           const on = has(c.id);
           const pic = coverOf(c)!;
+          const disp = c.site?.name || c.name;
           return (
-            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${c.name}` : `Add ${c.name}: ${every === "sheet" ? (c.views.sheet ? "reference sheet + face" : "every angle (no sheet yet)") : every === "stitch" ? "her angle pictures stitched into one + face" : every === "all" ? "every angle of the sheet" : "full body + face"}`}
+            <button key={c.id} onClick={() => toggle(c)} disabled={adding === c.id} aria-pressed={on} title={on ? `Remove ${disp}` : singleFront ? `Use ${disp}'s single front picture for BFS swap` : `Add ${disp}: ${every === "sheet" ? (c.views.sheet ? "reference sheet + face" : "every angle (no sheet yet)") : every === "stitch" ? "her angle pictures stitched into one + face" : every === "all" ? "every angle of the sheet" : "full body + face"}`}
               className={cx("press group relative flex w-[72px] shrink-0 flex-col items-stretch gap-1 rounded-sm border p-1 text-left transition-colors", on ? "border-accent bg-accent/10" : "border-line hover:border-muted")}>
               <span className="checker block h-[78px] overflow-hidden rounded-[2px]"><img src={viewUrl(pic)} alt="" className="h-full w-full object-cover" /></span>
-              <span className="truncate px-0.5 text-[11.5px]">{adding === c.id ? "Adding…" : c.name}</span>
+              <span className="truncate px-0.5 text-[11.5px]">{adding === c.id ? "Adding…" : disp}</span>
               {on && <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-[2px] bg-accent text-accentink"><Icon name="check" size={11} /></span>}
             </button>
           );

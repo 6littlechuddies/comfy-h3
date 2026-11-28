@@ -1,6 +1,6 @@
 // Builds ComfyUI API-format prompts for each Studio tab.
 // Every builder here is validated against a real ComfyUI's /prompt by scripts/test-graphs.ts.
-import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
+import { KREA_BOOST_NODE, M, REALISM_TRIGGER, realismOn, h3ErosOn, h3Frames, h3FramesFloor, interpOn, rtxOn, kreaBoostOn, kreaEditV2 } from "./models";
 import { fastAttnOn, speedOn } from "./speed";
 
 /** Speed-ups → Faster attention: ComfyUI's INT8 attention (only when this ComfyUI has it); off = the model as it was */
@@ -277,6 +277,78 @@ export function buildGreenScreen(image: string, prefix: string, color = "#00B140
   const g = new G();
   const l = g.add("LoadImage", { image });
   g.add("SaveImage", { images: o(matte(g, o(l), "Color", color)), filename_prefix: prefix }, "result");
+  return g.graph;
+}
+
+/** Hole-free #808080 grey cutout once per character for V9 Master Pack:
+ *  - "birefnet" (default): full-body BiRefNet HR-matting on 768×1024 -> unbroken face + body proportions, zero interior holes
+ *  - "face": head+hair+neck FaceSegment crop for front refs with a hand/peace-sign near the face */
+export function buildMasterPackCutout(image: string, prefix: string, mode: "birefnet" | "face" = "birefnet"): ApiGraph {
+  const g = new G();
+  const l = g.add("LoadImage", { image });
+  const sc = g.add("ImageScale", { image: o(l), upscale_method: "lanczos", width: 768, height: 1024, crop: "center" });
+  if (mode === "face") {
+    const cr = g.add("ImageCrop", { image: o(sc), width: 768, height: 460, x: 0, y: 0 });
+    const fs = g.add("FaceSegment", {
+      images: o(cr), Skin: true, Nose: true, Eyeglasses: true,
+      "Left-eye": true, "Right-eye": true, "Left-eyebrow": true, "Right-eyebrow": true,
+      "Left-ear": true, "Right-ear": true, Mouth: true, "Upper-lip": true, "Lower-lip": true,
+      Hair: true, Earring: true, Neck: true, process_res: 768, mask_blur: 2, mask_offset: 2,
+      invert_output: false, unload_model: false, background: "Color", background_color: "#808080",
+    });
+    g.add("SaveImage", { images: o(fs), filename_prefix: prefix }, "result");
+    return g.graph;
+  }
+  const cut = matte(g, o(sc), "Color", "#808080");
+  g.add("SaveImage", { images: o(cut), filename_prefix: prefix }, "result");
+  return g.graph;
+}
+
+export interface MasterPackShotOpts {
+  cutoutImage: string;
+  instruction: string;
+  seed: number;
+  prefix: string;
+  refBoost: number;
+  loras?: LoraPick[];
+  bodyAnchor?: string;
+  nudeFraming?: boolean;
+}
+
+/** V9 Master Pack shot: exact verified 8-step Krea 2 Identity Edit V2 recipe (832×1216 canvas, 0.75 MP cutout ref,
+ *  exact ref_boost 1.38–1.42 without halving, fast INT8 attention, CFG 1 euler/simple — zero over-step fizz). */
+export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: M.kreaUnet, weight_dtype: "default" });
+  const editLora = kreaEditV2() ? M.kreaIdentityV2 : M.kreaEditLora;
+  let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: editLora, strength_model: 1 }));
+  for (const l of activeLoras(p.loras ?? [])) {
+    model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  }
+  model = fastAttn(g, model);
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const loadRef = g.add("LoadImage", { image: p.cutoutImage });
+  const blank = g.add("EmptyImage", { width: 832, height: 1216, batch_size: 1, color: 16777215 });
+  const target = g.add("VAEEncode", { pixels: o(blank), vae: o(vae) });
+  const subjScaled = g.add("ImageScaleToTotalPixels", { image: o(loadRef), upscale_method: "lanczos", megapixels: 0.75, resolution_steps: 16 });
+  const subjLat = g.add("VAEEncode", { pixels: o(subjScaled), vae: o(vae) });
+  const patched = g.add("Krea2EditModelPatch", {
+    model, source_latent: o(target), ref_boost: p.refBoost, ref_boost_a: 1, fit_mode: "fit",
+    vae: o(vae), source_image: o(blank), target_latent: o(target),
+    source_latent_b: o(subjLat), source_image_b: o(subjScaled),
+    ...(kreaEditV2() ? { ref_position: "beside (right of target)", ref_position_a: "aligned (trained)" } : {}),
+  });
+  const cleanInst = p.instruction.trim().replace(/^[a-z]\d+\s*[:\-]\s*/i, "");
+  const bodyClause = p.bodyAnchor?.trim() || "her exact natural bust, narrow waist, and hip proportions from the reference picture";
+  const wrapped = p.nudeFraming
+    ? `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and natural hourglass proportions, completely naked: ${cleanInst}`
+    : `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and ${bodyClause}, dressed solely in the single outfit described below worn directly against bare skin (or completely nude when described): ${cleanInst}`;
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: wrapped, grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
+  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
+  const ks = g.add("KSampler", { model: o(patched), seed: p.seed, steps: 8, cfg: 1, sampler_name: "euler", scheduler: "simple", positive: o(pos), negative: o(neg), latent_image: o(target), denoise: 1 });
+  const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
+  g.add("SaveImage", { images: o(dec), filename_prefix: p.prefix }, "result");
   return g.graph;
 }
 
@@ -980,7 +1052,9 @@ export function swapPrompt(o: { pictures: number; who?: string; name?: string; l
 }
 
 /** Alissonerdx BFS H3 Character Swap v1.1 trained single-line prompt template (keep `body_swap:` at position 0!). */
-export function bfsSwapPrompt(o: { details?: string; who?: string; notes?: string }): string {
+export function bfsSwapPrompt(o: { details?: string; who?: string; notes?: string; pictures?: number }): string {
+  const n = Math.max(1, Math.min(8, o.pictures ?? 1));
+  const picRef = n === 1 ? "<Picture 1>" : `${Array.from({ length: n }, (_, i) => `<Picture ${i + 1}>`).slice(0, -1).join(", ")} and <Picture ${n}>`;
   const details = (o.details ?? "").trim().replace(/\.+$/, "") || "adult woman";
   const who = (o.who ?? "").trim();
   const targetClause = who && !/^person$/i.test(who)
@@ -989,10 +1063,10 @@ export function bfsSwapPrompt(o: { details?: string; who?: string; notes?: strin
   const extra = (o.notes ?? "").trim();
   const extraSentence = extra ? ` ${extra.replace(/([^.!?])$/, "$1.")}` : "";
   return (
-    `body_swap: subject_definitions: <Subject 1> is the ${details} shown in <Picture 1>, whose identity, face, head, hair or fur, skin, body shape, proportions and clothing define the character in the target video. ` +
+    `body_swap: subject_definitions: <Subject 1> is the ${details} shown in ${picRef}, whose identity, face, head, hair or fur, skin, body shape, proportions and clothing define the character in the target video. ` +
     `The guide video provides the scene and the performance: its background, environment, lighting, camera, framing, body pose, hand and arm movement, head rotation, gaze direction, lip movement and facial expression, frame by frame; ${targetClause} ` +
     `summary: [video generation + reference] Replace the guide subject with <Subject 1>, keeping the scene, camera and the complete motion and performance of the guide video. ` +
-    `detailed_description: [Shot 1] <Subject 1> takes the exact place of the guide subject and moves with the same timing, body pose, gestures, head motion, gaze, speech and facial expressions, while keeping the complete identity from <Picture 1>: facial structure, hair or fur, skin, body shape and clothing stay stable in every frame. ` +
+    `detailed_description: [Shot 1] <Subject 1> takes the exact place of the guide subject and moves with the same timing, body pose, gestures, head motion, gaze, speech and facial expressions, while keeping the complete identity from ${picRef}: facial structure, hair or fur, skin, body shape and clothing stay stable in every frame. ` +
     `The background, lighting, colors and camera of the guide video are preserved. Prevent identity drift, clothing changes, texture crawling and flicker.${extraSentence}`
   );
 }
@@ -1014,6 +1088,10 @@ export interface BfsVideoSwapOpts {
   turboLora?: string;
   /** BFS H3 Character Swap v1.1 LoRA strength (default 1.0) */
   strength?: number;
+  /** extra user H3 LoRAs (e.g. MysticXXX_MMH3-V4 for explicit clips) */
+  loras?: LoraPick[];
+  /** anime clip: skip realistic skin LoRA (r34l1sm) */
+  anime?: boolean;
   /** auto-cut out reference picture(s) onto neutral #808080 grey with BiRefNetRMBG so her old background never bleeds in */
   cutoutRef?: boolean;
   lowMemDecode?: boolean;
@@ -1022,10 +1100,23 @@ export interface BfsVideoSwapOpts {
   prefix: string;
 }
 
+/** Inject realism/LoRA triggers into a BFS prompt while keeping `body_swap:` strictly at position 0. */
+function injectBfsTriggers(prompt: string, addRealism: boolean, loras: LoraPick[]): string {
+  const extra = withTriggers("", loras).replace(/,\s*$/, "").trim();
+  const prefix = [addRealism ? REALISM_TRIGGER : "", extra].filter(Boolean).join(", ");
+  if (!prefix) return prompt;
+  if (/^body_swap:\s*/i.test(prompt)) {
+    const rest = prompt.replace(/^body_swap:\s*/i, "");
+    return rest.toLowerCase().includes(prefix.toLowerCase()) ? prompt : `body_swap: ${prefix}, ${rest}`;
+  }
+  return `${prefix}, ${prompt}`;
+}
+
 /** BFS H3 Character Swap v1.1 (Alissonerdx) using 100% native ComfyUI MiniMax H3 nodes + BiRefNetRMBG #808080 cutout:
  *  - Guide video goes straight into MiniMaxH3AddGuide(frame_idx=0) — no SAM masking required!
  *  - Character reference goes through BiRefNetRMBG(#808080) -> 0.5 MP -> MiniMaxH3ReferenceToVideo (<Picture 1>)
- *  - Uses full FP16 video VAE, MiniMaxH3SigmaShift(12, 3), comfy kitchen attention, and either 20-step Hero or 8-step DMD turbo. */
+ *  - Uses full FP16 video VAE, MiniMaxH3SigmaShift(12, 3), comfy kitchen attention, r34l1sm skin realism, optional extra H3 LoRAs,
+ *    snapped-down 17k+5 frame count (zero unguided tail frames), and either 20-step Hero or 8-step DMD turbo. */
 export function buildBfsVideoSwap(p: BfsVideoSwapOpts): ApiGraph {
   const g = new G();
   const unet = g.add("UNETLoader", { unet_name: M.h3Ref, weight_dtype: "default" });
@@ -1035,13 +1126,18 @@ export function buildBfsVideoSwap(p: BfsVideoSwapOpts): ApiGraph {
     model = o(g.add("LoraLoaderModelOnly", { model, lora_name: p.turboLora || M.h3BfsTurbo8, strength_model: 1 }, "BFS Swap 8-step turbo"));
   }
   model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3BfsSwap, strength_model: p.strength ?? 1 }, "BFS H3 Character Swap v1.1"));
+  const extraLoras = activeLoras(p.loras ?? []).filter((l) => !/character_swap|dmd_ref2va_8step|ref2v_turbo|fl2v_turbo/i.test(l.name));
+  for (const l of extraLoras) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  const real = realismOn() && !p.anime && !extraLoras.some((l) => /h3-realism-people/i.test(l.name));
+  if (real) model = o(g.add("LoraLoaderModelOnly", { model, lora_name: M.h3Realism, strength_model: 0.75 }, "Realistic skin"));
 
   const clip = g.add("CLIPLoader", { clip_name: M.h3TE, type: "minimax", device: "default" });
   const vvae = g.add("VAELoader", { vae_name: M.h3VaeFp16 });
   const avae = g.add("VAELoader", { vae_name: M.h3AudioVae });
 
   const span = Math.max(0.5, Math.min(15, (p.end || 5) - (p.start || 0)));
-  const length = h3Frames(span);
+  // Snap DOWN to largest 17k+5 <= clip frames so every frame has real guide video conditioning (zero tail jitter)
+  const length = h3FramesFloor(span);
 
   // Guide video: loaded at 24 fps for the selected trim range and matched cleanly to target width×height
   const vid = g.add("VHS_LoadVideo", {
@@ -1061,8 +1157,10 @@ export function buildBfsVideoSwap(p: BfsVideoSwapOpts): ApiGraph {
   });
 
   const keepAudio = !!p.hasAudio && p.useAudio !== false;
+  const basePrompt = p.prompt.trim() || bfsSwapPrompt({ pictures: p.pictures.length });
+  const finalPrompt = injectBfsTriggers(basePrompt, real, extraLoras);
   const cond = g.add("MiniMaxH3ReferenceToVideo", {
-    clip: o(clip), prompt: p.prompt.trim() || bfsSwapPrompt({}), width: p.width, height: p.height, length,
+    clip: o(clip), prompt: finalPrompt, width: p.width, height: p.height, length,
     ref_image_size: "match", vae: o(vvae), audio_vae: o(avae), ...refInputs,
   });
   const guide = g.add("MiniMaxH3AddGuide", {

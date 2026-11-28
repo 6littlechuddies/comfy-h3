@@ -1,7 +1,7 @@
 // Validates every Studio graph against a real ComfyUI (models can be empty dummy files):
 //   COMFY=http://127.0.0.1:18288 npx tsx scripts/test-graphs.ts
 // ComfyUI validates node types, inputs, links and combo values before queueing; we then cancel the queue.
-import { bfsSwapPrompt, buildBfsVideoSwap, buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
+import { bfsSwapPrompt, buildBfsVideoSwap, buildExtend, buildSwap, buildQwenEdit, buildCreate, buildEdit, buildFind, buildFindMask, buildMasterPackCutout, buildMasterPackShot, buildUpscale, buildAnimate, buildPromptHelper, buildExtractCharacter, buildCutout, buildDescribeCharacter, buildDescribeVideo, buildStage, DEFAULT_GUIDE, type ApiGraph } from "../src/lib/graphs";
 
 const COMFY = process.env.COMFY || "http://127.0.0.1:18288";
 const s = { sampler: "euler_ancestral", scheduler: "normal", steps: 28, cfg: 5.5, seed: 123456789012345 };
@@ -49,6 +49,8 @@ const cases: [string, ApiGraph][] = [
   ["describe character from picture", buildDescribeCharacter("test.png", 5)],
   ["create with LoRA off + triggers", buildCreate({ ...s, sampler: "euler", scheduler: "normal", steps: 20, cfg: 5, style: "anime", positive: "1girl", negative: "", loras: [], width: 832, height: 1216, count: 1, cutout: false, prefix: "studio/create/t" })],
   ["cutout", buildCutout("test.png", "studio/characters/x_cutout")],
+  ["v9 master pack cutout (birefnet)", buildMasterPackCutout("test.png", "studio/_work/v9_cutout_x", "birefnet")],
+  ["v9 master pack shot", buildMasterPackShot({ cutoutImage: "test.png", instruction: "High-angle candid phone selfie", seed: 7, prefix: "studio/packs/x/v9_selfies_1", refBoost: 1.42, loras: lora })],
 ];
 const a = { sampler: "er_sde", scheduler: "beta", steps: 10, seed: 42, prompt: "<Picture 1> dances", seconds: 10, width: 1344, height: 768, loras: lora, refImageSize: "match" as const, prefix: "studio/animate/a" };
 cases.push(

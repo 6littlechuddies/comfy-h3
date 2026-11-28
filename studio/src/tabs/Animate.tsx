@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { activePack, planWriter, useBigPlanner } from "../lib/packs";
-import { bfsSwapPrompt, buildAnimate, buildBfsVideoSwap, buildSwap, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
+import { bfsSwapPrompt, buildAnimate, buildBfsVideoSwap, buildSwap, type BfsVideoSwapOpts, swapPrompt, type AnimateOpts, type LoraPick } from "../lib/graphs";
 import { longSeconds, runLong, stopLong, forgetLong, useLong, type LongRun } from "../lib/long";
 import { askSweep } from "../components/Dialogs";
 import { rtxInstalled, syncKreaTE, useDownloads, useGroup } from "../lib/downloads";
@@ -93,6 +93,18 @@ export default function AnimateTab() {
   const handed = useWork((s) => s.animateFrame);
   useEffect(() => { if (handed) { setFrames([handed, null]); setWork({ animateFrame: null }); } }, [handed]); // eslint-disable-line react-hooks/exhaustive-deps
   useHandoffInto("animate", (items) => {
+    // "Swap into video" on any picture (V9 pack, Create, Edit): BFS H3 v1.1 swap with that exact single picture, keeping any guide video!
+    const swapPic = items.find((x) => x.slot === "swap" && x.media.kind === "image")?.media;
+    if (swapPic) {
+      remember();
+      set({ mode: "swap", swapEngine: "bfs" });
+      const keepVids = useWork.getState().animateRefs.filter((r) => r.media.kind !== "image");
+      setWork({ animateRefs: [makeRef(swapPic), ...keepVids] });
+      toast(keepVids.some((r) => r.media.kind === "video")
+        ? "Loaded into BFS Swap v1.1 — press Make video or Scout 3 drafts."
+        : "Loaded into BFS Swap v1.1 — drop a guide video (≤15 s) on the left and press Make video.", "good");
+      return;
+    }
     // "Animate" on a picture you made: image → video, with it as the starting frame (and the same picture in Plan a video)
     const start = items.find((x) => x.slot === "start" && x.media.kind === "image")?.media;
     if (start) {
@@ -173,7 +185,7 @@ export default function AnimateTab() {
   const swapText = swapFull
     ? a.prompt.trim()
     : swapIsBfs
-      ? bfsSwapPrompt({ details: swapCharDetails || swapChar?.block, who: a.swapWho, notes: a.prompt })
+      ? bfsSwapPrompt({ details: swapCharDetails || swapChar?.block || a.swapBfsDetails, who: a.swapWho, notes: a.prompt, pictures: swapPics.length || 1 })
       : swapPrompt({ pictures: swapPics.length || 1, who: a.swapWho, name: (a.swapName ?? "").trim() || swapChar?.name, look: swapChar?.block, keep: a.swapKeep, notes: a.prompt });
   const why = !dl.ready ? dl.why : long ? (!longParts.some((pt) => pt.text.trim()) ? "Write what happens in part 1"
       : longRun?.status === "running" ? "A long video is being made — wait, or stop it below"
@@ -247,6 +259,62 @@ export default function AnimateTab() {
       idea: a.prompt, seconds: a.seconds, mode: a.mode, cuts: 0, camera: "auto", text, sent: Date.now() })).catch(() => {});
     return text;
   };
+  // Build BFS H3 Character Swap v1.1 options (shared by Make video, Scout 3 drafts, and Render Hero)
+  const buildBfsOpts = async (seed: number, turbo: boolean, size: { width: number; height: number }, pics: string[], kitchen: boolean): Promise<BfsVideoSwapOpts> => {
+    let turboLora: string | undefined;
+    if (turbo) {
+      const have = await (await import("../lib/api")).listLoras().catch(() => [] as string[]);
+      const norm = (x: string) => x.replace(/\\/g, "/").toLowerCase();
+      const hasDmd = have.some((x) => norm(x) === norm(M.h3BfsTurbo8));
+      const hasFl8 = have.some((x) => norm(x) === norm(M.h3TurboFl8));
+      turboLora = hasDmd ? M.h3BfsTurbo8 : hasFl8 ? M.h3TurboFl8 : M.h3BfsTurbo8;
+    }
+    return {
+      video: swapVid!.media.name, start: swapSecs.start, end: swapSecs.end,
+      hasAudio: swapVid!.media.has_audio, useAudio: a.swapBfsAudio !== false,
+      pictures: pics, width: size.width, height: size.height,
+      prompt: swapText, seed, turbo, turboLora,
+      strength: a.swapBfsStrength ?? 1, loras: a.loras, anime: swapChar?.style === "anime",
+      cutoutRef: a.swapBfsCutout !== false, lowMemDecode: a.lowMemDecode, kitchen, prefix: "studio/animate/bfs_swap",
+    };
+  };
+
+  /** Seed Hunter: queue 3 cheap 8-step drafts (0.4 MP) with different seeds — hover your favorite to click "Render Hero (same seed)" */
+  const scout3 = async () => {
+    if (why) return;
+    setBusy(true); setTimeout(() => setBusy(false), 600);
+    const stack = `scout:${Date.now().toString(36)}`;
+    try {
+      if (swap && swapIsBfs && swapVid) {
+        const oi = await fetch("/object_info/ModelAttentionBackend").then((r) => r.json()).catch(() => null);
+        const kitchen = JSON.stringify(oi ?? {}).includes("comfy kitchen attention");
+        const pics = swapPics.map((r) => r.media.name);
+        const draftSz = h3SizeFor(swapVidRatio, 0.4);
+        for (let i = 0; i < 3; i++) {
+          const seed = newSeed();
+          const bfsO = await buildBfsOpts(seed, true, draftSz, pics, kitchen);
+          await run("animate", `Scout ${i + 1}/3 · BFS Swap · ${swapSecs.s} s`, buildBfsVideoSwap(bfsO), `animate:bfs_swap:turbo:${Math.round(swapSecs.s)}s:0.4`,
+            { bfsOpts: bfsO, preview: true, stack, snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
+        }
+        toast("Queued 3 fast BFS drafts (0.4 MP · 8 steps) — hover your favorite and click Render Hero (same seed).", "good");
+        return;
+      }
+      if (swap || long) return;
+      const planned = await planFirst();
+      const id = ref ? identityLine(refs, useCharacters.getState().list, planned) : "";
+      const prompt = id ? `${id}\n${planned}` : planned;
+      const draftSz = sizeOf(0.4);
+      const turbo = turboOk;
+      for (let i = 0; i < 3; i++) {
+        const seed = newSeed();
+        const o = opts(seed, turbo, { prompt, ...draftSz, steps: turbo ? 8 : Math.min(12, a.adv.steps) });
+        await run("animate", `Scout ${i + 1}/3 · ${a.seconds} s draft`, buildAnimate(o), `animate:${a.mode}:${turbo ? "turbo" : "full"}:${a.seconds}s:0.4`,
+          { opts: o, preview: true, stack, snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } });
+      }
+      toast("Queued 3 fast drafts (0.4 MP) — hover your favorite and click Render Hero (same seed).", "good");
+    } catch (e) { toast(`Couldn't start scout: ${(e as Error).message}`, "bad"); }
+  };
+
   // Swap the person: either BFS H3 Character Swap v1.1 (native guide-latent, best likeness ≤15 s) or H3 Relay v1.5 (SAM 3.1 masked looping)
   const goSwap = async () => {
     if (!swapVid) return;
@@ -259,28 +327,13 @@ export default function AnimateTab() {
       if (swapIsBfs) {
         const pics = swapPics.map((r) => r.media.name);
         const turbo = !!a.swapBfsTurbo;
-        let turboLora: string | undefined;
-        if (turbo) {
-          const have = await (await import("../lib/api")).listLoras().catch(() => [] as string[]);
-          const norm = (x: string) => x.replace(/\\/g, "/").toLowerCase();
-          const hasDmd = have.some((x) => norm(x) === norm(M.h3BfsTurbo8));
-          const hasFl8 = have.some((x) => norm(x) === norm(M.h3TurboFl8));
-          turboLora = hasDmd ? M.h3BfsTurbo8 : hasFl8 ? M.h3TurboFl8 : M.h3BfsTurbo8;
-        }
-        const g = buildBfsVideoSwap({
-          video: swapVid.media.name, start: swapSecs.start, end: swapSecs.end,
-          hasAudio: swapVid.media.has_audio, useAudio: a.swapBfsAudio !== false,
-          pictures: pics, width: swapBfsSize.width, height: swapBfsSize.height,
-          prompt: swapText, seed, turbo, turboLora,
-          strength: a.swapBfsStrength ?? 1, cutoutRef: a.swapBfsCutout !== false,
-          lowMemDecode: a.lowMemDecode, kitchen, prefix: "studio/animate/bfs_swap",
-        });
+        const bfsO = await buildBfsOpts(seed, turbo, swapBfsSize, pics, kitchen);
         await run(
           "animate",
-          `BFS Swap v1.1 · ${secs} s · ${turbo ? "8-step fast" : "20-step hero"} · ${swapChar?.name || `${pics.length} pic${pics.length > 1 ? "s" : ""}`}`,
-          g,
+          `BFS Swap v1.1 · ${secs} s · ${turbo ? "8-step fast" : "20-step hero"} · ${swapChar?.site?.name || swapChar?.name || `${pics.length} pic${pics.length > 1 ? "s" : ""}`}`,
+          buildBfsVideoSwap(bfsO),
           `animate:bfs_swap:${turbo ? "turbo" : "hero"}:${Math.round(secs)}s:${a.swapBfsMp ?? 0.6}`,
-          { snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } },
+          { bfsOpts: bfsO, preview: turbo, snapshot: { section: "animate", settings: { ...a, adv: { ...a.adv, seed, lockSeed: true } }, media: { refs, frames } } },
         );
         if (swapSecs.overBfsLimit) toast("BFS H3 v1.1 runs up to 15 s at a time — rendered the first 15 s of your selection. Switch Engine to H3 Relay v1.5 for longer full clips.", "info");
         return;
@@ -404,8 +457,19 @@ export default function AnimateTab() {
   };
 
   const redoFull = async (j: Job) => {
-    const o = { ...(j.meta!.opts as AnimateOpts), turbo: false, steps: useSettings.getState().s.animate.adv.steps, width, height };
-    try { await run("animate", `${o.seconds} s video · full quality`, buildAnimate(o), `animate:${o.mode}:full:${o.seconds}s:${a.mp}`, { opts: o }); }
+    const bfs = j.meta?.bfsOpts as BfsVideoSwapOpts | undefined;
+    if (bfs) {
+      const heroMp = Math.max(0.98, a.swapBfsMp ?? 0.98);
+      const heroSz = h3SizeFor(bfs.width / Math.max(1, bfs.height), heroMp);
+      const hero: BfsVideoSwapOpts = { ...bfs, turbo: false, turboLora: undefined, width: heroSz.width, height: heroSz.height };
+      try {
+        await run("animate", `BFS Swap v1.1 · Hero 20-step · ${heroSz.width}×${heroSz.height}`, buildBfsVideoSwap(hero), `animate:bfs_swap:hero:${Math.round(bfs.end - bfs.start)}s:${heroMp}`,
+          { bfsOpts: hero });
+      } catch (e) { toast((e as Error).message, "bad"); }
+      return;
+    }
+    const o = { ...(j.meta!.opts as AnimateOpts), turbo: false, steps: Math.max(20, useSettings.getState().s.animate.adv.steps), width, height };
+    try { await run("animate", `${o.seconds} s video · Hero quality`, buildAnimate(o), `animate:${o.mode}:full:${o.seconds}s:${a.mp}`, { opts: o }); }
     catch (e) { toast((e as Error).message, "bad"); }
   };
 
@@ -427,6 +491,7 @@ export default function AnimateTab() {
             { value: 0.4, label: "Draft 0.4 MP" },
             { value: 0.6, label: "Good 0.6 MP" },
             { value: 0.98, label: "Full 1 MP" },
+            { value: 1.2, label: "Hero 1.2 MP" },
           ]} />
           <Chip title="Reference background" value={a.swapBfsCutout === false ? 0 : 1} onChange={(v) => set({ swapBfsCutout: v === 1 })} options={[
             { value: 1, label: "Ref: Auto cutout", hint: "BiRefNetRMBG neutral #808080 cutout so her old room never bleeds into the video" },
@@ -441,6 +506,11 @@ export default function AnimateTab() {
             { value: 1, label: "Sound: Guide audio" },
             { value: 0, label: "Sound: H3 generated" },
           ]} />
+          {!swapChar && (
+            <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Optional: short description of the person in your standalone photo (e.g. “Female, long black hair, black dress”). Leave blank to auto-detect from the photo.">
+              Photo<input value={a.swapBfsDetails ?? ""} onChange={(e) => set({ swapBfsDetails: e.target.value })} placeholder="look (optional)" aria-label="Reference photo look" disabled={swapFull} className="w-36 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
+            </label>
+          )}
           <label className="flex h-8 items-center gap-1.5 border border-line bg-black/20 px-2 text-[12.5px] text-muted" title="Optional: if several people appear in the clip, say which one to replace (e.g. “woman on the left”). Leave empty for solo clips.">
             Target<input value={a.swapWho ?? ""} onChange={(e) => set({ swapWho: e.target.value })} placeholder="main subject" aria-label="Target subject" disabled={swapFull} className="w-32 bg-transparent text-ink placeholder:text-dim focus:outline-none disabled:opacity-50" />
           </label>
@@ -510,7 +580,14 @@ export default function AnimateTab() {
           </div>}
           {!long && planning && a.prompt.trim() ? <PlanLine plan={plan} text={a.prompt + "\u0000" + (a.avoid ?? "") + (a.music ?? "score")} onUse={(t) => set({ prompt: t })} onPlan={() => planFirst(true)} /> : null}
         </>}
-        action={<GoButton onClick={go} disabled={!!why} why={why}>{long ? `Make ${longSeconds(longParts)} s video` : takes > 1 ? `Make ${takes}` : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>} />}
+        action={<div className="flex items-center gap-1.5">
+          {!long && (!swap || swapIsBfs) && (
+            <Btn onClick={scout3} disabled={!!why} why={why} title="Seed Hunter: render 3 fast 0.4 MP drafts with different seeds, then hover your favorite and click Render Hero (same seed)">
+              Scout 3
+            </Btn>
+          )}
+          <GoButton onClick={go} disabled={!!why} why={why}>{long ? `Make ${longSeconds(longParts)} s video` : takes > 1 && !swap ? `Make ${takes}` : "Make video"} <EtaText k={etaKey} prefix="· " /></GoButton>
+        </div>} />}
       drawer={<>
         <PresetBar section="animate" />
         <button onClick={() => openImageImport("", "collections")} className="press group flex items-center gap-2.5 border border-dashed border-line px-3 py-2.5 text-left hover:border-accent">
@@ -533,7 +610,7 @@ export default function AnimateTab() {
         {refsMode ? (
           <div><Label right={<span className="flex gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" title="Bring back the box, references, frames and LoRAs from before the last change (Ctrl+Z)" onClick={doUndo}>↶ Undo</button>}
             {!swap && <button className="text-xs text-accent hover:underline" title="Your references, words, length and LoRAs go along" onClick={planInPrompt}>Plan a video with these</button>}</span>}>{swap ? "Video and pictures" : "References"}</Label>
-            <div className="mb-2"><CharacterPicker refs={refs} onChange={(r) => { remember(); setWork({ animateRefs: r }); }} /></div>
+            <div className="mb-2"><CharacterPicker refs={refs} singleFront={swap && swapIsBfs} onChange={(r) => { remember(); setWork({ animateRefs: r }); }} /></div>
             <RefList refs={refs} onChange={(r) => { if (r.length < refs.length) remember(); setWork({ animateRefs: r }); }} /></div>
         ) : (
           <div className={a.mode === "fl" ? "grid grid-cols-2 gap-2.5" : ""}>
@@ -543,7 +620,7 @@ export default function AnimateTab() {
         )}
         {!refsMode && <div className="flex justify-end gap-3">{undo.stack.length > 0 && <button className="text-xs text-muted hover:text-ink" onClick={doUndo}>↶ Undo</button>}<button className="text-xs text-accent hover:underline" onClick={planInPrompt}>Plan a video with these</button></div>}
         {!turboOk && !swap && <p className="text-xs text-muted">{h3ErosOn() ? "Eros Max has its own speed built in — turbo stays off." : "Turbo for this type is off in ⋯ → Speed-ups (Faster video steps)."}</p>}
-        {!swap && <LoraList family="h3" label="H3 LoRAs" value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />}
+        {(!swap || swapIsBfs) && <LoraList family="h3" label={swapIsBfs ? "Extra H3 LoRAs (optional, e.g. MysticXXX)" : "H3 LoRAs"} value={a.loras} onChange={(v) => { if (v.length < a.loras.length) remember(); set({ loras: v }); }} onSweep={sweep} />}
         <Advanced a={a.adv} set={(p) => set({ adv: { ...a.adv, ...p } })} hideCfg>
           <Slider label="Size (megapixels)" min={0.3} max={2.5} step={0.05} value={a.mp} show={`${a.mp.toFixed(2)} MP · ${width}×${height}`} onChange={(v) => set({ mp: Math.round(v * 100) / 100 })} />
           <p className="-mt-2 text-[11.5px] leading-relaxed text-dim">On a 5090: about 2 MP for 8 s, 1.5 MP for 12 s, 1.2 MP for 15 s. Bigger and longer needs more GPU memory — turn on low-memory decode if it runs out.</p>
@@ -562,7 +639,7 @@ export default function AnimateTab() {
           const sw = j.meta?.sweep as { name: string; strength: number } | undefined;
           return [
             ...(sw ? [{ label: `Use strength ${sw.strength.toFixed(1)}`, icon: "check", run: () => { set({ loras: a.loras.map((x) => (x.name === sw.name ? { ...x, strength: sw.strength, off: false } : x)) }); toast(`Strength set to ${sw.strength.toFixed(1)}`, "good"); } }] : []),
-            ...(j.meta?.preview ? [{ label: "Redo in full quality", icon: "refresh", run: () => redoFull(j) }] : []),
+            ...(j.meta?.preview ? [{ label: "Render Hero (same seed)", icon: "sparkle", primary: true, run: () => redoFull(j) }] : []),
           ];
         }} />
     </Workspace>

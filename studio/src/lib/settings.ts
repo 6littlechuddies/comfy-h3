@@ -118,6 +118,8 @@ export interface AnimateS {
   swapBfsAudio?: boolean;
   /** BFS H3 Character Swap v1.1: target megapixels matching guide aspect ratio (default 0.6) */
   swapBfsMp?: number;
+  /** BFS H3 Character Swap v1.1: optional short visual description when swapping a standalone photo (no saved character) */
+  swapBfsDetails?: string;
   /** Swap the person (H3 Relay): lock the motion with each window's depth (needs "Copy motion from a video") */
   swapDepth?: boolean;
   /** Swap the person: put her head on frame 1 with BFS first and give H3 that still as her first picture (needs BFS + SAM 3) */

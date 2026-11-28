@@ -44,6 +44,7 @@ function actionsFor({ o, j }: Item): Act[] {
   const a: Act[] = [];
   if (o.kind === "image") {
     a.push({ label: "Edit / remix", icon: "sparkle", run: () => { editPicture(j, o).catch((e) => useJobs.getState().toast((e as Error).message, "bad")); }, primary: true });
+    a.push({ label: "Swap into video", icon: "film", run: () => { useTray.getState().addOutput(o, j.label); sendTo("animate", [id], "swap"); } });
     a.push({ label: "Animate", icon: "play", run: () => { useTray.getState().addOutput(o, j.label); sendTo("animate", [id], "start"); } });
     a.push({ label: "Brush edit", icon: "brush", run: () => toBrush(j, o) });
   }

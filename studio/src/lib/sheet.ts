@@ -1,9 +1,10 @@
 // "Make full sheet": one high-resolution picture with every body angle (cut into separate views when it's done),
 // plus the face close-up and the cut-out — one click, three jobs, all from the character's front picture.
+import { toInput } from "./api";
 import { useDownloads } from "./downloads";
-import { buildCreate, buildCutout, buildEdit, buildQwenEdit } from "./graphs";
+import { buildCreate, buildCutout, buildEdit, buildMasterPackCutout, buildQwenEdit } from "./graphs";
 import { animeTags, charModel, familyOfModel, useCharacters, type Character, type View } from "./characters";
-import { useJobs } from "./jobs";
+import { useJobs, waitForJob } from "./jobs";
 import { M, quadSheetOn } from "./models";
 import { DEFAULTS, editArgs, modelArgs, modelOf, newSeed, qualityTags, useSettings } from "./settings";
 import type { EditEngine } from "./graphs";
@@ -82,11 +83,12 @@ export function viewGraph(c: Character, frontName: string, instruction: string, 
     return buildQwenEdit({ images: [frontName], prompt: `<sks> ${angle} eye-level shot wide shot`, seed, prefix: `studio/characters/${c.id}_${view}`, angles: true });
   }
   const e = useSettings.getState().s.edit;
-  const style = sheetStyle(c) === "anime" ? " Keep exactly the same art style, line art, shading and colours as this picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
+  const style = sheetStyle(c) === "anime" ? " Keep exactly the same art style, line art, shading and colours as this picture — it is the same drawing style, not a photo." : " Keep it a photo with the same natural skin texture, clean studio lighting and colours on a flat neutral mid-grey background.";
   // their LoRAs only when they're for this model (Krea 2) — anime LoRAs can't load here
   const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
   const unet = c.sheet?.ckpt?.krea || undefined;
-  return buildEdit({ ...editArgs(e, engine), loras: [...(editArgs(e, engine).loras ?? []), ...loras], enhance: false, seed: newSeed(), images: [frontName], instruction: forEngine(engine, instruction) + style + ONE, negative: "", resolution: 1024, prefix: `studio/characters/${c.id}_${view}`, ...(unet ? { unet } : {}) });
+  // Exact 8-step Krea 2 Turbo Edit settings (never over-step at 20 steps -> zero skin fizz)
+  return buildEdit({ ...editArgs(e, engine), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", refBoost: 3, loras: [...(editArgs(e, engine).loras ?? []), ...loras], enhance: false, seed: newSeed(), images: [frontName], instruction: forEngine(engine, instruction) + style + ONE, negative: "", resolution: 1024, prefix: `studio/characters/${c.id}_${view}`, ...(unet ? { unet } : {}) });
 }
 const SHEET_PROMPTS = {
   left: "Show the exact same character from image 1 in a full-body side profile view facing left, standing straight. Keep the same face, hair, outfit, colours and body proportions.",
@@ -124,33 +126,31 @@ export function sheetGraph(c: Character, frontName: string, seed = newSeed()) {
   if (usesQuad(c)) {
     const unet = c.sheet?.ckpt?.krea || undefined;
     const base = editArgs(e, "krea").loras ?? [];
-    return buildEdit({ ...editArgs(e, "krea"), loras: [...base, ...(c.loras ?? []), { name: M.quadView, strength: 1 }], enhance: false, seed, images: [frontName],
-      blank: { width: 1536, height: 1024 }, instruction: `The first picture is a blank canvas; the second picture is the character. ${QUAD_CAPTION} One single person in every panel. Keep it a photo with the same skin texture, lighting quality and colours.`,
-      negative: "", resolution: 1024, refBoost: 4, prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
+    return buildEdit({ ...editArgs(e, "krea"), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", loras: [...base, ...(c.loras ?? []), { name: M.quadView, strength: 1 }], enhance: false, seed, images: [frontName],
+      blank: { width: 1536, height: 1024 }, instruction: `Single seamless full-frame image of this exact adult person from the reference picture: ${QUAD_CAPTION} One single person in every view, flat mid-grey studio background, natural skin texture, consistent lighting and colours.`,
+      negative: "", resolution: 1024, refBoost: 3, prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
   }
   const anime = sheetStyle(c) === "anime";
-  const style = anime ? " Keep exactly the same art style, line art, shading and colours as the character picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
-  const intro = "The first picture is a blank canvas; the second picture is the person. ";
+  const style = anime ? " Keep exactly the same art style, line art, shading and colours as the reference picture — it is the same drawing style, not a photo." : " Keep it a photo with natural unretouched skin texture, clean studio lighting and colours.";
   const unet = c.sheet?.ckpt?.krea || undefined;
   const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
-  return buildEdit({ ...editArgs(e, "krea"), loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
-    blank: SHEET_CANVAS, instruction: `${intro}${SHEET_PROMPT} These are five views of ONE single person, not five different people.${style}`, negative: "", resolution: 1440,
+  return buildEdit({ ...editArgs(e, "krea"), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
+    blank: SHEET_CANVAS, instruction: `${SHEET_PROMPT} These are five views of ONE single adult person from the reference picture, not five different people.${style}`, negative: "", resolution: 1024, refBoost: 3,
     prefix: `studio/characters/${c.id}_sheet`, ...(unet ? { unet } : {}) });
 }
 
 /** her expression sheet: ONE picture, a grid of head-and-shoulders close-ups of her face in many moods plus four mouth shapes
- *  (for the talking loops) — the same lighting in every panel. Video uses it as a second reference beside the turnaround, so
- *  her face holds when she laughs, pouts or talks, which is where likeness drifts in long actions. */
+ *  (for the talking loops) — the same lighting in every panel. */
 export const FACES_PROMPT = "Expression reference sheet of this exact same single person: one image, a neat grid of 12 head-and-shoulders close-ups, 4 columns by 3 rows, with thin even gaps between them, on a plain flat mid-grey studio background, no text, no labels, no borders. In every panel the same face, the same hair, the same skin with visible natural texture, the same outfit neckline, the same soft even front lighting and the same scale; only the expression changes. Row 1: neutral and relaxed, a soft closed-lip smile, laughing with eyes crinkled, a playful wink. Row 2: surprised with raised brows, shy and blushing looking slightly down, a small pout, a calm sultry half-lidded look. Row 3, mouth shapes while talking, facing the camera: saying \"ah\" (mouth open), saying \"ee\" (lips wide), saying \"oo\" (lips rounded), saying \"mm\" (lips pressed together). An adult woman. Sharp focus on the eyes, high detail.";
 export const FACES_CANVAS = { width: 1920, height: 1440 };
 export function facesGraph(c: Character, frontName: string, seed = newSeed()) {
   const e = useSettings.getState().s.edit;
   const anime = sheetStyle(c) === "anime";
-  const style = anime ? " Keep exactly the same art style, line art, shading and colours as the character picture — it is the same drawing style, not a photo." : " Keep it a photo with the same skin texture, lighting quality and colours.";
+  const style = anime ? " Keep exactly the same art style, line art, shading and colours as the reference picture — it is the same drawing style, not a photo." : " Keep it a photo with natural unretouched skin texture, clean studio lighting and colours.";
   const unet = c.sheet?.ckpt?.krea || undefined;
   const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
-  return buildEdit({ ...editArgs(e, "krea"), loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
-    blank: FACES_CANVAS, instruction: `The first picture is a blank canvas; the second picture is the person. ${FACES_PROMPT} These are twelve pictures of ONE single person, not different people.${style}`, negative: "", resolution: 1440,
+  return buildEdit({ ...editArgs(e, "krea"), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", loras: [...(editArgs(e, "krea").loras ?? []), ...loras], enhance: false, seed, images: [frontName],
+    blank: FACES_CANVAS, instruction: `${FACES_PROMPT} These are twelve views of ONE single adult person from the reference picture, not different people.${style}`, negative: "", resolution: 1024, refBoost: 3,
     prefix: `studio/characters/${c.id}_faces`, ...(unet ? { unet } : {}) });
 }
 
@@ -160,19 +160,48 @@ export const ROOM_PROMPT = "Location reference sheet of the exact room in the pe
 export const ROOM_CANVAS = { width: 2304, height: 896 };
 export function roomGraph(stillName: string, prefix: string, seed = newSeed()) {
   const e = useSettings.getState().s.edit;
-  return buildEdit({ ...editArgs(e, "krea"), enhance: false, seed, images: [stillName], blank: ROOM_CANVAS,
-    instruction: `The first picture is a blank canvas; the second picture is a woman in her room. ${ROOM_PROMPT}`, negative: "", resolution: 1440, prefix });
+  return buildEdit({ ...editArgs(e, "krea"), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", enhance: false, seed, images: [stillName], blank: ROOM_CANVAS,
+    instruction: `Single full-frame image based on the room in the reference picture: ${ROOM_PROMPT}`, negative: "", resolution: 1024, refBoost: 3, prefix });
 }
 
-/** "Make sheet": one picture with every view, plus the cut-out. (The angles one by one are still in the sheet maker.) */
+/** Pre-cut a realistic character's front picture onto flat neutral #808080 grey so her old bedroom never bleeds into sheet angles. */
+async function cleanGreyRef(c: Character, frontName: string): Promise<string> {
+  if (sheetStyle(c) !== "realistic") return frontName;
+  try {
+    const j = await useJobs.getState().run(
+      "characters",
+      `${c.name}: clean #808080 cutout`,
+      buildMasterPackCutout(frontName, `studio/_work/sheet_ref_${c.id}`, "birefnet"),
+      "cutout:sheet",
+      { quiet: true, front: true, noTray: true, no4k: true, project: c.id },
+    );
+    const done = await waitForJob(j.id);
+    const out = done.outputs.find((x) => x.kind === "image" && x.type === "output");
+    if (out) return (await toInput(out)).name;
+  } catch { /* fall back to raw front */ }
+  return frontName;
+}
+
+/** "Make sheet": clean individual #808080 angles (Qwen Multiple Angles for realistic back/side/3/4 when installed) + crisp face
+ *  close-up + transparent cut-out. Avoids cramped 5-panel Krea collages and prevents room background bleed! */
 export async function queueFullSheet(c: Character, _bg: "grey" | "white" = "white") {
   const front = await useCharacters.getState().asMedia(c.id, "front");
   if (!front) throw new Error("Add their front picture first (drop one in, or make it)");
   const run = useJobs.getState().run;
-  // cut into her angles too (side, back, face, three-quarter), so "Every angle" and the sheet + face pair both have them
-  await run("characters", `${c.name}: character sheet`, sheetGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "sheet", ...sheetJobMeta(c) });
-  await run("characters", `${c.name}: expression sheet`, facesGraph(c, front.name), "characters:view:krea", { charId: c.id, view: "faces" });
+  const cleanRef = await cleanGreyRef(c, front.name);
   await run("characters", `${c.name}: cut-out`, buildCutout(front.name, `studio/characters/${c.id}_cutout`), "characters:cutout", { charId: c.id, view: "cutout" });
+  if (sheetStyle(c) === "realistic" && anglesReady() && c.sheet?.angles !== "krea") {
+    // Clean individual angles from her #808080 cutout: crisp 1024 px face + true Qwen Multiple Angles (threeq, left, back)
+    // Far sharper for RefMods, back/side photo packs, and video references than a cramped 5-panel collage!
+    await run("characters", `${c.name}: face close-up`, viewGraph(c, cleanRef, FACE_PROMPT, "face"), "characters:view:krea", { charId: c.id, view: "face" });
+    for (const v of ["threeq", "left", "back"] as const) {
+      await run("characters", `${c.name}: ${v} view (Qwen angles)`, viewGraph(c, cleanRef, SHEET_PROMPTS[v], v), "characters:view:qwen", { charId: c.id, view: v });
+    }
+    return;
+  }
+  // Fallback (anime, or rentals without Qwen Multiple Angles): clean 8-step sheet without "blank canvas" artifacts
+  await run("characters", `${c.name}: character sheet`, sheetGraph(c, cleanRef), "characters:view:krea", { charId: c.id, view: "sheet", ...sheetJobMeta(c) });
+  await run("characters", `${c.name}: expression sheet`, facesGraph(c, cleanRef), "characters:view:krea", { charId: c.id, view: "faces" });
 }
 
 /** what a sheet job carries along: "redraw it in Anima / Illustrious after Krea 2 copies it" */
