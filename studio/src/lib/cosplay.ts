@@ -41,31 +41,31 @@ export type CosplayVibe = "bold" | "selfie" | "glamour" | "editorial";
 export const COSPLAY_VIBES: { id: CosplayVibe; label: string; hint: string; directive: string; banks: BlueprintBankId[] }[] = [
   {
     id: "bold",
-    label: "Bold & Flirty",
-    hint: "Sexy low/high angles, arched figure-flattering poses, teasing eye contact & candid warm lighting (never stiff convention photos)",
-    directive: "BOLD & FLIRTY COSPLAY: Shoot like an alluring private cosplay shoot or boudoir-tinted candid — dynamic low/high/three-quarter angles, hip pops, crouched or reclining curves, strap/collar/zipper tease, heavy-lidded eye contact, warm directional practical light, and flattering natural figure framing. Never stiff straight-on convention standing poses.",
-    banks: ["sexy_cosplay", "camera_glamour", "mirror_choreo"],
+    label: "3-Style Mix (Recommended)",
+    hint: "Automatically rotates Upfront Magnetic Portraits, Amateur Bedroom/Mirror Selfies, and Creative CivitAI Pinups (zero repetitive template!)",
+    directive: "VARIED COVER-ART MIX: Rotate freely across upfront waist-up magnetic portraits, lived-in amateur bedroom mirror/handheld selfies, and expressive dynamic candids — warm practical lighting, clean dry matte natural skin, natural relaxed arms, zero repetitive seated-leg or stiff standing templates.",
+    banks: ["upfront_portrait", "raw_selfie", "mirror_choreo", "sexy_cosplay", "camera_glamour"],
   },
   {
     id: "selfie",
-    label: "Candid Selfie",
-    hint: "Raw smartphone selfies, mirror hip-twists, and late-night digicam flash bedroom snaps in cosplay",
-    directive: "CANDID SELFIE & MIRROR COSPLAY: Shoot like raw unposed smartphone front-camera selfies, low-hip upward snaps, bedroom mirror hip-twists, and late-night compact digicam flash photos she took herself in full cosplay — authentic warm bedroom lamp light, subtle phone grain, zero stiff studio posing.",
-    banks: ["raw_selfie", "mirror_choreo", "sexy_cosplay"],
+    label: "Candid Selfie & Mirror",
+    hint: "Raw lived-in bedroom mirror phone selfies, arm's-length snaps, and late-night digicam flash candids in cosplay",
+    directive: "CANDID SELFIE & MIRROR COSPLAY: Shoot like authentic lived-in bedroom mirror phone selfies, arm's-length smartphone snaps, and late-night compact digicam flash photos she took herself in full cosplay — warm bedroom lamp light, clean dry natural skin, subtle phone grain, zero stiff studio posing.",
+    banks: ["raw_selfie", "mirror_choreo", "upfront_portrait"],
   },
   {
     id: "glamour",
-    label: "Men's-Mag Glamour",
-    hint: "Early-2000s men's-magazine glamour lighting, warm skin tones, seductive gaze, and editorial curves",
-    directive: "MEN'S-MAGAZINE GLAMOUR COSPLAY: Early-2000s glossy men's-magazine glamour photography feel — warm tungsten highlights on natural unretouched skin, flattering 3/4 waist-to-hip framing, leaning forward over ledges/sofas, direct sultry eye contact, rich saturated costume textures.",
-    banks: ["camera_glamour", "sexy_cosplay", "lingerie_boudoir"],
+    label: "Upfront Glamour Portrait",
+    hint: "Close-in waist-up men's-magazine warmth, arms-up arches, bar/table leans, zipper/collar tease, and magnetic gaze",
+    directive: "UPFRONT MAGNETIC GLAMOUR COSPLAY: Close-in waist-up / chest-up men's-magazine warmth — leaning across a bar or table, arms raised behind head, zipper/collar tease, clean dry matte natural skin with warm directional tungsten key light, rich costume texture, direct sultry eye contact.",
+    banks: ["upfront_portrait", "camera_glamour", "sexy_cosplay"],
   },
   {
     id: "editorial",
     label: "Editorial World",
     hint: "Cinematic real-world locations evoking her canon story with varied camera geometry",
-    directive: "EDITORIAL WORLD COSPLAY: Grounded cinematic location photography evoking her world — dramatic camera height changes, environmental depth, authentic practical/natural weather lighting, natural candid expression.",
-    banks: ["camera_glamour", "sexy_cosplay"],
+    directive: "EDITORIAL WORLD COSPLAY: Grounded cinematic location photography evoking her world — dramatic camera height changes, environmental depth, authentic practical/natural weather lighting, clean natural skin, varied candid expression.",
+    banks: ["camera_glamour", "sexy_cosplay", "upfront_portrait"],
   },
 ];
 
@@ -218,21 +218,27 @@ export interface Brief { brief: string; ref?: PwPick; options?: PwPick[] }
 function dealer(posePicks: PwPick[], library: PwPick[], vibeId: CosplayVibe = "bold") {
   const vibe = COSPLAY_VIBES.find((v) => v.id === vibeId) ?? COSPLAY_VIBES[0];
   const R = shuffle(posePicks);
-  // Pre-deal a large non-repeating queue of real CivitAI camera/pose blueprints matching this cosplay vibe!
-  const fresh = pickFreshBlueprints(vibe.banks, 48, `cosplay:${vibe.id}`, 1);
+  // Pre-deal distinct non-repeating CivitAI blueprints across Upfront Portrait, Amateur Mirror/Selfie, and Creative Candid!
+  const upfrontPool = pickFreshBlueprints(["upfront_portrait"], 24, `cosplay:${vibe.id}:upfront`, 1);
+  const selfiePool = pickFreshBlueprints(["raw_selfie", "mirror_choreo"], 24, `cosplay:${vibe.id}:selfie`, 1);
+  const creativePool = pickFreshBlueprints(vibe.banks, 48, `cosplay:${vibe.id}:creative`, 1);
   let i = 0;
   return (k: number, shared?: PwPick[]): Brief => {
     const n = i++;
-    const bp = fresh[n % fresh.length];
     const setting = vibe.id === "selfie"
-      ? "a cozy dimly lit bedroom, bathroom vanity, or warm personal room that fits her vibe (varied spot per shot)"
+      ? "a cozy lived-in bedroom, messy mirror dresser, or warm personal room (varied spot per shot)"
       : WORLD;
     if (k === 0) {
-      const lead = fresh.find((x) => /close|portrait|selfie|waist|collar|choker|lean/i.test(x.words)) ?? bp;
-      return { brief: `VIBE: ${vibe.directive} · CAMERA & POSE: ${lead?.words ?? CLOSE} · SETTING: ${setting}` };
+      const lead = upfrontPool[n % upfrontPool.length] ?? creativePool[n % creativePool.length];
+      return { brief: `VIBE: ${vibe.directive} · STYLE: Upfront Magnetic Portrait · CAMERA & POSE: ${lead?.words ?? CLOSE} · SETTING: ${setting}` };
+    }
+    if (k === 1 && vibe.id === "bold") {
+      const sf = selfiePool[n % selfiePool.length] ?? creativePool[n % creativePool.length];
+      return { brief: `VIBE: ${vibe.directive} · STYLE: Authentic Amateur Mirror / Bedroom Selfie · CAMERA & POSE: ${sf?.words ?? CLOSE} · SETTING: a real lived-in bedroom mirror or cozy warm personal room` };
     }
     if (R.length) { const ref = R[n % R.length]; return { brief: `VIBE: ${vibe.directive} · POSE (copy exactly): ${ref.words} · SETTING: ${setting}`, ref }; }
     if (library.length && shared) return { brief: `VIBE: ${vibe.directive} · POSE: one of HER POSE OPTIONS, a different one from her other shots — answer its number as pose_id · SETTING: ${setting}`, options: shared };
+    const bp = creativePool[n % creativePool.length];
     return { brief: `VIBE: ${vibe.directive} · CAMERA & POSE (follow this exact camera height, angle, and body choreography): ${bp?.words ?? ANGLES[n % ANGLES.length]} · SETTING: ${setting}` };
   };
 }
