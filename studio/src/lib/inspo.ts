@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { loadState, saveState } from "./api";
 import { cleanPrompt } from "./civitUse";
+import { BLUEPRINT_BANKS, SHOT_BLUEPRINTS } from "./blueprints";
 import { POSES } from "./poses";
 
 export type InspoKind = "scene" | "pose";
@@ -12,7 +13,14 @@ export interface InspoItem { id: string; text: string; thumb?: string; /** the f
 export interface InspoSet { id: string; name: string; kind: InspoKind; items: InspoItem[] }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+const BLUEPRINT_SETS: InspoSet[] = BLUEPRINT_BANKS.map((bk) => ({
+  id: `bp-${bk.id}`,
+  name: `CivitAI Blueprints · ${bk.label}`,
+  kind: "pose",
+  items: SHOT_BLUEPRINTS.filter((b) => b.bank === bk.id).map((b) => ({ id: b.id, text: b.words, at: 0 })),
+}));
 const STARTER: InspoSet[] = [
+  ...BLUEPRINT_SETS,
   { id: "poses-clothed", name: "Clothed poses (built in)", kind: "pose", items: POSES[0].map((p) => ({ id: p.id, text: p.words, at: 0 })) },
   { id: "poses-relaxed", name: "Relaxed poses (built in)", kind: "pose", items: POSES[1].map((p) => ({ id: p.id, text: p.words, at: 0 })) },
   { id: "poses-bold", name: "Bold poses (built in)", kind: "pose", items: POSES[2].map((p) => ({ id: p.id, text: p.words, at: 0 })) },
@@ -47,8 +55,12 @@ function persist() {
   timer = setTimeout(() => { saveState("inspo", { sets: useInspo.getState().sets }).catch(() => {}); }, 500);
 }
 loadState<{ sets: InspoSet[] }>("inspo").then((d) => {
-  if (d?.sets?.length) useInspo.setState({ sets: d.sets, loaded: true });
-  else useInspo.setState({ loaded: true });
+  if (d?.sets?.length) {
+    // Always merge in any newly added built-in Blueprint banks so returning users get them immediately
+    const haveIds = new Set(d.sets.map((x) => x.id));
+    const missing = BLUEPRINT_SETS.filter((x) => !haveIds.has(x.id));
+    useInspo.setState({ sets: [...missing, ...d.sets], loaded: true });
+  } else useInspo.setState({ loaded: true });
 }).catch(() => useInspo.setState({ loaded: true }));
 
 /** a collection of this kind to save into: the one you used last, else the first one, else a new one */

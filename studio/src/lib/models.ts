@@ -14,6 +14,12 @@ export const setKreaBoost = (on: boolean) => { kreaBoost.on = on; };
 export const kreaBoostOn = () => kreaBoost.on;
 export const KREA_BOOST_KEY = "h3.kreaBoost"; // "off" = never
 export const KREA_BOOST_NODE = "ComfyUI-Krea2T-Enhancer";
+/** ApplyMiniMaxH3FirstBlockCache (Deooeo speedup node): opt-in toggle in 05 Animate → Advanced when node is installed */
+const h3Cache = { on: false };
+export const setH3Cache = (on: boolean) => { h3Cache.on = on; };
+export const h3CacheOn = () => h3Cache.on;
+export const H3_CACHE_KEY = "h3.firstBlockCache"; // "on" = enable First-Block Cache (0.10 / max 2)
+export const H3_CACHE_NODE = "ApplyMiniMaxH3FirstBlockCache";
 const h3 = { eros: false };
 /** Animate → Video model: Eros Max (models.txt group "eros") once it's downloaded and picked, else the official H3 files */
 export const setH3Eros = (on: boolean) => { h3.eros = on; };

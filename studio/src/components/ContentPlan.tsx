@@ -4,7 +4,7 @@ import { planExactRows, planRows } from "../lib/batch";
 import { isAdult, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { useInspo } from "../lib/inspo";
-import { ALL_MASTER_PACK_KEYS, MASTER_PACKS, SOLO_MASTER_PACK_KEYS, masterPackRef, v9PackStatus, type MasterPackKey } from "../lib/masterPack";
+import { ALL_MASTER_PACK_KEYS, CORE_MASTER_PACK_KEYS, EXPLICIT_MASTER_PACK_KEYS, MASTER_PACKS, SFW_TEASE_MASTER_PACK_KEYS, SOLO_MASTER_PACK_KEYS, masterPackRef, v9PackStatus, type MasterPackKey } from "../lib/masterPack";
 import type { Media } from "../lib/tray";
 import { InspoManager } from "./InspoManager";
 import { Btn, DropSelect, Seg, Slot, cx } from "./ui";
@@ -174,7 +174,7 @@ function loadV9Sets(): MasterPackKey[] {
       if (valid.length) return valid;
     }
   } catch { /* private mode */ }
-  return [...ALL_MASTER_PACK_KEYS];
+  return [...CORE_MASTER_PACK_KEYS];
 }
 
 /** 1-click UrGF V9 Master Demand Pack: pick any character(s) (new uploads OR linked UrGF characters) + choose which of the 5 sets to build */
@@ -331,11 +331,14 @@ function V9MasterPackBox() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 text-[11.5px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
           <span className="text-muted">Sets to create ({packs.length}/{MASTER_PACKS.length})</span>
-          <span className="ml-auto flex items-center gap-2">
-            <button onClick={() => setAndSavePacks([...ALL_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === ALL_MASTER_PACK_KEYS.length ? "text-ink" : "text-muted")}>All 5</button>
-            <button onClick={() => setAndSavePacks([...SOLO_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === SOLO_MASTER_PACK_KEYS.length && !packs.includes("cuckold_pov") ? "text-ink" : "text-muted")}>Solo only (4)</button>
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            <button onClick={() => setAndSavePacks([...CORE_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === CORE_MASTER_PACK_KEYS.length && CORE_MASTER_PACK_KEYS.every((k) => packs.includes(k)) ? "text-ink" : "text-muted")}>Core 5</button>
+            <button onClick={() => setAndSavePacks([...ALL_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === ALL_MASTER_PACK_KEYS.length ? "text-ink" : "text-muted")}>All {ALL_MASTER_PACK_KEYS.length}</button>
+            <button onClick={() => setAndSavePacks([...SFW_TEASE_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === SFW_TEASE_MASTER_PACK_KEYS.length && SFW_TEASE_MASTER_PACK_KEYS.every((k) => packs.includes(k)) ? "text-ink" : "text-muted")}>SFW/Tease ({SFW_TEASE_MASTER_PACK_KEYS.length})</button>
+            <button onClick={() => setAndSavePacks([...EXPLICIT_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === EXPLICIT_MASTER_PACK_KEYS.length && EXPLICIT_MASTER_PACK_KEYS.every((k) => packs.includes(k)) ? "text-ink" : "text-muted")}>Explicit ({EXPLICIT_MASTER_PACK_KEYS.length})</button>
+            <button onClick={() => setAndSavePacks([...SOLO_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === SOLO_MASTER_PACK_KEYS.length && SOLO_MASTER_PACK_KEYS.every((k) => packs.includes(k)) ? "text-ink" : "text-muted")}>Solo ({SOLO_MASTER_PACK_KEYS.length})</button>
           </span>
         </div>
         <div className="flex flex-wrap gap-1">

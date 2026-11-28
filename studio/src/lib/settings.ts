@@ -155,6 +155,13 @@ export interface Settings {
 }
 const adv = (sampler: string, scheduler: string, steps: number, cfg: number): Adv => ({ sampler, scheduler, steps, cfg, seed: 0, lockSeed: false });
 
+/** Proven Krea 2 Turbo sampler recipes from top bookmarked workflows (zero over-step fizz) */
+export const KREA_SAMPLER_PRESETS = [
+  { id: "turbo", label: "Turbo Fast", hint: "euler / simple · 8 steps · CFG 1 (fastest, cleanest on Edit V2)", sampler: "euler", scheduler: "simple", steps: 8, cfg: 1 },
+  { id: "crisp", label: "Crisp Photo", hint: "er_sde / beta · 10 steps · CFG 1 (sharper skin & fabric micro-contrast)", sampler: "er_sde", scheduler: "beta", steps: 10, cfg: 1 },
+  { id: "candid", label: "Raw Candid", hint: "euler_ancestral / sgm_uniform · 8 steps · CFG 1 (punchy digicam / amateur look)", sampler: "euler_ancestral", scheduler: "sgm_uniform", steps: 8, cfg: 1 },
+] as const;
+
 export const DEFAULTS: Settings = {
   tab: "create",
   drawers: {},
@@ -165,14 +172,14 @@ export const DEFAULTS: Settings = {
     negative: "worst quality, low quality, lowres, bad anatomy, bad hands, extra digits, missing fingers, watermark, signature, text, blurry",
     cutout: false, lorasAnime: [], lorasReal: [], shape: "portrait", count: 4,
     advAnime: adv("euler_ancestral", "normal", 28, 5.5), advReal: adv("euler", "simple", 25, 1),
-    realModel: "krea2", lorasKrea: [], advKrea: adv("euler", "beta", 8, 1), advKreaRaw: adv("euler", "simple", 28, 4.5), kreaTurboLora: 0,
+    realModel: "krea2", lorasKrea: [], advKrea: adv("euler", "simple", 8, 1), advKreaRaw: adv("euler", "simple", 28, 4.5), kreaTurboLora: 0,
     animeModel: "anima", lorasAnima: [], advAnima: adv("er_sde", "simple", 30, 4),
     characterId: null, styleAnime: "default", styleReal: "default", raw: false,
   },
   edit: {
-    mode: "pose", engine: "krea", instruction: TEMPLATES("krea").pose, negative: "", enhance: true, resolution: 1448, count: 1, loras: [],
+    mode: "pose", engine: "krea", instruction: TEMPLATES("krea").pose, negative: "", enhance: true, resolution: 1024, count: 1, loras: [],
     adv: adv("euler", "simple", 25, 1),
-    advKrea: adv("euler", "simple", 10, 1), lorasKrea: [], refBoost: 4,
+    advKrea: adv("euler", "simple", 8, 1), lorasKrea: [], refBoost: 1.5,
     advAnima: adv("er_sde", "simple", 30, 4), lorasAnima: [], advNoob: adv("euler_ancestral", "normal", 28, 5.5), lorasNoob: [], strength: 0.55,
   },
   prompt: { mode: "references", idea: "", seconds: 10, cuts: 0, camera: "auto", guide: DEFAULT_GUIDE, style: "" },

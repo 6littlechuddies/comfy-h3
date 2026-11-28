@@ -11,7 +11,7 @@ import { editGroup, kreaBoostInstalled, syncKreaTE, useDownloads, useGroup } fro
 import { KREA_BOOST_KEY, KREA_TE_KEY } from "../lib/models";
 import { WriterChoice } from "../components/WriterChoice";
 import { useJobs } from "../lib/jobs";
-import { CREATE_MODELS, modelArgs, modelOf, newSeed, pickModel, qualityTags, seedFor, useSection } from "../lib/settings";
+import { CREATE_MODELS, KREA_SAMPLER_PRESETS, modelArgs, modelOf, newSeed, pickModel, qualityTags, seedFor, useSection } from "../lib/settings";
 import { usePrimaryAction } from "../App";
 import { Advanced, Btn, EtaText, Icon, Label, LoraList, PresetBar, Seg, Slider, Slot, TextArea, TextIn, cx, tipsLine } from "../components/ui";
 import { rayCards, useCards } from "../lib/cards";
@@ -361,6 +361,20 @@ export default function CreateTab() {
           onModel={(mo, ck) => set({ ...pickModel(mo as Parameters<typeof pickModel>[0]), checkpoint: { ...c.checkpoint, [mo]: ck } })} />
         {m.family === "krea2" && <KreaEncoder />}
         {m.family === "krea2" && <KreaBoost />}
+        {m.family === "krea2" && (
+          <div className="flex flex-col gap-1">
+            <span className="lbl">Krea 2 finish preset</span>
+            <div className="flex flex-wrap gap-1">
+              {KREA_SAMPLER_PRESETS.map((pr) => {
+                const active = adv.sampler === pr.sampler && adv.scheduler === pr.scheduler && adv.steps === pr.steps;
+                return (
+                  <button key={pr.id} type="button" title={pr.hint} onClick={() => setAdv({ sampler: pr.sampler, scheduler: pr.scheduler, steps: pr.steps, cfg: pr.cfg })}
+                    className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", active && "on")}>{pr.label}</button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <WriterChoice />
         <PresetBar section="create" />
         <LoraList family={m.family} label={`LoRAs · ${m.label}`} value={loras} onChange={setLoras} onSweep={sweep} onFamily={onFamily} onTips={onTips} />

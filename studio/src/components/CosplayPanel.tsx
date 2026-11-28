@@ -3,7 +3,7 @@
 // card is the list — one row per character with its status and chips, opening into tabs (Pictures · LoRAs · Look & checkpoint).
 import { useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { addList, approve, findLoras, picksOf, researchAll, toBatch, useCosplay, type Candidate, type CosItem } from "../lib/cosplay";
+import { COSPLAY_VIBES, addList, approve, findLoras, picksOf, researchAll, toBatch, useCosplay, type Candidate, type CosItem, type CosplayVibe } from "../lib/cosplay";
 import { usePoseWear } from "../lib/posewear";
 import { isAdult, looks, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
@@ -102,12 +102,17 @@ export function CosplayOptions() {
           locks={o.lockedAll ?? {}} onLock={(n, on) => { const m = { ...(o.lockedAll ?? {}) }; if (on) m[n] = true; else delete m[n]; set({ lockedAll: m }); }} />
       </Section>
 
-      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${o.poses === "posewear" ? `${nPoses} picked poses` : o.poses === "mix" ? "poses in words" : "PoseWear auto"}`}>
+      <Section id="shots" title="Shots & poses" summary={`${o.takes} per character · ${(COSPLAY_VIBES.find((v) => v.id === (o.vibe ?? "bold")) ?? COSPLAY_VIBES[0]).label} · ${o.poses === "posewear" ? `${nPoses} picked poses` : o.poses === "mix" ? "CivitAI blueprints" : "PoseWear auto"}`}>
+        <div className="flex flex-col gap-1">
+          <span className="lbl">Cosplay vibe</span>
+          <Seg wrap value={o.vibe ?? "bold"} onChange={(v) => set({ vibe: v as CosplayVibe })} options={COSPLAY_VIBES.map((v) => ({ value: v.id, label: v.label }))} />
+          <p className="text-[11.5px] leading-snug text-dim">{(COSPLAY_VIBES.find((v) => v.id === (o.vibe ?? "bold")) ?? COSPLAY_VIBES[0]).hint}</p>
+        </div>
         <label className="flex items-center justify-between gap-2 text-[13px]">Pictures per character
           <DropSelect value={o.takes} onChange={(e) => set({ takes: Number(e.target.value) })} className="inset h-8 border px-2 text-[13px]">{[1, 2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}</DropSelect></label>
-        <p className="-mt-2 text-[11.5px] leading-snug text-dim">The first is a close-up; every one gets its own angle, pose and place.</p>
-        <Seg wrap value={o.poses ?? "library"} onChange={(v) => set({ poses: v })} options={[{ value: "library", label: "PoseWear · auto" }, { value: "posewear", label: `My picks${nPoses ? ` · ${nPoses}` : ""}` }, { value: "mix", label: "Words only" }]} />
-        <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{(o.poses ?? "library") === "library" ? "DeepSeek picks poses from the PoseWear depth library that suit each character — no pose used twice in a batch (your ★ first, your hidden ones never). Krea 2 copies each one's body position." : o.poses === "posewear" ? (nPoses ? "Each picture takes the next of your picks; Krea 2 copies its body position from its depth." : "No poses picked yet.") : "The writer describes the poses in words (nothing copied)."}</p>
+        <p className="-mt-2 text-[11.5px] leading-snug text-dim">Each shot gets a non-repeating camera angle, pose blueprint, and fresh spot — no two characters repeat the same shot.</p>
+        <Seg wrap value={o.poses ?? "library"} onChange={(v) => set({ poses: v })} options={[{ value: "library", label: "PoseWear · auto" }, { value: "posewear", label: `My picks${nPoses ? ` · ${nPoses}` : ""}` }, { value: "mix", label: "CivitAI blueprints" }]} />
+        <p className="-mt-1.5 text-[11.5px] leading-snug text-dim">{(o.poses ?? "library") === "library" ? "DeepSeek picks poses from the PoseWear depth library that suit each character — no pose used twice in a batch (your ★ first, your hidden ones never). Krea 2 copies each one's body position." : o.poses === "posewear" ? (nPoses ? "Each picture takes the next of your picks; Krea 2 copies its body position from its depth." : "No poses picked yet.") : "Deals non-repeating scraped camera-geometry, mirror, selfie, and sexy cosplay blueprints matching your chosen Vibe."}</p>
         <button onClick={() => import("./PoseWear").then(({ openPoseWear }) => openPoseWear("many", "depths"))} className="press btn-raised flex h-9 items-center justify-center gap-1.5 text-[13px]"><Icon name="user" size={14} className="text-muted" />Browse poses</button>
       </Section>
 

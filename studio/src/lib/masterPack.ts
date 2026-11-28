@@ -1,6 +1,7 @@
 // V9 Master Pack: 1-click UrGF 5-tier demand pack builder (Selfies, Lingerie & Thighs, Bare Boobs & Solo Doggy,
 // Explicit Solo, Voyeur / Cuckold Corner POV). Lets you select any adult character(s) — brand-new uploads OR existing
 // linked UrGF characters — and pick exactly which of the 5 sets to generate.
+import { pickFreshBlueprints, type BlueprintBankId } from "./blueprints";
 import { listLoras, objectInfo, toInput, type FileRef } from "./api";
 import { newGroup, newRow, queueAll, useBatch, type Row } from "./batch";
 import { type Character } from "./characters";
@@ -11,7 +12,18 @@ import { M } from "./models";
 import { newSeed } from "./settings";
 import type { Media } from "./tray";
 
-export type MasterPackKey = "selfies" | "lingerie_thighs" | "boobs_ass_doggy" | "explicit_solo" | "cuckold_pov";
+export type MasterPackKey =
+  | "selfies"
+  | "lingerie_thighs"
+  | "boobs_ass_doggy"
+  | "explicit_solo"
+  | "cuckold_pov"
+  | "mirror_bathroom"
+  | "cosplay_strip"
+  | "late_night_flash"
+  | "gym_athleisure"
+  | "gfe_date_pov"
+  | "partner_pov";
 
 export interface MasterPackSpec {
   key: MasterPackKey;
@@ -128,10 +140,122 @@ export const MASTER_PACKS: MasterPackSpec[] = [
       "- c3 (Black Bull / BBC · Side-Profile Doggy): Wide corner voyeur POV — viewer's hand gripping his own erect penis in bottom foreground watching across the room; on the bed in clear three-quarter side profile (contrasting skin tones), she is completely naked on all fours on hands and knees facing left while a muscular Black man kneels directly behind her hips gripping her waist with explicit vaginal penetration, his thick dark erect penis visibly thrusting deep inside her wet pussy between her spread cheeks (his face cropped near top edge), while she glances sideways straight at the viewer in the corner mid-moan.\n" +
       "- c4 (Black Bull / BBC · Clean Explicit Missionary — SINGLE MAN ONLY!): Candid handheld bedroom shot (contrasting skin tones, ONLY TWO PEOPLE in frame — one woman and one muscular Black man), she lies completely naked on her back on the mattress with her knees pulled high and legs spread wide around his waist while he kneels between her thighs with explicit vaginal penetration, his single thick dark erect penis sliding deep inside her wet pussy mid-thrust, while she turns her head toward the camera with heavy-lidded eyes.",
   },
+  {
+    key: "mirror_bathroom",
+    shortLabel: "Mirror & Bath",
+    title: "Mirror & Bathroom Candid",
+    setTag: "v9-mirror_bath",
+    tier: "premium",
+    rating: "suggestive",
+    shots: 4,
+    refBoost: 1.40,
+    loras: [[LORA_PHONE, 0.42], [LORA_SELFIE, 0.30]],
+    hint: "Premium · Suggestive · 4 candid getting-ready / post-shower shots (hip-twist check, towel drop, vanity lean, bare back glance)",
+    promptSpec:
+      "mirror_bathroom (4 candid bathroom & bedroom getting-ready tease shots — authentic warm vanity bulb lighting, single garment directly on bare skin, skip literal double reflections):\n" +
+      "- m1: Rear three-quarter hip-twist pose standing beside her vanity counter, weight shifted onto one leg popping her hip high while twisting at the waist to glance back with a sultry smirk in tiny fitted shorts and a cropped tank.\n" +
+      "- m2: Fresh out of the shower wrapped loosely in a plush bath towel tucked across her bare chest with damp wavy hair, dipping one bare shoulder forward while tugging the top towel edge slightly down.\n" +
+      "- m3: Leaning both palms forward onto the bathroom counter edge wearing solely a sheer lace bralette directly against bare skin, framing her collarbone, deep cleavage, and narrow waist with parted lips.\n" +
+      "- m4: Candid arms-raised shot gathering her hair up at the back of her crown wearing solely lacy panties and a cropped tee lifted slightly above her waist, teasing sideways gaze.",
+  },
+  {
+    key: "cosplay_strip",
+    shortLabel: "Cosplay Strip",
+    title: "Cosplay Tease → Strip Arc",
+    setTag: "v9-cosplay_strip",
+    tier: "premium",
+    rating: "explicit",
+    shots: 4,
+    refBoost: 1.40,
+    loras: [[LORA_PHONE, 0.38], [LORA_NUDE, 0.38]],
+    hint: "Premium · Explicit · 4-step costume strip arc (bold full cosplay → unzipped tease → topless in accessories → naked in stockings/choker)",
+    promptSpec:
+      "cosplay_strip (4-step sexy cosplay/signature-outfit undress progression — keeps her recognizable accessories like choker, stockings, gloves, or hair pieces as layers come off!):\n" +
+      "- cs1: Bold low-angle candid bedroom shot in her signature outfit or stylized cosplay (choker, fitted top, skirt/stockings), crouched or leaning playfully toward the camera with a wicked teasing smirk.\n" +
+      "- cs2: Mid-strip tease — shrugging her jacket/top straps off her bare shoulders and unzipping or pulling the neckline open to flash deep cleavage and bare stomach under warm lamp light.\n" +
+      "- cs3: Topless tease — completely bare-breasted kneeling on the bed wearing only her signature choker, gloves or thigh-high stockings, and panties/skirt, biting her lower lip looking straight up at the lens.\n" +
+      "- cs4: Fully naked except her signature choker and thigh-high stockings, arched back on her knees or reclining across the mattress inviting the viewer with heavy-lidded eyes.",
+  },
+  {
+    key: "late_night_flash",
+    shortLabel: "Night Flash",
+    title: "Late-Night Digicam & Flash",
+    setTag: "v9-night_flash",
+    tier: "premium",
+    rating: "suggestive",
+    shots: 4,
+    refBoost: 1.40,
+    loras: [[LORA_PHONE, 0.45], [LORA_SNAP, 0.30]],
+    hint: "Premium · Suggestive · 4 raw 2000s flash digicam & low-hip Snapchat night shots (completely different vibe from daylight sets)",
+    promptSpec:
+      "late_night_flash (4 raw late-night compact digicam & smartphone flash snapshots — direct on-camera flash specular skin highlights, crisp drop shadows in a dim bedroom/hallway, gritty 2000s candid feel):\n" +
+      "- f1: Raw compact-camera direct-flash photo caught mid-turn in a dim hallway or hotel corridor wearing a tight mini dress or crop top directly on bare skin, glancing back over her shoulder with amused eyes.\n" +
+      "- f2: Grainy low-hip upward smartphone snap taken from below looking up along her narrow waist and curves in dim warm lamp light wearing a skimpy lounge set or bralette directly on bare skin.\n" +
+      "- f3: Direct-flash candid perched on carpeted stairs or dark bedsheets with knees angled apart and elbows braced behind her, bold unfiltered skin texture and intense eye contact.\n" +
+      "- f4: Dim midnight bedside flash close-up leaning over the lens with messy hair, glossy lips parted, and warm lamp glow mixing with crisp camera flash across her collarbone.",
+  },
+  {
+    key: "gym_athleisure",
+    shortLabel: "Gym & Yoga",
+    title: "Gym & Athleisure Tease",
+    setTag: "v9-gym_yoga",
+    tier: "premium",
+    rating: "suggestive",
+    shots: 4,
+    refBoost: 1.40,
+    loras: [[LORA_PHONE, 0.40], [LORA_SNAP, 0.25]],
+    hint: "Premium · Suggestive · 4 toned athleisure shots (post-workout glute check, deep stretch arch, sports-bra lift, leggings tug)",
+    promptSpec:
+      "gym_athleisure (4 candid athletic & post-workout tease shots — subtle natural sweat sheen on bare collarbone and stomach, fitted sports bra & tight shorts/leggings directly on bare skin):\n" +
+      "- g1: Rear three-quarter post-workout curve check standing with one leg stepped slightly forward in tight scrunch athletic shorts and a fitted sports bra, glancing back over her shoulder with a proud smirk.\n" +
+      "- g2: Low floor-level shot on a yoga mat in a deep arched cat-cow or kneeling stretch accentuating her waist cinch and curves, warm natural gym/home daylight, looking straight into the camera.\n" +
+      "- g3: Medium thigh-up candid tugging the bottom band of her fitted sports bra slightly upward or hooking thumbs into her low waistband flashing her toned flat midriff with glistening natural skin.\n" +
+      "- g4: Seated on a workout bench or home floor after training, legs parted casually with one knee raised, hair messy in a loose high tie, teasing upward smile toward the lens.",
+  },
+  {
+    key: "gfe_date_pov",
+    shortLabel: "GFE Date",
+    title: "Girlfriend Date POV (GFE)",
+    setTag: "v9-gfe_date",
+    tier: "free",
+    rating: "sfw",
+    shots: 4,
+    refBoost: 1.42,
+    loras: [[LORA_SELFIE, 0.30], [LORA_PHONE, 0.42]],
+    hint: "Free · SFW · 4 boyfriend-POV date memories (car passenger sunset, candlelit dinner lean, hotel doorway, morning-after shirt)",
+    promptSpec:
+      "gfe_date_pov (4 warm first-person boyfriend-POV date & morning-after candid photos — authentic lived-in GFE intimacy, zero stiff posing):\n" +
+      "- d1: Candid golden-hour smartphone photo from the driver's seat looking over at her in the passenger seat wearing a cute date outfit, warm low sun across her hair and cheekbones, smiling warmly at you.\n" +
+      "- d2: Across-the-table candid at a dimly lit restaurant or cozy bar at night, leaning forward on her forearms with chin resting near her hands, warm candle/ambient glow and flirty parted-lip eye contact.\n" +
+      "- d3: Pausing at a softly lit hotel room or apartment doorway looking back invitingly over her shoulder as she steps inside after the date, playful knowing smirk.\n" +
+      "- d4: Morning-after messy bedsheets candid wearing only an oversized unbuttoned white dress shirt worn loosely on bare skin, tangled hair in soft morning window light, sleepy happy smile.",
+  },
+  {
+    key: "partner_pov",
+    shortLabel: "Partner POV",
+    title: "Explicit Partner POV Positions",
+    setTag: "v9-partner_pov",
+    tier: "premium",
+    rating: "explicit",
+    shots: 4,
+    refBoost: 1.38,
+    nudeFraming: true,
+    loras: [[LORA_SNOFS, 0.68], [LORA_NUDE, 0.30], [LORA_PHONE, 0.35]],
+    hint: "Premium · Explicit · 4 direct boyfriend-POV positions (oral upward gaze, missionary eye contact, cowgirl riding, rear doggy)",
+    promptSpec:
+      "partner_pov (4 DIRECT FIRST-PERSON MALE PARTNER POV explicit shots — ONLY TWO ADULTS IN FRAME, clean grounded anatomy where the male partner's thighs/hips/hands are clearly anchored at the lower edge so his erect penis belongs naturally to his body):\n" +
+      "- p1 (POV Oral): First-person downward male POV as she kneels completely naked between his spread thighs (his lower abdomen and thighs visible at bottom edge), lips wrapped tightly around his thick erect penis with one hand gripping the base while staring straight up through her lashes.\n" +
+      "- p2 (POV Missionary): First-person high diagonal missionary POV looking down as she lies completely naked on her back on the bed with knees bent wide around his waist (his forearms and hips visible in lower foreground), explicit vaginal penetration as she locks intense heavy-lidded eyes up at the camera.\n" +
+      "- p3 (POV Cowgirl): Low first-person POV lying back looking upward as she sits completely naked straddling his hips (his bare stomach and thighs anchored at bottom edge), leaning forward with palms braced on his chest riding his erect penis inserted deep inside her wet pussy.\n" +
+      "- p4 (POV Rear Doggy): First-person POV kneeling directly behind her hips on the bed (his hands firmly gripping her bare waist and hips in foreground), she is completely naked on all fours with her back deeply arched as his erect penis thrusts deep inside her from behind while she glances back over her shoulder mid-moan.",
+  },
 ];
 
+export const CORE_MASTER_PACK_KEYS: MasterPackKey[] = ["selfies", "lingerie_thighs", "boobs_ass_doggy", "explicit_solo", "cuckold_pov"];
 export const ALL_MASTER_PACK_KEYS: MasterPackKey[] = MASTER_PACKS.map((p) => p.key);
-export const SOLO_MASTER_PACK_KEYS: MasterPackKey[] = MASTER_PACKS.filter((p) => p.key !== "cuckold_pov").map((p) => p.key);
+export const SOLO_MASTER_PACK_KEYS: MasterPackKey[] = MASTER_PACKS.filter((p) => p.key !== "cuckold_pov" && p.key !== "partner_pov").map((p) => p.key);
+export const SFW_TEASE_MASTER_PACK_KEYS: MasterPackKey[] = MASTER_PACKS.filter((p) => p.rating !== "explicit").map((p) => p.key);
+export const EXPLICIT_MASTER_PACK_KEYS: MasterPackKey[] = MASTER_PACKS.filter((p) => p.rating === "explicit").map((p) => p.key);
 
 const HOURGLASS_FOCUS = new Set(["dani", "katie", "rosie", "claire"]);
 const KNOWN_FACE_HAND = new Set(["roxie", "jax"]);
@@ -196,15 +320,23 @@ export function buildMasterPackPlanPrompt(c: Character, selectedKeys: MasterPack
   const schema = `{${chosen.map((p) => `"${p.key}": ["shot1","shot2","shot3","shot4"]`).join(", ")}}`;
   const totalShots = chosen.reduce((sum, p) => sum + p.shots, 0);
   const sections = chosen.map((p, idx) => `${idx + 1}. ${p.promptSpec}`).join("\n\n");
+  // Pull fresh, non-repeating scraped camera/pose/lighting cues so consecutive runs across 20+ characters never feel samey
+  const bankPool: BlueprintBankId[] = ["camera_glamour", "mirror_choreo", "raw_selfie", "lingerie_boudoir"];
+  if (chosen.some((p) => p.rating === "explicit")) bankPool.push("explicit_positions");
+  if (chosen.some((p) => p.key === "cosplay_strip")) bankPool.push("sexy_cosplay");
+  const freshCues = pickFreshBlueprints(bankPool, Math.min(8, Math.max(4, chosen.length * 2)), `v9:${disp.toLowerCase()}`)
+    .map((b, i) => `  • [${b.name}] ${b.words}`)
+    .join("\n");
 
   return (
     `Write ${chosen.length} high-converting photo pack${chosen.length === 1 ? "" : "s"} (4 shots each = ${totalShots} shots total) for an adult companion character named ${disp}, grounded naturally in HER world (${world}).\n` +
     `Character: ${who}\n\n` +
     `Output ONLY valid JSON with these exact keys and 4 shot strings each: ${schema}\n\n` +
     `${sections}\n\n` +
+    (freshCues ? `FRESH NON-REPEATING CAMERA & POSE INSPIRATION FOR THIS RUN (borrow distinct camera heights, angles, hand placement, and warm lighting from these so every shot feels fresh and unrepetitive — adapt strictly to ${disp}'s own room & body):\n${freshCues}\n\n` : "") +
     "CAMERA & VISUAL STYLE (CRITICAL — RAW AMATEUR HANDHELD LOOK, NOT PROFESSIONALLY SHOT!):\n" +
-    "Every single shot MUST look like a real, raw, candid amateur phone photo she snapped herself or a partner snapped handheld in the moment — arm's-length outstretched angles, bird's-eye slightly-from-above angles, tilted raw bedroom/home lighting, authentic candid iPhone snap feel, natural imperfect skin & room lighting (NEVER glossy DSLR studio lighting, NEVER magazine glamour photography!).\n\n" +
-    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Skip mirrors/reflections, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
+    "Every single shot MUST look like a real, raw, candid amateur phone photo she snapped herself or a partner snapped handheld in the moment — arm's-length outstretched angles, low-hip upward angles, bird's-eye slightly-from-above angles, tilted raw bedroom/home lighting, authentic candid iPhone/digicam snap feel, natural imperfect skin & room lighting (NEVER glossy DSLR studio lighting, NEVER repetitive straight-on standing poses!).\n\n" +
+    "STRICT RULES: 55–80 words per shot. Positive-only wording (NEVER write 'no X' or 'zero X'). For every lingerie, bralette, swimwear, towel, or single-top shot, explicitly describe that single garment resting directly against her bare shoulders, bare collarbone, bare chest, and bare skin so Krea 2 renders one clean garment on bare skin. Skip double-reflection mirrors, skip hair-pulling, skip random cups/props. Rear shots describe rear anatomy only; front shots describe front anatomy only. End every shot with 'Raw amateur handheld phone photo, authentic natural room lighting, natural anatomy, realistic skin texture. Everyone is an adult.'"
   );
 }
 

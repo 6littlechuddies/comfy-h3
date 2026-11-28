@@ -87,8 +87,8 @@ export function viewGraph(c: Character, frontName: string, instruction: string, 
   // their LoRAs only when they're for this model (Krea 2) — anime LoRAs can't load here
   const loras = sheetStyle(c) === "realistic" ? c.loras ?? [] : [];
   const unet = c.sheet?.ckpt?.krea || undefined;
-  // Exact 8-step Krea 2 Turbo Edit settings (never over-step at 20 steps -> zero skin fizz)
-  return buildEdit({ ...editArgs(e, engine), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", refBoost: 3, loras: [...(editArgs(e, engine).loras ?? []), ...loras], enhance: false, seed: newSeed(), images: [frontName], instruction: forEngine(engine, instruction) + style + ONE, negative: "", resolution: 1024, prefix: `studio/characters/${c.id}_${view}`, ...(unet ? { unet } : {}) });
+  // Exact 8-step Krea 2 Turbo Edit settings with anti-blotch refBoost 1.5 (never 3–4+ or 20 steps -> zero orange skin fizz)
+  return buildEdit({ ...editArgs(e, engine), steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", refBoost: 1.5, loras, enhance: false, seed: newSeed(), images: [frontName], instruction: forEngine(engine, instruction) + style + ONE, negative: "", resolution: 1024, prefix: `studio/characters/${c.id}_${view}`, ...(unet ? { unet } : {}) });
 }
 const SHEET_PROMPTS = {
   left: "Show the exact same character from image 1 in a full-body side profile view facing left, standing straight. Keep the same face, hair, outfit, colours and body proportions.",

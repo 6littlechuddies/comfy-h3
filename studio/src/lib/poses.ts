@@ -3,17 +3,19 @@
 // (weight, legs, hands, torso, head and eyes): one concrete pose works, two in one prompt get blended, and vague words
 // ("sensual pose") get ignored. The words go into the prompt box exactly as shown — nothing rewrites them.
 
+import { SHOT_BLUEPRINTS } from "./blueprints";
+
 export type Level = 0 | 1 | 2 | 3;
 export interface Pose { id: string; name: string; words: string }
 
 export const LEVELS: { level: Level; name: string; hint: string }[] = [
-  { level: 0, name: "Clothed", hint: "Editorial, natural — fully dressed pictures" },
-  { level: 1, name: "Relaxed", hint: "Open, lounging — swimwear, wet, lingerie, bedroom" },
-  { level: 2, name: "Bold", hint: "Wide, arched, low to the camera — the explicit sets" },
-  { level: 3, name: "Framing", hint: "Extreme angles and tight crops that make any pose bolder" },
+  { level: 0, name: "Clothed", hint: "Editorial, glamour, candid — fully dressed pictures" },
+  { level: 1, name: "Relaxed", hint: "Open, flirty, mirror, cosplay tease, lingerie, bedroom" },
+  { level: 2, name: "Bold", hint: "Wide, arched, topless, solo explicit & low-angle shots" },
+  { level: 3, name: "Framing & POV", hint: "Extreme angles, tight crops, and explicit partner POV framing" },
 ];
 
-export const POSES: Record<Level, Pose[]> = {
+const BASE_POSES: Record<Level, Pose[]> = {
   0: [
     { id: "hip", name: "Weight on one leg", words: "standing with her weight on one leg, the other knee softly bent, one hand on her hip, the other arm relaxed at her side, shoulders turned slightly away, chin a little down, eyes on the camera" },
     { id: "wall", name: "Leaning on a wall", words: "leaning one shoulder against a wall, arms folded loosely under her chest, one ankle crossed over the other, head tilted, looking at the camera" },
@@ -44,6 +46,14 @@ export const POSES: Record<Level, Pose[]> = {
     { id: "waist", name: "Tight crop, waist to chin", words: "tight crop from her waist to her chin, back arched, one hand on her chest, lips parted" },
     { id: "thigh", name: "Cropped at mid-thigh", words: "cropped at mid-thigh, hips turned toward the camera, thumbs hooked into her waistband" },
   ],
+};
+
+/** Merge built-in poses with all 120 distilled CivitAI photo blueprints by intensity level (0..3) */
+export const POSES: Record<Level, Pose[]> = {
+  0: [...BASE_POSES[0], ...SHOT_BLUEPRINTS.filter((b) => b.level === 0).map((b) => ({ id: b.id, name: b.name, words: b.words }))],
+  1: [...BASE_POSES[1], ...SHOT_BLUEPRINTS.filter((b) => b.level === 1).map((b) => ({ id: b.id, name: b.name, words: b.words }))],
+  2: [...BASE_POSES[2], ...SHOT_BLUEPRINTS.filter((b) => b.level === 2).map((b) => ({ id: b.id, name: b.name, words: b.words }))],
+  3: [...BASE_POSES[3], ...SHOT_BLUEPRINTS.filter((b) => b.level === 3).map((b) => ({ id: b.id, name: b.name, words: b.words }))],
 };
 
 export const CAMERAS: { id: string; name: string; words: string; bolder: number }[] = [

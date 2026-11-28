@@ -2,7 +2,7 @@
 // before the Studio opens; the rest keep downloading in the background and each tab unlocks when its group arrives.
 import { create } from "zustand";
 import { forgetObjectInfo } from "./api";
-import { H3_MODEL_KEY, REALISM_KEY, setRealism, setQuadSheet, setBfs, RTX_KEY, SMOOTH_KEY, setInterp, setRtx, setH3Eros, KREA_BOOST_KEY, KREA_BOOST_NODE, KREA_EDIT_KEY, KREA_TE_KEY, setKreaBoost, setKreaEditV2, setKreaTE } from "./models";
+import { H3_CACHE_KEY, H3_CACHE_NODE, H3_MODEL_KEY, REALISM_KEY, setH3Cache, setRealism, setQuadSheet, setBfs, RTX_KEY, SMOOTH_KEY, setInterp, setRtx, setH3Eros, KREA_BOOST_KEY, KREA_BOOST_NODE, KREA_EDIT_KEY, KREA_TE_KEY, setKreaBoost, setKreaEditV2, setKreaTE } from "./models";
 
 /** Krea 2 uses the uncensored text encoder once its group is downloaded, unless you chose the stock one */
 export function syncKreaTE(groups: { id: string; state: string }[] = useDownloads.getState().groups) {
@@ -33,6 +33,9 @@ export function syncKreaTE(groups: { id: string; state: string }[] = useDownload
   if (off) setKreaBoost(false);
   else if (boostNode === null) void fetch(`/object_info/${KREA_BOOST_NODE}`).then((r) => (r.ok ? r.json() : Promise.reject())).then((b) => { boostNode = !!b?.[KREA_BOOST_NODE]; setKreaBoost(boostNode); }).catch(() => { /* not up yet: ask again next poll */ });
   else setKreaBoost(boostNode);
+  let cacheWant = false; try { cacheWant = localStorage.getItem(H3_CACHE_KEY) === "on"; } catch { /* private mode */ }
+  if (h3CacheNode === null) void fetch(`/object_info/${H3_CACHE_NODE}`).then((r) => (r.ok ? r.json() : Promise.reject())).then((b) => { h3CacheNode = !!b?.[H3_CACHE_NODE]; setH3Cache(cacheWant && h3CacheNode); }).catch(() => { /* not up yet */ });
+  else setH3Cache(cacheWant && h3CacheNode);
 }
 /** is the RTX Video Super Resolution node installed? (null = not asked yet) */
 let rtxNode: boolean | null = null;
@@ -44,6 +47,9 @@ let interpWidget: string | null = null;
 /** is the Krea2T Enhancer node installed? (null = not asked yet) */
 let boostNode: boolean | null = null;
 export const kreaBoostInstalled = () => boostNode;
+/** is ApplyMiniMaxH3FirstBlockCache installed? (null = not asked yet) */
+let h3CacheNode: boolean | null = null;
+export const h3CacheInstalled = () => h3CacheNode;
 
 export type GroupId = "anime" | "image" | "edit" | "writer" | "video" | string;
 export interface Group { id: GroupId; label: string; state: "checking" | "waiting" | "downloading" | "done" | "error" | "skipped" | "later"; pct: number; left_s: number; total_mb: number; done_mb: number; error?: string | null; can_later?: boolean; /** why it waits: no disk room, or the card is too small */ why?: string | null }
