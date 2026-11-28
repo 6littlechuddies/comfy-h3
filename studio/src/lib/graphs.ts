@@ -280,6 +280,78 @@ export function buildGreenScreen(image: string, prefix: string, color = "#00B140
   return g.graph;
 }
 
+/** Hole-free #808080 grey cutout once per character for V9 Master Pack:
+ *  - "birefnet" (default): full-body BiRefNet HR-matting on 768×1024 -> unbroken face + body proportions, zero interior holes
+ *  - "face": head+hair+neck FaceSegment crop for front refs with a hand/peace-sign near the face */
+export function buildMasterPackCutout(image: string, prefix: string, mode: "birefnet" | "face" = "birefnet"): ApiGraph {
+  const g = new G();
+  const l = g.add("LoadImage", { image });
+  const sc = g.add("ImageScale", { image: o(l), upscale_method: "lanczos", width: 768, height: 1024, crop: "center" });
+  if (mode === "face") {
+    const cr = g.add("ImageCrop", { image: o(sc), width: 768, height: 460, x: 0, y: 0 });
+    const fs = g.add("FaceSegment", {
+      images: o(cr), Skin: true, Nose: true, Eyeglasses: true,
+      "Left-eye": true, "Right-eye": true, "Left-eyebrow": true, "Right-eyebrow": true,
+      "Left-ear": true, "Right-ear": true, Mouth: true, "Upper-lip": true, "Lower-lip": true,
+      Hair: true, Earring: true, Neck: true, process_res: 768, mask_blur: 2, mask_offset: 2,
+      invert_output: false, unload_model: false, background: "Color", background_color: "#808080",
+    });
+    g.add("SaveImage", { images: o(fs), filename_prefix: prefix }, "result");
+    return g.graph;
+  }
+  const cut = matte(g, o(sc), "Color", "#808080");
+  g.add("SaveImage", { images: o(cut), filename_prefix: prefix }, "result");
+  return g.graph;
+}
+
+export interface MasterPackShotOpts {
+  cutoutImage: string;
+  instruction: string;
+  seed: number;
+  prefix: string;
+  refBoost: number;
+  loras?: LoraPick[];
+  bodyAnchor?: string;
+  nudeFraming?: boolean;
+}
+
+/** V9 Master Pack shot: exact verified 8-step Krea 2 Identity Edit V2 recipe (832×1216 canvas, 0.75 MP cutout ref,
+ *  exact ref_boost 1.38–1.42 without halving, fast INT8 attention, CFG 1 euler/simple — zero over-step fizz). */
+export function buildMasterPackShot(p: MasterPackShotOpts): ApiGraph {
+  const g = new G();
+  const unet = g.add("UNETLoader", { unet_name: M.kreaUnet, weight_dtype: "default" });
+  const editLora = kreaEditV2() ? M.kreaIdentityV2 : M.kreaEditLora;
+  let model: Link = o(g.add("LoraLoaderModelOnly", { model: o(unet), lora_name: editLora, strength_model: 1 }));
+  for (const l of activeLoras(p.loras ?? [])) {
+    model = o(g.add("LoraLoaderModelOnly", { model, lora_name: l.name, strength_model: l.strength }));
+  }
+  model = fastAttn(g, model);
+  const clip = g.add("CLIPLoader", { clip_name: M.kreaClip, type: "krea2", device: "default" });
+  const vae = g.add("VAELoader", { vae_name: M.kreaVae });
+  const loadRef = g.add("LoadImage", { image: p.cutoutImage });
+  const blank = g.add("EmptyImage", { width: 832, height: 1216, batch_size: 1, color: 16777215 });
+  const target = g.add("VAEEncode", { pixels: o(blank), vae: o(vae) });
+  const subjScaled = g.add("ImageScaleToTotalPixels", { image: o(loadRef), upscale_method: "lanczos", megapixels: 0.75, resolution_steps: 16 });
+  const subjLat = g.add("VAEEncode", { pixels: o(subjScaled), vae: o(vae) });
+  const patched = g.add("Krea2EditModelPatch", {
+    model, source_latent: o(target), ref_boost: p.refBoost, ref_boost_a: 1, fit_mode: "fit",
+    vae: o(vae), source_image: o(blank), target_latent: o(target),
+    source_latent_b: o(subjLat), source_image_b: o(subjScaled),
+    ...(kreaEditV2() ? { ref_position: "beside (right of target)", ref_position_a: "aligned (trained)" } : {}),
+  });
+  const cleanInst = p.instruction.trim().replace(/^[a-z]\d+\s*[:\-]\s*/i, "");
+  const bodyClause = p.bodyAnchor?.trim() || "her exact natural bust, narrow waist, and hip proportions from the reference picture";
+  const wrapped = p.nudeFraming
+    ? `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and natural hourglass proportions, completely naked: ${cleanInst}`
+    : `Single full-frame candid photograph filling the entire frame edge to edge of this exact adult woman from the reference picture, keeping her exact face, eyes, hair, skin tone, and ${bodyClause}, dressed solely in the single outfit described below worn directly against bare skin (or completely nude when described): ${cleanInst}`;
+  const pos = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: wrapped, grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
+  const neg = g.add("Krea2EditGroundedEncode", { clip: o(clip), prompt: "", grounding_px: 768, system_prompt: "", image: o(blank), image_b: o(subjScaled) });
+  const ks = g.add("KSampler", { model: o(patched), seed: p.seed, steps: 8, cfg: 1, sampler_name: "euler", scheduler: "simple", positive: o(pos), negative: o(neg), latent_image: o(target), denoise: 1 });
+  const dec = g.add("VAEDecode", { samples: o(ks), vae: o(vae) });
+  g.add("SaveImage", { images: o(dec), filename_prefix: p.prefix }, "result");
+  return g.graph;
+}
+
 // ---------------------------------------------------------------- Edit (Krea 2 Identity Edit; Anima / NoobAI redraw for anime)
 /** which model edits: Krea 2 + the Identity Edit LoRA (plain-words edits, 2 pictures), or an anime redraw */
 export type EditEngine = "krea" | "anima" | "noob";

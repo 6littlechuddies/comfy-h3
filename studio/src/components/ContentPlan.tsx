@@ -4,6 +4,7 @@ import { planExactRows, planRows } from "../lib/batch";
 import { isAdult, useCharacters } from "../lib/characters";
 import { useJobs } from "../lib/jobs";
 import { useInspo } from "../lib/inspo";
+import { ALL_MASTER_PACK_KEYS, MASTER_PACKS, SOLO_MASTER_PACK_KEYS, masterPackRef, v9PackStatus, type MasterPackKey } from "../lib/masterPack";
 import { InspoManager } from "./InspoManager";
 import { Btn, DropSelect, Seg, cx } from "./ui";
 
@@ -54,6 +55,7 @@ export function ContentPlan() {
   };
   if (!open) return (
     <div className="flex flex-col gap-2">
+      <V9MasterPackBox />
       <AutoPlanBox />
       <Btn onClick={() => setOpen(true)} className="w-full">Content plan · pick backgrounds × poses yourself</Btn>
     </div>
@@ -157,7 +159,167 @@ function AutoPlanBox() {
         </DropSelect></label>
       <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted"><input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => { setReview(e.target.checked); try { localStorage.setItem("h3.autoplan.review", e.target.checked ? "on" : "off"); } catch { /* */ } }} />
         <span>Let me read the prompts before anything is made (they appear in each row below; then press Queue)</span></label>
-      <Btn kind="primary" onClick={go} disabled={!who.length || !!busy} why={busy ?? "Pick at least one character"}>{busy ?? (review ? `Plan & write · ${total} prompts` : `Plan, write & queue · ${total} pictures`)}</Btn>
+      <Btn kind="primary" onClick={go} disabled={!who.length || !total || !!busy} why={busy ?? "Pick at least one character"}>{busy ?? (review ? `Plan & write · ${total} prompts` : `Plan, write & queue · ${total} pictures`)}</Btn>
+    </div>
+  );
+}
+
+const V9_SETS_KEY = "h3.v9pack.sets";
+function loadV9Sets(): MasterPackKey[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(V9_SETS_KEY) || "null");
+    if (Array.isArray(raw)) {
+      const valid = raw.filter((k): k is MasterPackKey => ALL_MASTER_PACK_KEYS.includes(k));
+      if (valid.length) return valid;
+    }
+  } catch { /* private mode */ }
+  return [...ALL_MASTER_PACK_KEYS];
+}
+
+/** 1-click UrGF V9 Master Demand Pack: pick any character(s) (new uploads OR linked UrGF characters) + choose which of the 5 sets to build */
+function V9MasterPackBox() {
+  const chars = useCharacters(useShallow((s) => s.list.filter((c) => isAdult(c) && !!masterPackRef(c))));
+  const sel = useCharacters((s) => s.sel);
+  const toast = useJobs((s) => s.toast);
+  const [who, setWho] = useState<string[]>(sel ? [sel] : []);
+  const [packs, setPacks] = useState<MasterPackKey[]>(loadV9Sets);
+  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [faceOnlyCutout, setFaceOnlyCutout] = useState(false);
+  const [review, setReview] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const setAndSavePacks = (next: MasterPackKey[]) => {
+    setPacks(next);
+    try { localStorage.setItem(V9_SETS_KEY, JSON.stringify(next)); } catch { /* */ }
+  };
+  const togglePack = (k: MasterPackKey) => {
+    setAndSavePacks(packs.includes(k) ? packs.filter((x) => x !== k) : [...packs, k]);
+  };
+
+  const pickedChars = chars.filter((c) => who.includes(c.id));
+  const missingV9Ids = chars.filter((c) => v9PackStatus(c).missing.length > 0).map((c) => c.id);
+  const shotsPerChar = MASTER_PACKS.filter((p) => packs.includes(p.key)).reduce((sum, p) => sum + p.shots, 0);
+  const totalPics = pickedChars.length * shotsPerChar;
+  const totalSets = pickedChars.length * packs.length;
+
+  const go = async () => {
+    setBusy("Starting V9 Master Pack…");
+    try {
+      const { planAndQueueMasterPack } = await import("../lib/masterPack");
+      const r = await planAndQueueMasterPack(pickedChars, { packs, replaceExisting, faceOnlyCutout, review }, setBusy);
+      const warn = r.failed.length ? ` (${r.failed.length} failed: ${r.failed[0]})` : "";
+      toast(
+        review
+          ? `Planned ${r.rows} V9 prompts across ${r.sets} set${r.sets === 1 ? "" : "s"} — edit any row below, then press Queue.${warn}`
+          : `Queued ${r.jobs} V9 pictures across ${r.sets} set${r.sets === 1 ? "" : "s"} — finished shots land automatically in Your site.${warn}`,
+        r.failed.length ? "info" : "good",
+        "batch",
+      );
+    } catch (e) {
+      toast((e as Error).message, "bad", "batch");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border border-good/50 bg-good/[.04] p-3 text-[12.5px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="font-medium text-ink">V9 Master Pack · UrGF sets</b>
+        <span className="ml-auto flex items-center gap-2 text-[11.5px]">
+          {missingV9Ids.length > 0 && missingV9Ids.length < chars.length && (
+            <button onClick={() => setWho(missingV9Ids)} className="text-muted hover:text-ink hover:underline" title="Select characters missing one or more V9 sets">
+              Missing V9 ({missingV9Ids.length})
+            </button>
+          )}
+          {chars.length > 0 && (
+            <button onClick={() => setWho(who.length === chars.length ? [] : chars.map((c) => c.id))} className="text-accent hover:underline">
+              {who.length === chars.length ? "Clear all" : `Select all (${chars.length})`}
+            </button>
+          )}
+        </span>
+      </div>
+      <p className="-mt-1.5 text-[11.5px] leading-relaxed text-dim">
+        1-click 8-step Krea 2 Identity Edit pipeline with hole-free BiRefNet cutout &amp; tier LoRAs — works on both new uploads and linked UrGF characters. Finished shots land straight in <b>Your site</b>.
+      </p>
+
+      <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+        {chars.map((c) => {
+          const st = v9PackStatus(c);
+          const on = who.includes(c.id);
+          const disp = c.site?.name || c.name;
+          const title = st.have.length
+            ? `Has ${st.have.length}/5 V9 sets (${st.have.join(", ")})${st.missing.length ? ` · missing: ${st.missing.join(", ")}` : ""}`
+            : "No V9 sets yet";
+          return (
+            <button
+              key={c.id}
+              title={title}
+              onClick={() => setWho((w) => (w.includes(c.id) ? w.filter((x) => x !== c.id) : [...w, c.id]))}
+              aria-pressed={on}
+              className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", on && "on")}
+            >
+              <span>{disp}</span>
+              {st.have.length > 0 && (
+                <span className={cx("ml-1 text-[10.5px]", st.have.length === MASTER_PACKS.length ? "text-good" : "opacity-65")}>
+                  {st.have.length}/{MASTER_PACKS.length}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        {!chars.length && <span className="text-dim">Add a character with a front or cover picture first.</span>}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 text-[11.5px]">
+          <span className="text-muted">Sets to create ({packs.length}/{MASTER_PACKS.length})</span>
+          <span className="ml-auto flex items-center gap-2">
+            <button onClick={() => setAndSavePacks([...ALL_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === ALL_MASTER_PACK_KEYS.length ? "text-ink" : "text-muted")}>All 5</button>
+            <button onClick={() => setAndSavePacks([...SOLO_MASTER_PACK_KEYS])} className={cx("hover:underline", packs.length === SOLO_MASTER_PACK_KEYS.length && !packs.includes("cuckold_pov") ? "text-ink" : "text-muted")}>Solo only (4)</button>
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {MASTER_PACKS.map((p) => {
+            const on = packs.includes(p.key);
+            return (
+              <button
+                key={p.key}
+                type="button"
+                title={p.hint}
+                onClick={() => togglePack(p.key)}
+                aria-pressed={on}
+                className={cx("press tag-btn !h-7 !px-2.5 !text-[12px]", on && "on")}
+              >
+                <span>{p.shortLabel}</span>
+                <span className="ml-1 text-[10.5px] opacity-65">{p.tier === "free" ? "free" : "prem"} · {p.shots}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+        <span>Replace older V9 sets of the chosen types (leaves unselected sets untouched)</span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={faceOnlyCutout} onChange={(e) => setFaceOnlyCutout(e.target.checked)} />
+        <span>Head-only cutout (FaceSegment) — tick if her front photo has a hand or peace sign near her face</span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={review} onChange={(e) => setReview(e.target.checked)} />
+        <span>Let me read or edit prompts before queueing</span>
+      </label>
+
+      <Btn
+        kind="primary"
+        onClick={go}
+        disabled={!pickedChars.length || !packs.length || !!busy}
+        why={busy ?? (!pickedChars.length ? "Pick at least one character" : "Pick at least one V9 set")}
+      >
+        {busy ?? (review ? `Plan V9 prompts · ${totalPics} shots (${totalSets} sets)` : `Build & queue V9 Master Pack · ${totalPics} pictures (${totalSets} sets)`)}
+      </Btn>
     </div>
   );
 }
